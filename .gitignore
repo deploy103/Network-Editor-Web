@@ -1,0 +1,9 @@
+node_modules/
+dist/
+alternative/
+id.txt
+.env
+.env.*
+*.local
+.DS_Store
+Thumbs.db
