@@ -180,6 +180,8 @@ function normalizePort(port: NetworkPort): NetworkPort {
     bpduGuard: port.bpduGuard === true,
     accessGroupIn: port.accessGroupIn || "",
     accessGroupOut: port.accessGroupOut || "",
+    helperAddresses: Array.isArray(port.helperAddresses) ? port.helperAddresses.filter(Boolean) : [],
+    switchportNonegotiate: port.switchportNonegotiate === true,
     natRole: port.natRole === "inside" || port.natRole === "outside" ? port.natRole : undefined
   };
 }
