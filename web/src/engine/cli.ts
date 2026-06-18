@@ -101,6 +101,13 @@ export function runCliCommand(device: NetworkDevice, session: CliSession, rawCom
 
   if (lower.startsWith("do ")) return runDoCommand(device, session, command.slice(3));
 
+  if (lower === "show privilege") {
+    return result(device, session, `Current privilege level is ${session.mode === "exec" ? 1 : 15}`);
+  }
+  if (lower === "show history") {
+    return result(device, session, "Terminal command history is enabled, history size is 80. Use Up/Down arrows to recall commands.");
+  }
+
   if (session.mode === "global") return globalCommand(device, session, command, lower);
   if (session.mode === "interface") return interfaceCommand(device, session, command, lower);
   if (session.mode === "vlan") return vlanCommand(device, session, command, lower);
@@ -160,9 +167,9 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
   if (!device.powerOn) return ["power on", "boot"];
   if (session.pendingAction) return ["", "yes", "no"];
   const base = session.mode === "exec"
-    ? ["enable", "show version", "show clock", "show interfaces", "show ip interface brief", "show ip route", "show route", "show cdp neighbors", "show arp", "ping ", "traceroute ", "terminal length 0", "help"]
+    ? ["enable", "show version", "show clock", "show privilege", "show history", "show interfaces", "show ip interface brief", "show ip route", "show route", "show cdp neighbors", "show arp", "ping ", "traceroute ", "terminal length 0", "help"]
     : session.mode === "privileged"
-      ? ["disable", "configure terminal", "conf t", "show running-config", "show startup-config", "show version", "show clock", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show spanning-tree", "show interfaces", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show mac address-table", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show ip access-lists", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
+      ? ["disable", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show clock", "show privilege", "show history", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show spanning-tree", "show interfaces", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show mac address-table", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show ip access-lists", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
         ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "interface ", "int ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-lookup", "no ip domain-lookup", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
@@ -382,6 +389,8 @@ function expandShowCommand(rest: string[]): string {
     if (isAbbrev(second, "interface", 3) || second === "int") return `show running-config interface ${rest.slice(2).join(" ")}`;
     return ["show running-config", ...rest.slice(1)].join(" ");
   }
+  if (isAbbrev(first, "history", 3)) return "show history";
+  if (isAbbrev(first, "privilege", 3)) return "show privilege";
   if (isAbbrev(first, "startup-config", 3)) return "show startup-config";
   if (isAbbrev(first, "version", 3)) return "show version";
   if (isAbbrev(first, "clock", 2)) return "show clock";
@@ -1217,7 +1226,7 @@ function showCommand(device: NetworkDevice, lower: string): string {
     const port = findPort(device, name);
     return port ? interfaceConfig(port).join("\n") : `% Interface ${name} not found.`;
   }
-  if (lower === "show run" || lower === "show running-config") return runningConfig(device);
+  if (lower === "show run" || lower === "show running-config" || lower === "show running-config all" || lower === "show running-config brief") return runningConfig(device);
   if (lower === "show version") return [`${device.model} Software, Network Editor Web`, `Device uptime is simulated`, `System image file is "ptweb:${device.modelId}"`, `${device.ports.length} interfaces`, `${device.powerOn ? "System returned to ROM by power-on" : "System is powered off"}`].join("\n");
   if (lower === "show clock") return new Date().toLocaleString("ko-KR", { hour12: false });
   if (lower === "show inventory") return [`NAME: "${device.label}", DESCR: "${device.model}"`, `PID: ${device.modelId}, VID: PTWEB, SN: ${device.id}`, ...device.modules.map((module) => `NAME: "${module.slotId}", PID: ${module.moduleId}`)].join("\n");
@@ -1665,7 +1674,10 @@ function searchHelp(term: string): string {
     "show running-config | begin <text>",
     "show running-config | exclude <text>",
     "show running-config interface <name>",
+    "show running-config all",
     "show version",
+    "show privilege",
+    "show history",
     "show ip interface",
     "show ip interface brief",
     "show interfaces",
