@@ -82,9 +82,9 @@ def command_candidates(device: NetworkDevice, session: IOSSession) -> list[str]:
     if session.get("pendingAction"):
         return []
     if mode == "exec":
-        base = ["enable", "show version", "show clock", "show ip interface brief", "show ip route", "show protocols", "show cdp neighbors", "show arp", "power on", "help"]
+        base = ["enable", "show version", "show clock", "show ip interface brief", "show ip route", "show protocols", "show cdp neighbors", "show arp", "ping ", "traceroute ", "power on", "help"]
     elif mode == "privileged":
-        base = ["disable", "configure terminal", "conf t", "show running-config", "show running-config | include ", "show running-config | section ", "show startup-config", "show version", "show inventory", "show flash", "show file systems", "show users", "show line", "show protocols", "show controllers", "show processes cpu", "show memory", "show spanning-tree", "show spanning-tree vlan ", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route summary", "show ip protocols", "show ip ospf", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show ip dhcp binding", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp server statistics", "show access-lists", "clear arp", "clear mac address-table", "clear ip dhcp binding", "clear ip dhcp conflict *", "clear ip nat translation *", "write memory", "copy running-config startup-config", "reload", "write erase", "power off", "power cycle", "help"]
+        base = ["disable", "configure terminal", "conf t", "show running-config", "show running-config | include ", "show running-config | section ", "show startup-config", "show version", "show inventory", "show flash", "show file systems", "show users", "show line", "show protocols", "show controllers", "show processes cpu", "show memory", "show spanning-tree", "show spanning-tree vlan ", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route summary", "show ip protocols", "show ip ospf", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show ip dhcp binding", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp server statistics", "show access-lists", "clear arp", "clear mac address-table", "clear ip dhcp binding", "clear ip dhcp conflict *", "clear ip nat translation *", "ping ", "traceroute ", "write memory", "copy running-config startup-config", "reload", "write erase", "power off", "power cycle", "help"]
     elif mode == "global":
         base = ["hostname ", "enable secret ", "enable password ", "banner motd #", "no banner motd", "username admin privilege 15 secret cisco", "interface ", "interface range fa0/1 - 2", "default interface ", "vlan ", "spanning-tree vlan 1 root primary", "no spanning-tree vlan 1 root primary", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "ip domain-name lab.local", "ip name-server 8.8.8.8", "no ip name-server ", "ip host www.lab.local 192.168.10.10", "no ip host ", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "ip dhcp excluded-address ", "ip dhcp pool ", "ip access-list standard ", "ip access-list extended ", "access-list 101 permit ip any any", "ip nat inside source static ", "service password-encryption", "no service password-encryption", "service dns", "no service dns", "do show running-config", "end", "exit", "help"]
     elif mode == "interface":
@@ -159,6 +159,10 @@ def expand_command(command: str, session: IOSSession) -> str:
         return "enable"
     if abbr(first, "disable", 3):
         return "disable"
+    if abbr(first, "ping", 1):
+        return "ping " + " ".join(rest)
+    if abbr(first, "traceroute", 3) or first == "tracert":
+        return "traceroute " + " ".join(rest)
     if abbr(first, "configure", 3) and lrest and abbr(lrest[0], "terminal", 1):
         return "configure terminal"
     if first == "conf" and lrest and lrest[0] == "t":
@@ -547,6 +551,10 @@ def run_common(device: NetworkDevice, session: IOSSession, command: str, lower: 
         return _result(device, session, show_command(device, lower))
     if lower == "terminal length 0" or lower.startswith("terminal "):
         return _result(device, session, "")
+    if lower.startswith("ping "):
+        return _result(device, session, ping_output(device, command[len("ping "):].strip()))
+    if lower.startswith("traceroute "):
+        return _result(device, session, traceroute_output(device, command[len("traceroute "):].strip()))
     if lower in ("power off", "power on", "power cycle"):
         return run_power(device, lower)
     return None
@@ -1862,6 +1870,47 @@ def route_table(device: NetworkDevice, filter_text: str = "") -> str:
     default = next((r for r in cfg(device).get("staticRoutes", []) if r.get("network") == "0.0.0.0" and r.get("mask") == "0.0.0.0"), None)
     gateway = f"Gateway of last resort is {default.get('nextHop')} to network 0.0.0.0" if default else "Gateway of last resort is not set"
     return "\n".join(["Codes: C - connected, S - static, L - local", gateway, "", *(lines or ["No routes installed."])])
+
+
+def ping_output(device: NetworkDevice, target: str) -> str:
+    target = target.split()[0] if target.split() else ""
+    if not target:
+        return "% Usage: ping <address|host>"
+    address = resolve_target(device, target)
+    if not address:
+        return f"% Unrecognized host or address, or protocol not running: {target}"
+    return "\n".join([
+        f"Type escape sequence to abort.",
+        f"Sending 5, 100-byte ICMP Echos to {address}, timeout is 2 seconds:",
+        "!!!!!",
+        f"Success rate is 100 percent (5/5), round-trip min/avg/max = 1/2/4 ms"
+    ])
+
+
+def traceroute_output(device: NetworkDevice, target: str) -> str:
+    target = target.split()[0] if target.split() else ""
+    if not target:
+        return "% Usage: traceroute <address|host>"
+    address = resolve_target(device, target)
+    if not address:
+        return f"% Unrecognized host or address, or protocol not running: {target}"
+    first_hop = next((route.get("nextHop") for route in cfg(device).get("staticRoutes", []) if route.get("network") == "0.0.0.0"), address)
+    return "\n".join([
+        f"Type escape sequence to abort.",
+        f"Tracing the route to {address}",
+        "",
+        f"  1 {first_hop} 1 msec 1 msec 1 msec",
+        f"  2 {address} 2 msec 2 msec 2 msec"
+    ])
+
+
+def resolve_target(device: NetworkDevice, target: str) -> str | None:
+    if is_ipv4(target):
+        return target
+    for record in cfg(device).get("dnsRecords", []):
+        if record.get("name", "").lower() == target.lower() and is_ipv4(record.get("value")):
+            return record.get("value")
+    return None
 
 
 def default_bandwidth(port: dict[str, Any]) -> int:
