@@ -3,7 +3,7 @@ import { createId } from "../utils/id";
 import { isIpv4, maskToPrefix, networkAddress } from "./ip";
 import type { DhcpPool, DeviceConfig, NetworkDevice, NetworkPort, RuntimeState } from "../types/network";
 
-export type CliMode = "exec" | "privileged" | "global" | "interface" | "vlan" | "dhcp" | "line" | "router";
+export type CliMode = "exec" | "privileged" | "global" | "interface" | "vlan" | "dhcp" | "line" | "router" | "acl";
 export type CliPendingAction = "reload" | "erase-startup";
 
 export interface CliSession {
@@ -13,6 +13,8 @@ export interface CliSession {
   dhcpPoolId?: string;
   lineId?: string;
   routingId?: string;
+  aclName?: string;
+  aclType?: "standard" | "extended";
   pendingAction?: CliPendingAction;
 }
 
@@ -39,6 +41,7 @@ export function cliPrompt(device: NetworkDevice, session: CliSession): string {
   if (session.mode === "dhcp") return `${hostname}(dhcp-config)#`;
   if (session.mode === "line") return `${hostname}(config-line)#`;
   if (session.mode === "router") return `${hostname}(config-router)#`;
+  if (session.mode === "acl") return `${hostname}(${session.aclType === "standard" ? "config-std-nacl" : "config-ext-nacl"})#`;
   return `${hostname}#`;
 }
 
@@ -103,6 +106,7 @@ export function runCliCommand(device: NetworkDevice, session: CliSession, rawCom
   if (session.mode === "dhcp") return dhcpCommand(device, session, command, lower);
   if (session.mode === "line") return lineCommand(device, session, command, lower);
   if (session.mode === "router") return routerCommand(device, session, command, lower);
+  if (session.mode === "acl") return aclCommand(device, session, command, lower);
 
   if (lower.startsWith("show ")) {
     const showTarget = lower.split("|")[0].trim();
@@ -159,7 +163,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
     : session.mode === "privileged"
       ? ["disable", "configure terminal", "conf t", "show running-config", "show startup-config", "show version", "show clock", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show spanning-tree", "show interfaces", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface brief", "show ip route", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show vlan brief", "show mac address-table", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
-        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "interface ", "int ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-lookup", "no ip domain-lookup", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
+        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "interface ", "int ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-lookup", "no ip domain-lookup", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
           ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "ip access-group 101 in", "ip access-group 101 out", "no ip access-group 101 in", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk allowed vlan ", "no switchport", "spanning-tree portfast", "no spanning-tree portfast", "spanning-tree bpduguard enable", "spanning-tree bpduguard disable", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
           : session.mode === "vlan"
@@ -168,7 +172,11 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
               ? ["network ", "default-router ", "dns-server ", "start-ip ", "max-leases ", "shutdown", "no shutdown", "end", "exit", "help"]
               : session.mode === "line"
                 ? ["password ", "login", "no login", "transport input all", "transport input ssh", "transport input telnet", "transport input none", "exec-timeout 10 0", "logging synchronous", "no logging synchronous", "end", "exit", "help"]
-                : ["network ", "version 2", "auto-summary", "no auto-summary", "passive-interface ", "no passive-interface ", "redistribute static", "no redistribute static", "end", "exit", "help"];
+                : session.mode === "router"
+                  ? ["network ", "version 2", "auto-summary", "no auto-summary", "passive-interface ", "no passive-interface ", "redistribute static", "no redistribute static", "end", "exit", "help"]
+                  : session.aclType === "standard"
+                    ? ["permit any", "permit host ", "permit 192.168.1.0 0.0.0.255", "deny any", "deny host ", "no 10", "do show access-lists", "end", "exit", "help"]
+                    : ["permit ip any any", "deny ip any any", "permit tcp any host 192.168.1.10 eq 80", "permit icmp any any", "no 10", "do show access-lists", "end", "exit", "help"];
   return unique([...base, ...device.ports.flatMap((port) => [`interface ${port.name}`, `int ${shortPortAlias(port.name)}`, `show interface ${port.name}`])]);
 }
 
@@ -216,6 +224,7 @@ function expandCliHead(command: string, session: CliSession): string {
   if (isAbbrev(first, "line", 2)) return expandLineCommand(rest);
   if (isAbbrev(first, "router", 3)) return expandRouterCommand(rest);
   if (isAbbrev(first, "description", 4) || first === "desc") return `description ${rest.join(" ")}`;
+  if ((session.mode === "acl") && (first === "permit" || first === "deny" || /^\d+$/.test(first))) return command;
   if (isAbbrev(first, "shutdown", 2)) return "shutdown";
   if (first === "no") return expandNoCommand(rest);
   if (first === "ip") return expandIpCommand(rest, session);
@@ -321,6 +330,7 @@ function expandNoCommand(rest: string[]): string {
     if (isAbbrev(lowerRest[1], "dhcp") && isAbbrev(lowerRest[2], "pool")) return `no ip dhcp pool ${rest.slice(3).join(" ")}`;
     if (isAbbrev(lowerRest[1], "host")) return `no ip host ${rest.slice(2).join(" ")}`;
     if (isAbbrev(lowerRest[1], "access-group", 3)) return `no ip access-group ${rest.slice(2).join(" ")}`;
+    if (isAbbrev(lowerRest[1], "access-list", 3)) return `no ip access-list ${rest.slice(2).join(" ")}`;
   }
   if (isAbbrev(first, "vlan")) return `no vlan ${rest.slice(1).join(" ")}`;
   if (isAbbrev(first, "access-list", 3)) return `no access-list ${rest.slice(1).join(" ")}`;
@@ -340,6 +350,7 @@ function expandIpCommand(rest: string[], session: CliSession): string {
   if (isAbbrev(first, "domain-lookup", 3)) return "ip domain-lookup";
   if (isAbbrev(first, "host")) return `ip host ${rest.slice(1).join(" ")}`;
   if (isAbbrev(first, "dhcp") && isAbbrev(lowerRest[1], "pool")) return `ip dhcp pool ${rest.slice(2).join(" ")}`;
+  if (isAbbrev(first, "access-list", 3)) return `ip access-list ${rest.slice(1).join(" ")}`;
   return `ip ${rest.join(" ")}`;
 }
 
@@ -388,7 +399,7 @@ function expandShowCommand(rest: string[]): string {
   if (first === "nat") return "show nat";
   if (isAbbrev(first, "vlan")) return "show vlan brief";
   if (isAbbrev(first, "mac")) return "show mac address-table";
-  if (isAbbrev(first, "access-list", 3) || first === "access-lists") return "show access-list";
+  if (isAbbrev(first, "access-list", 3) || first === "access-lists") return ["show access-list", ...rest.slice(1)].join(" ");
   if (first === "cdp" && isAbbrev(second, "neighbors", 3)) return lowerRest[2]?.startsWith("det") ? "show cdp neighbors detail" : "show cdp neighbors";
   if (first === "ip") {
     if (isAbbrev(second, "route", 2)) return ["show ip route", ...rest.slice(2)].join(" ");
@@ -496,7 +507,7 @@ function applyStartupConfig(device: NetworkDevice): NetworkDevice {
     config: { ...defaultConfig(device.label, device.kind), startupConfig },
     ports: device.ports.map((port) => resetPortForBoot(device, port))
   };
-  let context: { mode: "global" } | { mode: "interface"; portId: string } | { mode: "vlan"; vlanId: number } | { mode: "dhcp"; poolId: string } | { mode: "line"; lineId: string } | { mode: "router"; routingId: string } = { mode: "global" };
+  let context: { mode: "global" } | { mode: "interface"; portId: string } | { mode: "vlan"; vlanId: number } | { mode: "dhcp"; poolId: string } | { mode: "line"; lineId: string } | { mode: "router"; routingId: string } | { mode: "acl"; name: string; aclType: "standard" | "extended" } = { mode: "global" };
 
   for (const line of startupConfig) {
     const command = line.trim();
@@ -575,6 +586,12 @@ function applyStartupConfig(device: NetworkDevice): NetworkDevice {
       continue;
     }
 
+    if (lower.startsWith("ip access-list ")) {
+      const acl = parseAccessListTarget(command);
+      if (acl) context = { mode: "acl", name: acl.name, aclType: acl.type };
+      continue;
+    }
+
     if (isGlobalStartupLine(lower)) {
       context = { mode: "global" };
       next = applyStartupGlobalLine(next, command, lower);
@@ -605,6 +622,10 @@ function applyStartupConfig(device: NetworkDevice): NetworkDevice {
       next = applyStartupRouterLine(next, context.routingId, command, lower);
       continue;
     }
+    if (context.mode === "acl") {
+      next = applyStartupAclLine(next, context.name, context.aclType, command, lower);
+      continue;
+    }
     next = applyStartupGlobalLine(next, command, lower);
   }
 
@@ -620,6 +641,8 @@ function isGlobalStartupLine(lower: string): boolean {
     lower === "no ip default-gateway" ||
     lower === "ip domain-lookup" ||
     lower === "no ip domain-lookup" ||
+    lower.startsWith("ip access-list ") ||
+    lower.startsWith("no ip access-list ") ||
     lower.startsWith("access-list ") ||
     lower.startsWith("nat ") ||
     lower.startsWith("service ") ||
@@ -687,6 +710,10 @@ function applyStartupGlobalLine(device: NetworkDevice, command: string, lower: s
   if (lower.startsWith("access-list ")) {
     const rule = parseAccessList(command);
     return rule ? { ...device, config: { ...device.config, accessRules: [...device.config.accessRules, rule] } } : device;
+  }
+  if (lower.startsWith("no ip access-list ")) {
+    const acl = parseAccessListTarget(command.slice(3));
+    return acl ? removeAccessList(device, acl.name) : device;
   }
   if (lower.startsWith("nat ")) {
     const [, insideLocal, insideGlobal, outsideInterface] = command.split(/\s+/);
@@ -790,6 +817,14 @@ function applyStartupRouterLine(device: NetworkDevice, routingId: string, comman
   return device;
 }
 
+function applyStartupAclLine(device: NetworkDevice, aclName: string, aclType: "standard" | "extended", command: string, lower: string): NetworkDevice {
+  if (lower.startsWith("permit ") || lower.startsWith("deny ") || /^\d+\s+(permit|deny)\s+/i.test(command)) {
+    const rule = parseAclSubmodeRule(aclName, aclType, command);
+    return rule ? { ...device, config: { ...device.config, accessRules: [...device.config.accessRules, rule] } } : device;
+  }
+  return device;
+}
+
 function globalCommand(device: NetworkDevice, session: CliSession, command: string, lower: string): CliResult {
   if (lower.startsWith("hostname ")) {
     const hostname = command.split(/\s+/)[1]?.replace(/[^a-zA-Z0-9_.-]/g, "").slice(0, 32);
@@ -843,6 +878,18 @@ function globalCommand(device: NetworkDevice, session: CliSession, command: stri
       config: { ...device.config, vlans: device.config.vlans.filter((vlan) => vlan.id !== id) },
       ports: device.ports.map((port) => port.vlan === id ? { ...port, vlan: 1, allowedVlans: port.allowedVlans.filter((vlan) => vlan !== id) } : port)
     }, session, "");
+  }
+
+  if (lower.startsWith("ip access-list ")) {
+    const acl = parseAccessListTarget(command);
+    if (!acl) return result(device, session, "% Usage: ip access-list standard|extended <name>");
+    return result(device, { mode: "acl", aclName: acl.name, aclType: acl.type }, "");
+  }
+
+  if (lower.startsWith("no ip access-list ")) {
+    const acl = parseAccessListTarget(command.slice(3));
+    if (!acl) return result(device, session, "% Usage: no ip access-list standard|extended <name>");
+    return result(removeAccessList(device, acl.name), session, "");
   }
 
   if (lower.startsWith("ip route ")) {
@@ -1073,6 +1120,27 @@ function routerCommand(device: NetworkDevice, session: CliSession, command: stri
   return result(device, session, "% Unsupported router configuration command.");
 }
 
+function aclCommand(device: NetworkDevice, session: CliSession, command: string, lower: string): CliResult {
+  const aclName = session.aclName;
+  const aclType = session.aclType ?? "extended";
+  if (!aclName) return result(device, { mode: "global" }, "% ACL context is missing.");
+  if (lower.startsWith("permit ") || lower.startsWith("deny ") || /^\d+\s+(permit|deny)\s+/i.test(command)) {
+    const rule = parseAclSubmodeRule(aclName, aclType, command);
+    if (!rule) return result(device, session, aclType === "standard" ? "% Usage: permit|deny <source> [wildcard]" : "% Usage: permit|deny <protocol> <source> <destination>");
+    return result({ ...device, config: { ...device.config, accessRules: [...device.config.accessRules, rule] } }, session, "");
+  }
+  if (/^no\s+\d+$/i.test(command)) {
+    const sequence = Number(command.split(/\s+/)[1]);
+    return result(removeAccessListSequence(device, aclName, sequence), session, "");
+  }
+  if (lower.startsWith("no permit ") || lower.startsWith("no deny ")) {
+    const rule = parseAclSubmodeRule(aclName, aclType, command.slice(3));
+    return result(rule ? removeAccessRule(device, rule) : device, session, "");
+  }
+  if (lower.startsWith("remark ")) return result(device, session, "");
+  return result(device, session, "% Unsupported access-list configuration command.");
+}
+
 function showCommand(device: NetworkDevice, lower: string): string {
   if (lower.startsWith("show running-config interface ")) {
     const name = lower.slice("show running-config interface ".length);
@@ -1118,6 +1186,7 @@ function showCommand(device: NetworkDevice, lower: string): string {
   if (lower === "show ip dhcp pool") return device.config.dhcpPools.map((pool) => [`풀 ${pool.name}`, `  네트워크 ${pool.network} ${pool.mask}`, `  기본 라우터 ${pool.defaultGateway}`, `  DNS 서버 ${pool.dnsServer}`, `  시작 범위 ${pool.startIp}, 최대 임대 ${pool.maxLeases}`, `  상태 ${pool.enabled ? "활성" : "비활성"}`].join("\n")).join("\n\n") || "DHCP 풀이 없습니다.";
   if (lower === "show hosts") return device.config.dnsRecords.map((record) => `${record.name.padEnd(32)}${record.value}`).join("\n") || "호스트 레코드가 없습니다.";
   if (lower === "show access-list" || lower === "show access-lists") return accessListStatus(device);
+  if (lower.startsWith("show access-list ")) return accessListStatus(device, lower.slice("show access-list ".length).trim());
   if (lower === "show nat") return device.config.natRules.map((rule) => `${rule.insideLocal} -> ${rule.insideGlobal} outside ${rule.outsideInterface} (${rule.hits}회 적중)`).join("\n") || "NAT 규칙이 없습니다.";
   return "% Unsupported show command.";
 }
@@ -1165,7 +1234,7 @@ function runningConfig(device: NetworkDevice): string {
     ...device.ports.flatMap((port) => interfaceConfig(port)),
     ...device.config.staticRoutes.map((route) => `ip route ${route.network} ${route.mask} ${route.nextHop}`),
     ...device.config.dnsRecords.map((record) => `ip host ${record.name} ${record.value}`),
-    ...device.config.accessRules.map(accessRuleConfig),
+    ...accessRulesConfig(device.config.accessRules),
     ...device.config.natRules.map((rule) => `nat ${rule.insideLocal} ${rule.insideGlobal} ${rule.outsideInterface}`),
     ...Object.entries(device.config.services).map(([name, enabled]) => `${enabled ? "" : "no "}service ${name}`),
     ...device.config.dhcpPools.flatMap((pool) => [
@@ -1353,6 +1422,7 @@ function help(mode: CliMode): string {
   if (mode === "dhcp") return "network <network> <mask>, default-router <ip>, dns-server <ip>, start-ip <ip>, max-leases <n>, shutdown, no shutdown, exit";
   if (mode === "line") return "password <value>, login, no login, transport input <all|ssh|telnet|none>, exec-timeout <min> <sec>, logging synchronous, exit";
   if (mode === "router") return "network <network> [wildcard-mask], version <n>, auto-summary, no auto-summary, passive-interface <name>, redistribute static, exit";
+  if (mode === "acl") return "permit|deny <protocol> <source> <destination>, permit|deny <source> [wildcard], no <sequence>, exit";
   return "enable, configure terminal, show run, show version, show interfaces, show interfaces switchport, show interfaces trunk, show ip interface brief, show interfaces status, show vlan brief, show ip route, show ip dhcp pool, show hosts, show access-list, show nat, show cdp neighbors, show arp, show ip dhcp binding, clear ..., write memory, reload, write erase";
 }
 
@@ -1427,19 +1497,20 @@ function pipeSection(lines: string[], term: string): string {
   return sections.join("\n") || "% No matching sections.";
 }
 
-function parseAccessList(command: string): AccessRule | null {
+function parseAccessList(command: string, forcedType?: "standard" | "extended"): AccessRule | null {
   const tokens = command.trim().split(/\s+/);
   const listName = tokens[1] ?? "";
   const action = tokens[2]?.toLowerCase();
   if (!listName || !isAction(action)) return null;
   if (tokens[3]?.toLowerCase() === "remark") return null;
 
-  if (isStandardAcl(listName)) {
+  if (forcedType === "standard" || (!forcedType && isStandardAcl(listName))) {
     const source = parseAclAddress(tokens, 3);
     if (!source) return null;
     return {
       id: createId("acl"),
       listName,
+      listType: "standard",
       interfaceName: listName,
       action,
       protocol: "ip",
@@ -1459,6 +1530,7 @@ function parseAccessList(command: string): AccessRule | null {
   return {
     id: createId("acl"),
     listName,
+    listType: forcedType ?? "extended",
     interfaceName: listName,
     action,
     protocol,
@@ -1466,6 +1538,19 @@ function parseAccessList(command: string): AccessRule | null {
     destination: options ? `${destination.text} ${options}` : destination.text,
     hits: 0
   };
+}
+
+function parseAclSubmodeRule(aclName: string, aclType: "standard" | "extended", command: string): AccessRule | null {
+  const withoutSequence = command.trim().replace(/^\d+\s+/, "");
+  return parseAccessList(`access-list ${aclName} ${withoutSequence}`, aclType);
+}
+
+function parseAccessListTarget(command: string): { type: "standard" | "extended"; name: string } | null {
+  const match = command.match(/^ip access-list\s+(standard|extended)\s+(.+)$/i);
+  const type = match?.[1]?.toLowerCase();
+  const name = match?.[2]?.trim().split(/\s+/)[0] ?? "";
+  if ((type !== "standard" && type !== "extended") || !name) return null;
+  return { type, name };
 }
 
 function parseAclAddress(tokens: string[], index: number): { text: string; nextIndex: number } | null {
@@ -1497,10 +1582,13 @@ function aclUsage(): string {
   return "% Usage: access-list <list> permit|deny <protocol> <source> <destination>";
 }
 
-function accessListStatus(device: NetworkDevice): string {
-  if (!device.config.accessRules.length) return "No access lists configured.";
+function accessListStatus(device: NetworkDevice, filter = ""): string {
+  const rulesToShow = filter
+    ? device.config.accessRules.filter((rule) => aclListName(rule).toLowerCase() === filter.toLowerCase())
+    : device.config.accessRules;
+  if (!rulesToShow.length) return "No access lists configured.";
   const groups = new Map<string, AccessRule[]>();
-  for (const rule of device.config.accessRules) {
+  for (const rule of rulesToShow) {
     const name = aclListName(rule);
     groups.set(name, [...(groups.get(name) ?? []), rule]);
   }
@@ -1510,8 +1598,24 @@ function accessListStatus(device: NetworkDevice): string {
   ]).join("\n");
 }
 
-function accessRuleConfig(rule: AccessRule): string {
-  return `access-list ${aclListName(rule)} ${accessRuleBody(rule)}`;
+function accessRulesConfig(rules: AccessRule[]): string[] {
+  const named = new Map<string, AccessRule[]>();
+  const numbered: AccessRule[] = [];
+  for (const rule of rules) {
+    const name = aclListName(rule);
+    if (/^\d+$/.test(name)) {
+      numbered.push(rule);
+    } else {
+      named.set(name, [...(named.get(name) ?? []), rule]);
+    }
+  }
+  return [
+    ...numbered.map((rule) => `access-list ${aclListName(rule)} ${accessRuleBody(rule)}`),
+    ...[...named.entries()].flatMap(([name, group]) => [
+      `ip access-list ${group.every(isStandardAccessRule) ? "standard" : "extended"} ${name}`,
+      ...group.map((rule, index) => ` ${(index + 1) * 10} ${accessRuleBody(rule)}`)
+    ])
+  ];
 }
 
 function accessRuleBody(rule: AccessRule): string {
@@ -1521,11 +1625,52 @@ function accessRuleBody(rule: AccessRule): string {
 }
 
 function isStandardAccessRule(rule: AccessRule): boolean {
+  if (rule.listType) return rule.listType === "standard";
   return isStandardAcl(aclListName(rule)) && rule.protocol === "ip" && normalizeAclEndpoint(rule.destination) === "any";
 }
 
 function aclListName(rule: AccessRule): string {
   return rule.listName || rule.interfaceName || "ACL";
+}
+
+function removeAccessList(device: NetworkDevice, listName: string): NetworkDevice {
+  return {
+    ...device,
+    config: { ...device.config, accessRules: device.config.accessRules.filter((rule) => aclListName(rule).toLowerCase() !== listName.toLowerCase()) }
+  };
+}
+
+function removeAccessListSequence(device: NetworkDevice, listName: string, sequence: number): NetworkDevice {
+  const targetIndex = Math.floor(sequence / 10) - 1;
+  if (!Number.isInteger(targetIndex) || targetIndex < 0) return device;
+  let currentIndex = -1;
+  return {
+    ...device,
+    config: {
+      ...device.config,
+      accessRules: device.config.accessRules.filter((rule) => {
+        if (aclListName(rule).toLowerCase() !== listName.toLowerCase()) return true;
+        currentIndex += 1;
+        return currentIndex !== targetIndex;
+      })
+    }
+  };
+}
+
+function removeAccessRule(device: NetworkDevice, target: AccessRule): NetworkDevice {
+  return {
+    ...device,
+    config: {
+      ...device.config,
+      accessRules: device.config.accessRules.filter((rule) =>
+        !(aclListName(rule).toLowerCase() === aclListName(target).toLowerCase() &&
+          rule.action === target.action &&
+          rule.protocol === target.protocol &&
+          normalizeAclEndpoint(rule.source) === normalizeAclEndpoint(target.source) &&
+          normalizeAclEndpoint(rule.destination) === normalizeAclEndpoint(target.destination))
+      )
+    }
+  };
 }
 
 function normalizeAclEndpoint(value: string): string {
@@ -1735,7 +1880,7 @@ function isProtocol(value: string | undefined): value is "ip" | "icmp" | "tcp" |
 
 function exitSession(session: CliSession): CliSession {
   if (session.mode === "global") return { mode: "privileged" };
-  if (session.mode === "interface" || session.mode === "vlan" || session.mode === "dhcp" || session.mode === "line" || session.mode === "router") return { mode: "global" };
+  if (session.mode === "interface" || session.mode === "vlan" || session.mode === "dhcp" || session.mode === "line" || session.mode === "router" || session.mode === "acl") return { mode: "global" };
   return { mode: "exec" };
 }
 
