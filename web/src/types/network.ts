@@ -125,6 +125,7 @@ export interface DeviceConfig {
   enablePassword?: string;
   motdBanner?: string;
   domainLookup?: boolean;
+  domainName?: string;
   defaultGateway?: string;
   staticRoutes: StaticRoute[];
   vlans: Array<{ id: number; name: string }>;
@@ -132,6 +133,7 @@ export interface DeviceConfig {
   dnsRecords: DnsRecord[];
   accessRules: AccessRule[];
   natRules: NatRule[];
+  localUsers?: Array<{ id: string; name: string; secret?: string; password?: string; privilege?: number }>;
   lineConfigs?: Array<{ id: string; kind: "console" | "vty"; range: string; password: string; login: boolean; transportInput: string; execTimeout: string; loggingSynchronous: boolean }>;
   routingProtocols?: Array<{ id: string; protocol: "rip" | "ospf" | "eigrp"; processId?: string; networks: string[]; version?: string; autoSummary: boolean; passiveInterfaces: string[]; redistributeStatic: boolean }>;
   services: {
