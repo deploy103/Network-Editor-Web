@@ -177,7 +177,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
     : session.mode === "privileged"
       ? ["disable", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show clock", "show privilege", "show history", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show spanning-tree", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route summary", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show mac address-table", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show ip access-lists", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
-        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "interface ", "int ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-lookup", "no ip domain-lookup", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
+        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "interface ", "int ", "default interface ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-lookup", "no ip domain-lookup", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
           ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "ip access-group 101 in", "ip access-group 101 out", "no ip access-group 101 in", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk allowed vlan ", "no switchport", "spanning-tree portfast", "no spanning-tree portfast", "spanning-tree bpduguard enable", "spanning-tree bpduguard disable", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
           : session.mode === "vlan"
@@ -234,6 +234,7 @@ function expandCliHead(command: string, session: CliSession): string {
   if (isAbbrev(first, "show", 2) && rest.length) return expandShowCommand(rest);
   if (isAbbrev(first, "interface", 3) || first === "int") return `interface ${rest.join(" ")}`;
   if (isAbbrev(first, "hostname", 4)) return `hostname ${rest.join(" ")}`;
+  if (isAbbrev(first, "default", 3)) return expandDefaultCommand(rest);
   if (isAbbrev(first, "banner", 3)) return expandBannerCommand(rest);
   if (isAbbrev(first, "line", 2)) return expandLineCommand(rest);
   if (isAbbrev(first, "router", 3)) return expandRouterCommand(rest);
@@ -277,6 +278,12 @@ function expandBannerCommand(rest: string[]): string {
   const lowerRest = rest.map((token) => token.toLowerCase());
   if (isAbbrev(lowerRest[0], "motd")) return `banner motd ${rest.slice(1).join(" ")}`;
   return `banner ${rest.join(" ")}`;
+}
+
+function expandDefaultCommand(rest: string[]): string {
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  if (isAbbrev(lowerRest[0], "interface", 3) || lowerRest[0] === "int") return `default interface ${rest.slice(1).join(" ")}`;
+  return `default ${rest.join(" ")}`;
 }
 
 function expandLineCommand(rest: string[]): string {
@@ -946,6 +953,13 @@ function globalCommand(device: NetworkDevice, session: CliSession, command: stri
     if (!routing) return result(device, session, "% Usage: router rip | router ospf <process-id> | router eigrp <as-number>");
     const ensured = ensureRoutingProtocol(device, routing.protocol, routing.processId);
     return result(ensured.device, { mode: "router", routingId: ensured.protocol.id }, "");
+  }
+
+  if (lower.startsWith("default interface ")) {
+    const name = command.slice("default interface ".length).trim();
+    const port = findPort(device, name);
+    if (!port) return result(device, session, `% Interface ${name} not found.`);
+    return result({ ...device, ports: device.ports.map((item) => item.id === port.id ? resetPortForBoot(device, item) : item) }, session, "");
   }
 
   if (lower.startsWith("no vlan ")) {
@@ -1772,6 +1786,7 @@ function searchHelp(term: string): string {
     "tracert <ip-or-host>",
     "configure terminal",
     "interface <name>",
+    "default interface <name>",
     "ip address <ip> <mask>",
     "description <text>",
     "switchport mode access",

@@ -31,6 +31,7 @@ function assert(condition, message) {
 
 let device = createDevice("switch-2960", { x: 0, y: 0 }, []);
 let session = initialCliSession();
+const sparePort = device.ports.find((port) => port.name.toLowerCase().includes("0/2"))?.name ?? device.ports.find((port) => port.kind !== "console")?.name ?? "FastEthernet0/2";
 const run = (command) => {
   const result = runCliCommand(device, session, command);
   device = result.device;
@@ -56,6 +57,7 @@ run("enable");
 run("cisco");
 assert(cliPrompt(device, session).endsWith("#"), "correct enable secret must enter privileged EXEC");
 run("conf t");
+run(`default interface ${sparePort}`);
 run("int vlan 1");
 run("ip add 192.168.10.2 255.255.255.0");
 run("ip nat inside");
