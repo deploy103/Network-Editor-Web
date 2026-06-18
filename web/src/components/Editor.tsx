@@ -2528,17 +2528,18 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
     if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
   }, [lines]);
 
-  async function run() {
+  async function run(commandOverride?: string) {
     const prompt = cliEngine.prompt(device, session);
-    const normalizedInput = input.trim().toLowerCase().replace(/\s+/g, " ");
-    const submittedInput = input;
+    const commandText = commandOverride ?? input;
+    const normalizedInput = commandText.trim().toLowerCase().replace(/\s+/g, " ");
+    const submittedInput = commandText;
     setHistoryIndex(null);
     if (submittedInput.trim()) {
       setHistory((items) => [...items, submittedInput].slice(-80));
     }
     setCompletionItems([]);
     if (normalizedInput.startsWith("ping ") || normalizedInput.startsWith("traceroute ") || normalizedInput.startsWith("tracert ")) {
-      const output = await runCliPacketCommand(project, device, input, onProjectChange);
+      const output = await runCliPacketCommand(project, device, commandText, onProjectChange);
       setLines((items) => [...items, `${prompt} ${submittedInput}`, output].filter(Boolean));
       setInput("");
       return;
@@ -2548,7 +2549,7 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
       setInput("");
       return;
     }
-    const result = await cliEngine.run(device, session, input);
+    const result = await cliEngine.run(device, session, commandText);
     setSession(result.session);
     onUpdate(result.device);
     setLines((items) => [...items, `${prompt} ${submittedInput}`, result.output].filter(Boolean));
@@ -2569,6 +2570,23 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
   }
 
   function handleInputKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.ctrlKey && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      void run("end");
+      return;
+    }
+    if (event.ctrlKey && event.key.toLowerCase() === "c") {
+      event.preventDefault();
+      if (session.pendingAction) {
+        void run("no");
+      } else {
+        const prompt = cliEngine.prompt(device, session);
+        setLines((items) => [...items, `${prompt} ${input}^C`]);
+        setInput("");
+        setCompletionItems([]);
+      }
+      return;
+    }
     if (event.key === "Tab") {
       event.preventDefault();
       completeInput();
