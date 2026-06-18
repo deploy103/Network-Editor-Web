@@ -139,6 +139,11 @@ assert_true("switchport nonegotiate" in config, "switchport nonegotiate must sur
 assert_true("ip access-list extended WEB-FILTER" in config, "named ACL block must survive reload")
 assert_true("10 permit tcp any host 192.168.10.2 eq 80" in config, "named ACL sequence must survive reload")
 assert_true("default-information originate always" in config, "default route originate must survive reload")
+assert_true("Power is off" in run("power off"), "power off must halt the device")
+assert_true(device["powerOn"] is False, "power off must update device state")
+assert_true("powered off" in run("show version"), "show version must reflect powered-off state")
+assert_true("Power restored" in run("power on"), "power on must boot the device")
+assert_true(device["powerOn"] is True, "power on must update device state")
 
 print("Python CLI smoke tests passed")
 PY

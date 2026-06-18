@@ -143,6 +143,8 @@ def expand_command(command: str, session: IOSSession) -> str:
         return "reload"
     if abbr(first, "reboot", 3):
         return "reboot"
+    if first == "power":
+        return expand_power(rest)
     if first == "no":
         return expand_no(rest)
     if first == "int" or abbr(first, "interface", 3):
@@ -438,6 +440,17 @@ def expand_clear(rest: list[str]) -> str:
     return "clear " + " ".join(rest)
 
 
+def expand_power(rest: list[str]) -> str:
+    first = rest[0].lower() if rest else ""
+    if abbr(first, "on"):
+        return "power on"
+    if abbr(first, "off"):
+        return "power off"
+    if abbr(first, "cycle"):
+        return "power cycle"
+    return "power " + " ".join(rest)
+
+
 def expand_router_subcommand(first: str, rest: list[str], lower_rest: list[str], command: str) -> str:
     if abbr(first, "network", 3):
         return "network " + " ".join(rest)
@@ -477,6 +490,8 @@ def run_common(device: NetworkDevice, session: IOSSession, command: str, lower: 
         return _result(device, session, show_command(device, lower))
     if lower == "terminal length 0" or lower.startswith("terminal "):
         return _result(device, session, "")
+    if lower in ("power off", "power on", "power cycle"):
+        return run_power(device, lower)
     return None
 
 
@@ -510,6 +525,23 @@ def run_privileged(device: NetworkDevice, session: IOSSession, command: str, low
     if lower in ("clear ip nat translation", "clear ip nat translation *"):
         return _result(device, session, "")
     return _result(device, session, "% Unsupported privileged EXEC command.")
+
+
+def run_power(device: NetworkDevice, lower: str) -> dict[str, Any]:
+    if lower == "power off":
+        device["powerOn"] = False
+        runtime(device)["arpTable"] = []
+        runtime(device)["macTable"] = []
+        runtime(device)["dhcpLeases"] = []
+        return _result(device, {"mode": "exec"}, "System halted.\nPower is off.")
+    if lower == "power on":
+        device["powerOn"] = True
+        return _result(device, {"mode": "exec"}, "System Bootstrap, Version 15.2(PTWEB)\nPower restored.")
+    device["powerOn"] = True
+    runtime(device)["arpTable"] = []
+    runtime(device)["macTable"] = []
+    runtime(device)["dhcpLeases"] = []
+    return _result(apply_startup_config(device), {"mode": "exec"}, "System Bootstrap, Version 15.2(PTWEB)\nSystem restarted after power cycle.")
 
 
 def run_global(device: NetworkDevice, session: IOSSession, command: str, lower: str) -> dict[str, Any]:
@@ -1000,7 +1032,7 @@ def show_command(device: NetworkDevice, lower: str) -> str:
         lines = cfg(device).get("startupConfig") or []
         return "\n".join(lines) if lines else "% Startup config is not saved."
     if lower == "show version":
-        return f"{device.get('model', 'Cisco IOS')} Software, Network Editor Python IOS\nDevice uptime is simulated\nSystem image file is \"python-ios:{device.get('modelId', 'generic')}\"\n{len(device.get('ports', []))} interfaces"
+        return f"{device.get('model', 'Cisco IOS')} Software, Network Editor Python IOS\nDevice uptime is simulated\nSystem image file is \"python-ios:{device.get('modelId', 'generic')}\"\n{len(device.get('ports', []))} interfaces\n{'System returned to ROM by power-on' if device.get('powerOn', True) else 'System is powered off'}"
     if lower == "show clock":
         return time.strftime("%Y-%m-%d %H:%M:%S KST", time.localtime())
     if lower == "show inventory":
