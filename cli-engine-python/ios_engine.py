@@ -215,6 +215,14 @@ def expand_show(rest: list[str]) -> str:
         return "show privilege"
     if abbr(first, "logging", 3):
         return "show logging"
+    if abbr(first, "protocols", 3):
+        return "show protocols"
+    if abbr(first, "controllers", 4):
+        return "show controllers " + " ".join(rest[1:])
+    if abbr(first, "processes", 3) and abbr(second, "cpu"):
+        return "show processes cpu"
+    if abbr(first, "memory", 3):
+        return "show memory"
     if abbr(first, "users", 2):
         return "show users"
     if abbr(first, "line", 2):
@@ -971,6 +979,11 @@ def run_acl(device: NetworkDevice, session: IOSSession, command: str, lower: str
         sequence = int(command.split()[1])
         remove_acl_sequence(device, session.get("aclName"), sequence)
         return _result(device, session, "")
+    if lower.startswith("no permit ") or lower.startswith("no deny "):
+        rule = parse_acl_rule(command[3:], session.get("aclName"), session.get("aclType"))
+        if rule:
+            remove_acl_rule(device, rule)
+        return _result(device, session, "")
     return _result(device, session, "% Unsupported access-list configuration command.")
 
 
@@ -1005,6 +1018,14 @@ def show_command(device: NetworkDevice, lower: str) -> str:
         return "Command history is maintained by the terminal session."
     if lower == "show logging":
         return logging_status(device)
+    if lower == "show protocols":
+        return protocols_status(device)
+    if lower.startswith("show controllers"):
+        return controllers_status(device, lower[len("show controllers"):].strip())
+    if lower == "show processes cpu":
+        return "CPU utilization for five seconds: 1%/0%; one minute: 1%; five minutes: 1%"
+    if lower == "show memory":
+        return "Processor Pool Total: 262144 Used: 98304 Free: 163840\nI/O Pool Total: 65536 Used: 8192 Free: 57344"
     if lower == "show users":
         return "Line       User       Host(s)              Idle       Location\n* 0 con 0  console    idle                 00:00:00   local"
     if lower == "show ip interface brief":
@@ -1080,6 +1101,8 @@ def show_command(device: NetworkDevice, lower: str) -> str:
     if lower == "show hosts":
         records = cfg(device).get("dnsRecords", [])
         return "\n".join(f"{r.get('name','').ljust(32)}{r.get('value','')}" for r in records) if records else "No host records."
+    if lower in ("show cdp neighbors", "show cdp neighbors detail"):
+        return "Device ID        Local Intrfce     Holdtme    Capability  Platform  Port ID\nNo CDP neighbors discovered by the Python device-local CLI engine."
     if lower == "show line":
         return line_status(device)
     if lower == "show terminal":
@@ -1583,6 +1606,19 @@ def remove_acl_sequence(device: NetworkDevice, name: str | None, sequence: int) 
     cfg(device)["accessRules"] = [r for r in cfg(device).get("accessRules", []) if not (acl_name(r) == name and r.get("sequence") == sequence)]
 
 
+def remove_acl_rule(device: NetworkDevice, target: dict[str, Any]) -> None:
+    cfg(device)["accessRules"] = [
+        rule for rule in cfg(device).get("accessRules", [])
+        if not (
+            acl_name(rule).lower() == acl_name(target).lower()
+            and rule.get("action") == target.get("action")
+            and rule.get("protocol") == target.get("protocol")
+            and rule.get("source") == target.get("source")
+            and rule.get("destination") == target.get("destination")
+        )
+    ]
+
+
 def acl_name(rule: dict[str, Any]) -> str:
     return str(rule.get("listName") or rule.get("interfaceName") or "")
 
@@ -1705,6 +1741,33 @@ def interfaces_status(device: NetworkDevice) -> str:
     return "\n".join(["Port                  Status      Mode    VLAN  Type", *[f"{p.get('name','').ljust(22)}{('connected' if p.get('linkId') else 'notconnect').ljust(12)}{p.get('mode','').ljust(8)}{str(p.get('vlan',1)).ljust(6)}{p.get('kind','')}" for p in device.get("ports", [])]])
 
 
+def protocols_status(device: NetworkDevice) -> str:
+    rows = []
+    for port in device.get("ports", []):
+        if port.get("kind") == "console":
+            continue
+        status = "up" if device.get("powerOn", True) and port.get("adminUp", True) else "down"
+        protocol = "up" if port.get("linkId") else "down"
+        ip_line = f"\n  Internet address is {port.get('ipAddress')}/{mask_to_prefix(port.get('subnetMask', '0.0.0.0'))}" if port.get("ipAddress") else ""
+        rows.append(f"{port.get('name')} is {status}, line protocol is {protocol}{ip_line}")
+    return "\n\n".join(rows) if rows else "No protocol interfaces."
+
+
+def controllers_status(device: NetworkDevice, filter_text: str = "") -> str:
+    wanted = filter_text.strip().lower()
+    ports = []
+    for port in device.get("ports", []):
+        name = port.get("name", "")
+        kind = port.get("kind", "")
+        if kind == "console":
+            continue
+        if not wanted or wanted in name.lower() or wanted in kind:
+            ports.append(port)
+    if not ports:
+        return "% No controllers found."
+    return "\n\n".join("\n".join([f"{port.get('name')} controller", f"  Hardware is {port.get('kind')}", f"  DCE/DTE status: {'DCE, clock rate set' if port.get('clockRate') else 'DTE or clock rate not set' if port.get('kind') == 'serial' else 'not applicable'}", f"  Clock rate: {port.get('clockRate') or 'not set'}", f"  Cable state: {'connected' if port.get('linkId') else 'not connected'}", "  Interface reset count: 0"]) for port in ports)
+
+
 def switchport_status(device: NetworkDevice) -> str:
     return "\n\n".join("\n".join([f"Name: {p.get('name')}", f"Switchport: {'Disabled' if p.get('mode') == 'routed' else 'Enabled'}", f"Administrative Mode: {p.get('mode')}", f"Operational Mode: {p.get('mode')}", f"Access Mode VLAN: {p.get('vlan', 1)}", f"Trunking VLANs Enabled: {','.join(map(str, p.get('allowedVlans') or [])) if p.get('mode') == 'trunk' else 'none'}", f"Native VLAN: {p.get('nativeVlan', 1)}", f"Negotiation of Trunking: {'Off' if p.get('switchportNonegotiate') else 'On'}"]) for p in device.get("ports", []) if p.get("kind") != "console") or "% No switchport interfaces."
 
@@ -1754,10 +1817,23 @@ def access_lists(device: NetworkDevice, name_filter: str = "") -> str:
 
 def acl_config(rules: list[dict[str, Any]]) -> list[str]:
     lines = []
+    grouped: dict[str, list[dict[str, Any]]] = {}
     for rule in rules:
         name = acl_name(rule)
         if name:
-            lines.append(f"access-list {name} {rule.get('action')} {rule.get('protocol')} {rule.get('source')} {rule.get('destination')}")
+            grouped.setdefault(name, []).append(rule)
+    for name, items in grouped.items():
+        numbered = name.isdigit()
+        acl_type = items[0].get("listType", "extended")
+        if numbered:
+            for rule in items:
+                lines.append(f"access-list {name} {rule.get('action')} {rule.get('protocol')} {rule.get('source')} {rule.get('destination')}")
+            continue
+        lines.append(f"ip access-list {acl_type} {name}")
+        for index, rule in enumerate(items, 10):
+            sequence = rule.get("sequence", index)
+            body = f"{rule.get('action')} {rule.get('protocol')} {rule.get('source')} {rule.get('destination')}" if acl_type == "extended" else f"{rule.get('action')} {rule.get('source')}"
+            lines.append(f" {sequence} {body}")
     return lines
 
 
