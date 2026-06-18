@@ -1,0 +1,510 @@
+Cisco Packet Tracer 웹 구현 조사 및 설계 초안
+작성 시각: 2026-06-17 KST
+
+1. 요구사항 요약
+
+- Cisco Packet Tracer처럼 사용자가 라우터, 스위치, 방화벽, PC, 서버, 무선 장비, 허브, 케이블을 배치하고 연결할 수 있는 웹 네트워크 실습 프로그램을 만든다.
+- 각 장비는 클릭해서 설정할 수 있어야 한다.
+- 라우터/스위치/방화벽 같은 네트워크 장비는 CLI 입력, 전원 끄기/켜기, 모듈 장착/제거를 지원해야 한다.
+- 사용자별 저장 기능과 로그인/회원가입이 필요하다.
+- 메인 페이지는 로그인한 사용자의 기존 프로젝트를 보여 주고, 없으면 새 네트워크 구성 시작 흐름을 제공해야 한다.
+- 네트워크는 단순 그림이 아니라 실제로 동작해야 한다. 최소한 ARP, ICMP ping, 스위칭, 라우팅, DHCP, DNS, 서버 서비스 같은 학습용 흐름이 화면에서 검증되어야 한다.
+- `.pkt` 파일 내보내기 요구가 있다. 다만 조사 결과 `.pkt` 완전 호환은 가장 큰 리스크다.
+
+2. 웹 공식 조사
+
+- Cisco Networking Academy의 Packet Tracer 공식 페이지 메타데이터 기준:
+  - URL: https://www.netacad.com/cisco-packet-tracer
+  - 페이지 제목: "What is Cisco Packet Tracer? | Free Training and Download"
+  - 설명: Packet Tracer는 네트워킹, IoT, 사이버보안 학습을 위한 컴퓨터 네트워크 시뮬레이션 소프트웨어이며, 하드웨어 없이 가상 랩에서 네트워크 작동을 시각화하고 랙/스택/케이블링을 연습하는 도구로 설명되어 있다.
+- 2026-06-18 재확인:
+  - `https://tutorials.ptnetacad.net/help/default/interfaceOverview.htm` HTTP 200 OK 확인.
+  - `https://www.netacad.com/cisco-packet-tracer` HTTP 200 OK 확인.
+  - UI 기준은 온라인 interface overview와 로컬 설치본 help 문서의 공통 구조(상단 메뉴/툴바, Logical/Physical Workspace, Realtime/Simulation, 하단 장비 선택 박스, 장비별 창)를 우선한다.
+
+3. 로컬 Packet Tracer 조사
+
+- 사용자 지정 폴더:
+  - `C:\Users\youghwjdkill2\Cisco Packet Tracer 6.1sv`
+  - `PT.conf`, `logs`, `saves`, `templates`, `extensions`가 있다.
+  - `PT.conf`는 평문 설정 파일이 아니고 바이너리/암호화된 형태로 보인다.
+- 실제 설치 폴더:
+  - `C:\Program Files (x86)\Cisco Packet Tracer 6.1sv`
+  - 주요 폴더: `art`, `backgrounds`, `bin`, `extensions`, `help`, `languages`, `saves`, `templates`
+- 실행 파일:
+  - `bin/PacketTracer6.exe`
+  - Windows PE32 GUI 실행 파일이며 Qt4 기반 DLL을 사용한다.
+- 로컬 help 문서:
+  - `help/default/interfaceOverview.htm`
+  - `help/default/devicesAndModules.htm`
+  - `help/default/connectionsLinks.htm`
+  - `help/default/config_routers.htm`
+  - `help/default/config_switches.htm`
+  - `help/default/config_servers.htm`
+  - `help/default/config_PCs.htm`
+  - `help/default/CLI_routerIOS15.htm`
+  - `help/default/CLI_switchIOS.htm`
+  - `help/default/CLI_asa.htm`
+  - `help/default/mode_realtime.htm`
+  - `help/default/mode_simulation.htm`
+- 로컬 help의 핵심 내용:
+  - Packet Tracer UI는 메뉴/툴바, 공통 도구, Logical/Physical Workspace, Realtime/Simulation 바, 장비 선택 박스, 사용자 생성 패킷 창으로 구성된다.
+  - Logical Workspace는 토폴로지 구성/설정 중심이고, Physical Workspace는 실제 위치/케이블/장비 물리 상태를 표현한다.
+  - Realtime Mode에서는 네트워크가 계속 실행되고, Simulation Mode에서는 PDU 흐름을 느리게 관찰하며 Event List로 단계별 이벤트를 본다.
+  - Simulation Mode의 이벤트 목록 필드는 Visible, Time, Last Device, At Device, Type, Info다.
+  - 단순 PDU는 사실상 one-shot ping이며, ARP/ICMP 흐름을 만들어 Event List에서 추적한다.
+  - 장비 모듈 변경은 반드시 전원을 끈 뒤 기존 모듈 제거, 새 모듈 장착, 전원 켜기 흐름으로 동작한다.
+  - 라우터/스위치를 전원 재시작하면 startup-config가 로드되고 running-config를 저장하지 않으면 설정이 사라지는 모델이다.
+  - Packet Tracer의 Cisco IOS/ASA CLI는 실제 IOS 전체가 아니라 "simplified model"이고 help 문서의 command tree에 포함된 명령만 지원한다.
+
+4. 장비/링크 범위
+
+- 설치본 `art/Workspace/Logical`와 `art/ComponentBox`에서 확인된 주요 논리 장비:
+  - Router, Switch, 3560 Multilayer Switch, ASA, Hub, Bridge, Repeater, Cloud, Cable/DSL Modem, Access Point, Linksys/WRT, PC/Workstation, Laptop, Server, Printer, IP Phone, Analog Phone, Tablet, PDA, TV, Wired/Wireless End Device 등.
+- 필수 요구사항에 맞춘 1차 장비 범위:
+  - Router
+  - Switch
+  - Firewall/ASA
+  - PC
+  - Server
+  - Wireless AP/Router
+  - Hub
+  - Cable set
+- 케이블/링크:
+  - Console
+  - Copper straight-through
+  - Copper crossover
+  - Fiber
+  - Phone
+  - Coaxial
+  - Serial DCE/DTE
+  - Octal
+  - Wireless association
+- 링크 상태:
+  - green: physical link up
+  - blinking green: activity
+  - red: physical down
+  - amber: STP blocking
+  - black: console connected correctly
+
+5. 장비 설정 모델
+
+- 모든 장비 공통:
+  - display name
+  - power state
+  - interface list
+  - module slots
+  - running config
+  - startup config
+  - status tables
+- Router:
+  - Config 탭 수준: global, routing, switching 일부, interface
+  - CLI 탭 수준: exec, privileged exec, global config, interface config, router rip/eigrp/ospf, DHCP pool, ACL, VLAN interface 등
+  - 1차 구현 명령: enable, configure terminal, hostname, interface, ip address, no shutdown, shutdown, description, ip route, router rip, network, ip dhcp pool, default-router, dns-server, show ip interface brief, show running-config, show startup-config, copy running-config startup-config, ping
+- Switch:
+  - Config 탭 수준: global, switching, interface
+  - 1차 구현 명령: enable, configure terminal, hostname, vlan, name, interface, switchport mode access/trunk, switchport access vlan, no shutdown, shutdown, show vlan brief, show mac address-table, show running-config, copy running-config startup-config
+- ASA/Firewall:
+  - Packet Tracer도 simplified ASA model을 사용한다.
+  - 1차 구현에서는 인터페이스 보안 레벨, ACL permit/deny, NAT 표시/간단 처리, 기본 라우팅까지만 넣고 고급 VPN/WebVPN은 구조만 둔다.
+- PC/Server:
+  - IP Configuration: static/DHCP
+  - Desktop/Command Prompt: ping, ipconfig, arp, tracert 일부
+  - Server services: HTTP, DHCP, DNS, TFTP, SYSLOG, AAA, NTP, Email, FTP 중 1차는 HTTP/DHCP/DNS 중심
+
+6. 시뮬레이션 엔진 설계
+
+- 화면 토폴로지와 엔진 모델을 분리한다.
+- 엔진은 다음 계층으로 나눈다.
+  - Physical/link layer: 포트, 케이블 타입, link up/down, bandwidth, duplex, 전원 상태
+  - L2: Ethernet frame, MAC address, ARP, switch MAC table, VLAN 기본 모델
+  - L3: IPv4 packet, subnet match, default gateway, static route, router forwarding
+  - L4/L7: DHCP, DNS, HTTP, ICMP 중심의 학습용 프로토콜
+  - Simulation event queue: Event List와 PDU animation을 위한 시간순 이벤트 큐
+- Realtime Mode:
+  - 구성 변경 후 즉시 reachability를 재계산한다.
+  - ping 같은 사용자 액션은 결과를 빠르게 보여 준다.
+- Simulation Mode:
+  - 사용자가 source/destination을 선택하면 PDU를 생성한다.
+  - Capture/Forward는 이벤트 큐에서 한 단계씩 진행한다.
+  - Auto Capture/Play는 일정 간격으로 단계 진행한다.
+  - 각 이벤트는 time, lastDevice, atDevice, type, layer info, status를 가진다.
+
+6-1. 로컬 모델 문서에서 확인한 프로토콜 구현 근거
+
+- `model_layer2.htm`
+  - 스위치는 수신 프레임의 access/trunk 포트 타입과 Dot1Q 포맷을 비교한다.
+  - VLAN별 MAC table을 유지하고, source MAC이 없으면 학습하며 타이머 만료 시 제거한다.
+  - destination MAC이 unicast이면 MAC table에 따라 전달하고, multicast/broadcast이면 같은 VLAN의 허용 포트로 flood한다.
+  - blocking 포트는 STP 프레임 외 일반 프레임을 drop한다.
+- `model_misc.htm`
+  - 장비가 IP packet을 보낼 때 ARP table을 먼저 확인한다.
+  - ARP entry가 없으면 원 IP packet을 drop/대기시키고 ARP request를 broadcast한다.
+  - ARP request는 포트 down, IP 미설정, 같은 요청 진행 중이면 보내지 않는다.
+  - NAT는 inside/outside 포트와 NAT table을 기준으로 TCP/UDP/ICMP 포트 및 주소 변환을 한다.
+- `model_layer7.htm`
+  - DHCP client는 DHCP-DISCOVER를 보내고, OFFER를 받으면 REQUEST를 보내며, ACK를 받으면 IP/subnet/gateway를 설정한다.
+  - DHCP server는 DISCOVER에 OFFER, REQUEST에 ACK, RELEASE에 lease 해제를 수행한다.
+  - DHCP 서버에 사용 가능한 IP가 없거나 잘못된 메시지는 drop한다.
+- `model_layer3Routing.htm`
+  - RIP은 포트 up, RIP enabled, passive interface가 아닌 조건에서 update/request를 처리한다.
+  - RIPv1/RIPv2는 broadcast/multicast와 수신 가능 버전이 다르게 동작한다.
+  - EIGRP/OSPF는 process enabled, 같은 subnet, passive interface 여부, neighbor 상태 등을 검사한다.
+- 1차 구현은 위 흐름 중 CCNA 실습에 자주 쓰는 ARP, ICMP, MAC learning, VLAN access/trunk, static route, DHCP를 먼저 구현한다.
+- RIP/OSPF/EIGRP는 UI와 CLI 명령은 받을 수 있게 두되, 실제 동적 라우팅 수렴은 2차 기능으로 둔다.
+
+6-2. 1차/2차 기능 경계
+
+- 1차에서 반드시 실제 동작시킬 기능:
+  - 장비 전원 on/off와 link up/down 반영
+  - Hub flood와 단순 collision 표시
+  - Switch MAC learning과 unknown unicast/broadcast flood
+  - VLAN access 포트와 trunk 포트의 기본 전달/차단
+  - IPv4 address/subnet/default gateway 설정
+  - ARP request/reply와 ARP table 표시
+  - ICMP ping 성공/실패
+  - Static route 기반 라우터 forwarding
+  - DHCP discover/offer/request/ack와 lease table
+  - DNS A record 조회
+  - HTTP service reachability 확인
+  - PC command prompt의 `ipconfig`, `arp`, `ping`, `nslookup`, `tracert` 일부
+- 1차에서 UI/설정만 만들고 실제 엔진은 단순화할 기능:
+  - Wireless association: SSID/WEP 일치 여부 중심, 실제 전파 물리 계산 없음
+  - ASA firewall: ACL permit/deny와 기본 NAT 표시 중심
+  - Console cable: PC terminal에서 장비 CLI 접근 흐름 표시
+  - Serial DCE/DTE: clock rate 설정과 link state 표시
+- 2차 이후 기능:
+  - RIP/RIPv2 실제 주기 update와 triggered update
+  - OSPF/EIGRP neighbor/LSA/topology table 수렴
+  - STP/RSTP convergence
+  - NAT inside/outside 실제 translation table
+  - TCP 상태 머신, FTP/Email/TFTP/SNMP/VPN/VoIP
+  - IPv6, ND, DHCPv6, ICMPv6
+  - Physical Workspace의 거리/건물/클로짓 모델
+
+6-3. 내부 데이터 모델 방향
+
+- `Device`
+  - id, type, modelName, label, position, powerOn, ports, modules, config, runtimeTables
+- `Port`
+  - id, name, kind, macAddress, ipAddress, subnetMask, vlan, mode, status, connectedLinkId
+- `Link`
+  - id, type, endpointA, endpointB, status, activity, dceSide
+- `Project`
+  - id, ownerUserId, name, description, devices, links, simulation, updatedAt
+- `SimulationEvent`
+  - id, time, visible, lastDeviceId, atDeviceId, type, summary, osiLayers, status
+- `CliSession`
+  - deviceId, mode, currentInterface, currentRouterProcess, outputHistory
+
+7. 저장/인증 설계
+
+- 요구 로그인 필드:
+  - 이름
+  - 아이디
+  - 이메일
+  - 생년월일
+  - 비밀번호
+  - 비밀번호 확인
+- 비밀번호 규칙:
+  - 8자 이상
+  - 특수문자 1개 이상
+- 최초 구현:
+  - 로컬 브라우저 저장소 기반 사용자/프로젝트 저장으로 빠르게 완성한다.
+  - 프로젝트는 사용자별로 분리해 저장한다.
+  - 이후 백엔드가 필요하면 같은 데이터 모델을 API/DB로 옮긴다.
+- 권장 최종 백엔드:
+  - Go + PostgreSQL
+  - 비밀번호는 서버에서 Argon2id 또는 bcrypt로 해시
+  - 프로젝트 JSON은 별도 테이블 또는 JSONB로 저장
+
+8. `.pkt` 호환 조사와 결론
+
+- 샘플 `.pkt` 경로:
+  - `C:\Program Files (x86)\Cisco Packet Tracer 6.1sv\saves\TCP_IP\TCP_IP.pkt`
+- 조사 결과:
+  - `file` 명령은 단순 `data`로 식별했다.
+  - `xxd` 첫 바이트에 JSON/XML/ZIP 매직이 없다.
+  - `strings`에서 의미 있는 평문 구조가 거의 나오지 않았다.
+  - 설치본의 `unzip.exe`로 열었을 때 ZIP 중앙 디렉터리 시그니처가 없다는 오류가 나왔다.
+- 결론:
+  - `.pkt`는 공개 표준 파일이 아니며, 완전 호환 exporter를 바로 구현하는 것은 현실적으로 매우 위험하다.
+  - 웹앱 내부 저장 포맷은 JSON 기반으로 안정적으로 설계한다.
+  - `.pkt`처럼 보이게 저장하면 Packet Tracer 6.1에서 "not compatible" 오류를 만들 수 있으므로, 1차 구현에서는 자체 메타데이터/토폴로지 데이터를 `.ptweb` 확장자로 저장한다.
+  - 완전 호환이 필요하면 Cisco가 공개한 포맷 문서나 공식 SDK가 필요하다. 현재 조사 범위에서는 그런 문서를 확인하지 못했다.
+  - 따라서 `.pkt` 관련 코드는 `exporters/packetTracer` 같은 독립 모듈로 격리하고, 추후 포맷 정보가 생기면 교체한다.
+
+8-1. IPC/Script Module 조사
+
+- 설치 폴더의 `extensions`에는 IPC/Script 관련 파일이 있다.
+  - `extensions/IpcTest/IpcTest.xml`
+  - `extensions/IpcTest/IpcTest.pta`
+  - `extensions/IpcLog/IpcLog.pta`
+  - `extensions/scriptTemplates/*.ptst`
+- `IpcTest.xml`은 External Application 메타데이터이며, GET_NETWORK_INFO, CHANGE_NETWORK_INFO, SIMULATION_MODE, FILE, IPC 같은 privilege를 선언한다.
+- 로컬 help의 `scriptModules_scriptEngine.htm`은 Packet Tracer 엔진/GUI가 IPC API로 접근 가능하고, API 선언이 `.pki` 파일에 있다고 설명한다.
+- 하지만 설치 폴더 전체에서 `.pki` 파일은 발견되지 않았다.
+- `.pta`, `.ptst` 파일은 사람이 읽을 수 있는 XML/JSON이 아니라 `data`로 식별되고 문자열도 의미 있게 나오지 않았다.
+- 따라서 현 단계에서 Packet Tracer IPC를 이용해 웹 토폴로지를 자동으로 `.pkt`로 생성하는 방법은 확인되지 않았다.
+
+9. 개발 스택 결정
+
+- `alternative/개발언어추천.md`의 이상적 권장:
+  - Frontend: TypeScript + React
+  - Simulation Engine: Rust + WebAssembly
+  - Backend: Go
+  - DB: PostgreSQL
+- 현재 로컬 환경:
+  - Node.js 24.15.0
+  - npm 11.12.1
+  - Rust, Go, wasm-pack은 현재 확인되지 않음
+- npm registry 확인 버전:
+  - React 19.2.7
+  - Vite 8.0.16
+  - @vitejs/plugin-react 6.0.2
+  - lucide-react 1.20.0
+- 1차 완성 스택:
+  - TypeScript + React + Vite
+  - 시뮬레이션 엔진도 TypeScript로 작성하되, `engine` 디렉터리 경계를 분리해 나중에 Rust/WASM으로 교체 가능하게 한다.
+  - 사용자/프로젝트 저장은 localStorage 기반으로 먼저 완성한다.
+  - UI와 엔진 데이터 모델은 순수 JSON으로 연결한다.
+- 이유:
+  - 현재 빈 프로젝트에서 가장 빨리 실제로 작동하는 웹앱을 만들 수 있다.
+  - 설치 가능한 도구가 Node/npm뿐이라 빌드/검증 실패 위험이 낮다.
+  - 요구사항 대부분은 웹 UI와 상태 관리, 이벤트 시뮬레이션으로 먼저 구현 가능하다.
+
+10. 만들 앱의 화면 구조
+
+- 인증 화면:
+  - 로그인
+  - 회원가입
+  - 필드 검증
+- 프로젝트 홈:
+  - 사용자별 프로젝트 목록
+  - 새 네트워크 만들기
+  - 최근 수정일, 장비 수, 링크 수 표시
+  - 프로젝트 열기/복제/삭제
+- 네트워크 에디터:
+  - 상단: 파일/저장/내보내기/되돌리기/확대축소/모드 전환
+  - 좌측: 장비/케이블 팔레트
+  - 중앙: Logical Workspace
+  - 하단 또는 우측: 장비별 세부 선택/케이블 선택/시뮬레이션 이벤트
+  - 우측: 선택 장비 Inspector
+- 장비 상세:
+  - Physical 탭: 전원, 모듈 슬롯, 포트 상태
+  - Config 탭: 장비별 폼 설정
+  - CLI 탭: IOS/ASA 유사 명령 입력
+  - Desktop/Services 탭: PC/Server용 IP 설정, ping, DNS/HTTP/DHCP 서비스
+- Simulation 패널:
+  - Realtime / Simulation 모드 전환
+  - Add Simple PDU
+  - Capture/Forward
+  - Auto Capture/Play
+  - Reset Simulation
+  - Event List
+  - User Created PDU Window
+  - Scenario selector
+  - PDU detail drawer
+
+10-1. Simulation UX 세부
+
+- Packet Tracer는 User Created Packet Window(UCPW)와 Event List를 구분한다.
+- UCPW:
+  - 사용자가 만든 PDU를 저장한다.
+  - scenario별로 source, destination, type, color, time, periodic, last status를 가진다.
+  - reset simulation을 눌러도 사용자 PDU 목록은 지워지지 않는다.
+- Event List:
+  - 네트워크에서 실제로 발생한 모든 PDU 이벤트를 기록한다.
+  - 사용자가 만든 PDU뿐 아니라 ARP, DHCP, RIP, OSPF 같은 프로토콜 자동 이벤트도 표시한다.
+- PDU detail:
+  - OSI Model
+  - Inbound PDU Details
+  - Outbound PDU Details
+  - 각 layer의 처리 결과: encapsulate, de-encapsulate, transfer, accept, queue, drop, transmit
+- 구현 방향:
+  - `simulation.scenarios`에는 사용자 PDU와 예약 시간을 저장한다.
+  - `simulation.events`에는 실행 결과 이벤트를 저장한다.
+  - Event 클릭 시 OSI layer 처리 로그와 header-like details를 보여 준다.
+
+11. 구현 우선순위
+
+1단계: 앱 뼈대
+- Vite React TypeScript 프로젝트 생성
+- 인증/프로젝트/에디터 라우팅
+- localStorage 저장소
+
+2단계: 토폴로지 에디터
+- 장비 팔레트
+- 캔버스 드래그 배치
+- 장비 선택/이동/삭제
+- 케이블 연결
+- 링크 상태 표시
+
+3단계: 장비 모델
+- Router, Switch, ASA, PC, Server, Wireless AP, Hub 기본 타입
+- 포트/모듈/전원 상태
+- Physical/Config/CLI 탭
+
+4단계: CLI/Config 동기화
+- CLI 명령 파서
+- running-config/startup-config
+- Config 탭 변경 시 equivalent CLI 기록
+- 전원 재시작 시 startup-config 재로드
+
+5단계: 시뮬레이션
+- ARP + ICMP ping
+- 스위치 MAC 학습
+- 허브 flood
+- 라우터 static route/default gateway
+- DHCP 할당
+- DNS resolve
+- HTTP reachability
+- Simulation Event List
+
+6단계: 저장/내보내기
+- 사용자별 자동 저장
+- 프로젝트 JSON export/import
+- `.ptweb` 자체 프로젝트 export 모듈 제공
+- `.pkt` 완전 호환 한계는 UI/문서에서 명확히 표시
+
+12. 중요한 설계 원칙
+
+- Packet Tracer의 모든 실제 기능을 한 번에 완벽 복제하려고 하면 파일 포맷, IOS 명령 전체, 동적 라우팅 전체, 물리 엔진 때문에 실패 위험이 높다.
+- 대신 Packet Tracer가 공식 help에서 스스로 말하는 simplified model 방식으로 만든다.
+- 첫 완성본은 CCNA 수준 실습에 필요한 기능을 실제로 동작하게 만드는 데 집중한다.
+- 코드는 장비 정의, CLI 파서, 시뮬레이션 엔진, UI를 분리해 점진적으로 기능을 확장한다.
+
+13. 00:40 이후 개발 착수 계획
+
+- 프로젝트 위치:
+  - `alternative/` 안에 Vite React TypeScript 앱을 만든다.
+- 예상 주요 파일:
+  - `package.json`
+  - `index.html`
+  - `src/main.tsx`
+  - `src/App.tsx`
+  - `src/styles.css`
+  - `src/types/network.ts`
+  - `src/data/deviceCatalog.ts`
+  - `src/storage/localStore.ts`
+  - `src/auth/authStore.ts`
+  - `src/engine/ip.ts`
+  - `src/engine/topology.ts`
+  - `src/engine/simulation.ts`
+  - `src/engine/cli.ts`
+  - `src/exporters/projectExport.ts`
+  - `src/exporters/packetTracerExport.ts`
+  - `src/components/AuthScreen.tsx`
+  - `src/components/ProjectHome.tsx`
+  - `src/components/Editor.tsx`
+  - `src/components/Workspace.tsx`
+  - `src/components/Palette.tsx`
+  - `src/components/Inspector.tsx`
+  - `src/components/CliTerminal.tsx`
+  - `src/components/SimulationPanel.tsx`
+- 구현 검증:
+  - `npm install`
+  - `npm run build`
+  - 가능하면 개발 서버를 띄워 브라우저에서 동작 확인
+- 완성 기준:
+  - 회원가입/로그인 가능
+  - 사용자별 프로젝트 생성/저장/열기 가능
+  - 장비 배치/이동/삭제 가능
+  - 케이블 연결 가능
+  - 장비별 Physical/Config/CLI/Desktop/Services 패널 작동
+  - CLI 명령으로 config가 바뀜
+  - PC/Server/Router/Switch 간 ping 시뮬레이션 결과와 이벤트 목록 표시
+  - DHCP/DNS/HTTP 기본 서비스 확인 가능
+  - JSON export/import 및 `.ptweb` 자체 포맷 export 가능
+
+14. UI 설계 기준
+
+- 첫 화면은 실제 사용 흐름이어야 한다.
+  - 비로그인: 로그인/회원가입
+  - 로그인: 프로젝트 홈
+  - 프로젝트 열림: 네트워크 에디터
+- 에디터는 운영 도구처럼 밀도 있게 구성한다.
+  - 좌측 장비 팔레트
+  - 중앙 대형 작업 캔버스
+  - 우측 장비 Inspector
+  - 하단 Simulation/Event 패널
+- 불필요한 설명성 문구를 화면에 많이 넣지 않는다.
+- 장비/케이블/툴 버튼에는 lucide-react 아이콘을 우선 사용한다.
+- 장비 노드는 텍스트만 있는 박스가 아니라 색상, 포트 점, 상태 LED, 타입 아이콘을 가진다.
+- 링크는 cable type별 선 스타일로 구분한다.
+  - copper: 실선
+  - fiber: 밝은 선
+  - serial: 점선
+  - console: 어두운 선
+  - wireless: 곡선/파형 느낌의 선
+- 모바일에서도 텍스트가 버튼/패널을 넘치지 않게 한다.
+- 다크 블루/퍼플 단색 팔레트에 치우치지 않고, 작업 도구 UI에 맞는 중립 배경 + 상태색을 쓴다.
+
+15. 자산/저작권 기준
+
+- 설치 폴더의 `art`에는 Packet Tracer 장비 아이콘, 배경, 물리 장비 이미지가 많이 있다.
+- 하지만 로컬 `copyrights.htm`의 EULA는 Packet Tracer 소프트웨어와 관련 문서를 Cisco Networking Academy 관련 시뮬레이션 용도로 사용하는 라이선스 구조로 설명한다.
+- 따라서 이 웹앱에는 Cisco 설치본의 이미지/아이콘 파일을 그대로 복사하지 않는다.
+- 장비 표현은 자체 CSS/SVG-like 컴포넌트, lucide-react 아이콘, 상태 LED, 포트 점 등으로 새로 만든다.
+- Cisco 상표처럼 보이는 로고/브랜드 이미지는 사용하지 않는다.
+
+16. 요구사항2 기능 조사 및 02:20 이후 개발 계획
+
+작성 시각: 2026-06-17 02:10 KST
+
+- 위치 정정:
+  - 초기 조사 계획에는 앱을 `alternative/` 안에 만든다고 적었지만, 이후 사용자 지시에 따라 실제 앱은 프로젝트 루트 `Network-Editor-Web/` 바로 아래에 둔다.
+  - `alternative/`는 `read.md`, `개발언어추천.md`, `요구사항2`, `조사.txt`, `개발 과정.md` 같은 문서/기록만 둔다.
+
+- Packet Tracer help에서 확인한 요구사항2 관련 동작:
+  - Logical Workspace에는 Zoom In, Zoom Reset, Zoom Out 도구가 있다.
+  - Device-Specific Selection Box는 장비 타입 선택 후 구체 모델을 고르는 구조다.
+  - 연결은 Connections에서 케이블을 선택하고 첫 장비/인터페이스, 두 번째 장비/인터페이스를 고르는 방식이다.
+  - Enable Auto Cable 옵션이 있어 자동 연결 기능을 토글할 수 있다.
+  - 연결 실패/성공은 포트 타입과 케이블 타입에 의존한다.
+  - 링크가 만들어지면 각 끝단에 link light가 보이고, 잘못 연결했으면 link light 쪽에서 뽑고 다시 연결할 수 있다.
+  - Simple PDU는 사실상 one-shot ping이고 source 장비, destination 장비를 찍으면 ARP/ICMP 패킷이 큐에 들어가며 Event List에서 이동을 관찰한다.
+  - 라우터 모델은 1841, 1941, 2620XM, 2621XM, 2811, 2901, 2911 등 여러 종류가 있다.
+  - 장비 모듈은 전원을 꺼야 추가/제거할 수 있다.
+
+- 현재 구현과 차이:
+  - 현재는 포트 점을 직접 눌러야 연결된다. Packet Tracer처럼 장비를 누르면 가능한 포트를 고르거나 자동 선택하는 흐름이 약하다.
+  - 연결 실패 이유가 사용자에게 즉시 보이지 않는다.
+  - 링크 목록은 있지만, 캔버스 선 자체에 어떤 포트끼리 연결됐는지 충분히 보이지 않는다.
+  - 장비 노드는 타입별 색/아이콘이 있지만, 형태가 대부분 같은 카드라 빠르게 구분하기 어렵다.
+  - Router 모델이 사실상 하나다.
+  - Router/Firewall/Switch 같은 네트워크 장비에도 Desktop 탭이 그대로 있어 Packet Tracer와 맞지 않는다.
+  - Simulation Event List는 있으나 작업 공간 위에 편지/봉투처럼 패킷이 이동하는 애니메이션이 없다.
+  - CLI 도움말은 명령 실패 문구만 있고, 사용자가 지원 명령을 찾는 버튼/패널이 없다.
+
+- 02:20 이후 1차 개발 우선순위:
+  1. Workspace 줌: 마우스 휠 확대/축소, 줌 버튼, reset, 드래그 좌표 보정.
+  2. 자동 케이블 연결: active cable 상태에서 장비 본체를 클릭하면 사용 가능한 호환 포트를 자동 선택한다.
+  3. 연결 실패 안내: 포트 없음, 이미 사용 중, 케이블-포트 타입 불일치, 같은 포트 중복 연결을 작은 창으로 설명한다.
+  4. 연결 정보 가시화: 선 위/링크 목록에 `Device port -> Device port`, cable type, status를 표시한다.
+  5. 장비 시각 구분: 라우터/스위치/방화벽/PC/서버/AP/허브별 CSS shape와 포트 배치를 다르게 만든다.
+  6. Router 모델 확장: 1841, 1941, 2811, 2901, 2911을 팔레트에 별도 모델로 표시하되 엔진 타입은 `router`로 유지한다.
+  7. 장비별 탭 정리: Router/Switch/Firewall은 Physical/Config/CLI 중심, PC는 Physical/Config/Desktop, Server는 Physical/Config/Desktop/Services 중심으로 제한한다.
+  8. CLI 도움말 버튼: CLI 탭에 지원 명령 목록/검색 패널을 붙인다.
+  9. PDU 봉투 애니메이션: Simulation selected event 또는 최신 이벤트 기준으로 lastDevice -> atDevice 사이에 작은 packet marker가 이동하도록 표시한다.
+
+- 구현 방식:
+  - 기존 데이터 모델을 크게 깨지 않도록 `DeviceSpec`에 catalog id/shape/role metadata를 추가한다.
+  - `NetworkDevice`에는 필요하면 `catalogId`만 추가하고 기존 저장 프로젝트가 깨지지 않게 fallback한다.
+  - 자동 연결은 `topology.ts`에 `findAutoEndpoint`, `explainConnectionFailure` 성격의 순수 함수를 둔다.
+  - PDU 애니메이션은 엔진 이벤트 데이터를 재사용하고, 실제 프로토콜 엔진과 분리해 Workspace 렌더링 계층에서 처리한다.
+
+17. 2026-06-18 요구사항3 재조사 보강
+
+확인 시각: 2026-06-18 11:30 KST 전후
+
+- Cisco/NetAcad Packet Tracer 공식/도움말 계열 페이지 재확인:
+  - `https://tutorials.ptnetacad.net/help/default/interfaceOverview.htm`
+  - `https://tutorials.ptnetacad.net/help/default/mode_simulation.htm`
+  - `https://www.netacad.com/cisco-packet-tracer`
+- 반영 기준:
+  - 작업 화면은 상단 메뉴/툴바, Logical/Physical workspace, Realtime/Simulation 전환, 하단 장비/연결 선택 영역으로 구성한다.
+  - Simulation Mode는 Event List와 패킷 경로 관찰이 중심이므로, 하단 dock에 `Simulation Events`, `PDU Information`, `User Created Packets` 성격의 구역을 둔다.
+  - Simple PDU는 source/destination 선택 후 패킷 이동을 볼 수 있어야 하므로, 최신 이벤트 기준 봉투 marker와 active-flow link 강조를 유지한다.
+  - 장비 설정은 우측 고정 패널보다 Packet Tracer처럼 별도 Device Window에서 Physical/Config/CLI/Desktop/Services 탭으로 처리한다.
+  - 빈 workspace, device, link 모두 브라우저 기본 context menu가 아니라 앱 내부 메뉴가 떠야 한다.
