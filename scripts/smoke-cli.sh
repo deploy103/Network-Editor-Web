@@ -42,6 +42,8 @@ assert(cliPrompt(device, session).endsWith(">"), "initial prompt must be user EX
 assert(run("conf t").includes("enable"), "configure terminal must require enable");
 run("en");
 assert(cliPrompt(device, session).endsWith("#"), "enable must enter privileged EXEC");
+assert(run("sh priv").includes("15"), "show privilege must report privileged level after enable");
+assert(run("sh hist").includes("history"), "show history must be supported");
 run("conf t");
 run("int vlan 1");
 run("ip add 192.168.10.2 255.255.255.0");
@@ -106,6 +108,7 @@ run("");
 run("en");
 const config = run("sh run");
 assert(config.includes("hostname Switch0"), "reload must restore saved startup-config");
+assert(run("sh run all").includes("hostname Switch0"), "show running-config all must be supported");
 assert(config.includes("access-list 101 permit ip any any"), "ACL must survive reload");
 assert(config.includes("ip access-group 101 in"), "interface ACL binding must survive reload");
 assert(config.includes("ip nat inside"), "inside NAT interface role must survive reload");
