@@ -57,6 +57,8 @@ export interface NetworkPort {
   dnsServer: string;
   adminUp: boolean;
   ipCapable?: boolean;
+  stpPortfast?: boolean;
+  bpduGuard?: boolean;
   linkId?: string;
   moduleSlotId?: string;
   moduleId?: string;

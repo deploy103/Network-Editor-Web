@@ -173,7 +173,9 @@ function normalizePort(port: NetworkPort): NetworkPort {
     gateway: port.gateway || legacy.interfaceConfig?.gateway || "",
     dnsServer: port.dnsServer || legacy.interfaceConfig?.dns || "",
     adminUp: port.adminUp !== false && legacy.status !== "administratively-down",
-    ipCapable: Boolean(port.ipCapable || mode === "routed" || port.ipAddress || legacy.interfaceConfig?.ipAddress)
+    ipCapable: Boolean(port.ipCapable || mode === "routed" || port.ipAddress || legacy.interfaceConfig?.ipAddress),
+    stpPortfast: port.stpPortfast === true,
+    bpduGuard: port.bpduGuard === true
   };
 }
 
