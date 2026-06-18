@@ -59,7 +59,7 @@ export function normalizeProject(project: NetworkProject): NetworkProject {
       targetDeviceId: pdu.destinationDeviceId || "",
       packetId: pdu.id || createId("packet"),
       type: pdu.protocol || "ICMP",
-      info: `User-created ${pdu.protocol || "ICMP"} PDU.`,
+      info: `사용자가 만든 ${pdu.protocol || "ICMP"} PDU입니다.`,
       status: pdu.lastStatus === "success" ? "delivered" : pdu.lastStatus === "failed" ? "dropped" : "forwarded",
       osiLayers: ["Layer 7", "Layer 3", "Layer 2"]
     })))
@@ -92,7 +92,7 @@ export function normalizeProject(project: NetworkProject): NetworkProject {
     ...projectFields,
     id: project.id || createId("project"),
     ownerId: project.ownerId || legacyProject.ownerUserId || "",
-    name: project.name || "Untitled Network",
+    name: project.name || "제목 없는 네트워크",
     devices: devices.map((device) => ({
       ...device,
       ports: device.ports.map((port) => ({ ...port, linkId: linkByPort.get(`${device.id}:${port.id}`)?.id }))
@@ -122,7 +122,7 @@ function normalizeDevice(device: NetworkDevice): NetworkDevice {
     moduleSlots?: Array<{ id: string; installedModule?: string }>;
   };
   const kind: DeviceKind = isDeviceKind(device.kind) ? device.kind : isDeviceKind(legacy.type) ? legacy.type : "pc";
-  const hostname = device.config?.hostname || device.label || "Device";
+  const hostname = device.config?.hostname || device.label || "장비";
   const modules = Array.isArray(device.modules)
     ? device.modules
     : Array.isArray(legacy.moduleSlots)
@@ -135,7 +135,7 @@ function normalizeDevice(device: NetworkDevice): NetworkDevice {
     id: device.id || createId("dev"),
     kind,
     modelId: device.modelId || legacy.catalogId || "pc-pt",
-    model: device.model || legacy.modelName || "Device",
+    model: device.model || legacy.modelName || "장비",
     label: device.label || hostname,
     position: {
       x: Number.isFinite(device.position?.x) ? device.position.x : Number.isFinite(legacy.x) ? legacy.x! : 120,
@@ -161,7 +161,7 @@ function normalizePort(port: NetworkPort): NetworkPort {
   return {
     ...port,
     id: port.id || createId("port"),
-    name: port.name || "Port",
+    name: port.name || "포트",
     kind: normalizePortKind(port.kind),
     description: port.description ?? (legacy.requiredModule ? `Requires ${legacy.requiredModule}` : ""),
     macAddress: port.macAddress || "02:00:00:00:00:00",

@@ -51,7 +51,7 @@ export async function apiProjects(): Promise<NetworkProject[]> {
 }
 
 export async function apiSaveProject(project: NetworkProject): Promise<NetworkProject> {
-  const next = normalizeProject({ ...project, name: project.name.trim() || "Untitled Network", updatedAt: new Date().toISOString() });
+  const next = normalizeProject({ ...project, name: project.name.trim() || "제목 없는 네트워크", updatedAt: new Date().toISOString() });
   await authorizedRequest<{ id: string }>("/api/projects", { method: "PUT", body: JSON.stringify(next) });
   return next;
 }

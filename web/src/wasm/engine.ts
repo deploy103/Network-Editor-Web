@@ -36,7 +36,8 @@ export async function simulatePing(project: NetworkProject, sourceId: string, ta
 
 export async function engineLabel(): Promise<string> {
   const wasm = await loadWasm();
-  return wasm?.engine_version() ?? "typescript-fallback-engine";
+  const version = wasm?.engine_version();
+  return version ? `WASM 엔진: ${version}` : "TypeScript 대체 엔진";
 }
 
 async function loadWasm(): Promise<WasmModule | null> {
