@@ -49,7 +49,7 @@ export function requestDhcp(project: NetworkProject, clientId: string): { projec
   for (let index = 0; index < pool.maxLeases; index += 1) {
     if (leasedIp) break;
     const candidate = increment(pool.startIp, index);
-    if (!active.has(candidate)) {
+    if (!active.has(candidate) && !isDhcpExcluded(server, candidate)) {
       leasedIp = candidate;
       break;
     }
@@ -375,6 +375,15 @@ function increment(ip: string, offset: number): string {
   let value = ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) + offset;
   value >>>= 0;
   return [(value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255].join(".");
+}
+
+function isDhcpExcluded(server: NetworkDevice, ipAddress: string): boolean {
+  return (server.config.dhcpExcludedRanges ?? []).some((range) => {
+    if (!range.endIp) return range.startIp === ipAddress;
+    if (!isIpv4(range.startIp) || !isIpv4(range.endIp) || !isIpv4(ipAddress)) return false;
+    const value = ipToNumber(ipAddress);
+    return value >= ipToNumber(range.startIp) && value <= ipToNumber(range.endIp);
+  });
 }
 
 function findInterfaceByIp(project: NetworkProject, ipAddress: string): { device: NetworkDevice; port: NetworkPort } | null {

@@ -98,6 +98,12 @@ export interface DnsRecord {
   value: string;
 }
 
+export interface DhcpExcludedRange {
+  id: string;
+  startIp: string;
+  endIp?: string;
+}
+
 export interface AccessRule {
   id: string;
   action: "permit" | "deny";
@@ -133,6 +139,7 @@ export interface DeviceConfig {
   staticRoutes: StaticRoute[];
   vlans: Array<{ id: number; name: string }>;
   dhcpPools: DhcpPool[];
+  dhcpExcludedRanges?: DhcpExcludedRange[];
   dnsRecords: DnsRecord[];
   accessRules: AccessRule[];
   natRules: NatRule[];
