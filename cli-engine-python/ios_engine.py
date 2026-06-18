@@ -84,7 +84,7 @@ def command_candidates(device: NetworkDevice, session: IOSSession) -> list[str]:
     if mode == "exec":
         base = ["enable", "show version", "show clock", "show ip interface brief", "show ip route", "show protocols", "show cdp neighbors", "show arp", "ping ", "traceroute ", "power on", "help"]
     elif mode == "privileged":
-        base = ["disable", "configure terminal", "conf t", "show running-config", "show running-config | include ", "show running-config | section ", "show startup-config", "show version", "show inventory", "show flash", "show file systems", "show users", "show line", "show protocols", "show controllers", "show processes cpu", "show memory", "show spanning-tree", "show spanning-tree vlan ", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route summary", "show ip protocols", "show ip ospf", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show ip dhcp binding", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp server statistics", "show access-lists", "clear arp", "clear mac address-table", "clear ip dhcp binding", "clear ip dhcp conflict *", "clear ip nat translation *", "ping ", "traceroute ", "write memory", "copy running-config startup-config", "reload", "write erase", "power off", "power cycle", "help"]
+        base = ["disable", "configure terminal", "conf t", "show running-config", "show running-config | include ", "show running-config | section ", "show startup-config", "show version", "show inventory", "show flash", "show file systems", "show users", "show line", "show protocols", "show controllers", "show processes cpu", "show memory", "show spanning-tree", "show spanning-tree vlan ", "show interfaces", "show interfaces counters", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route summary", "show ip protocols", "show ip ospf", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show ip dhcp binding", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp server statistics", "show access-lists", "clear arp", "clear mac address-table", "clear ip dhcp binding", "clear ip dhcp conflict *", "clear ip nat translation *", "ping ", "traceroute ", "write memory", "copy running-config startup-config", "reload", "write erase", "power off", "power cycle", "help"]
     elif mode == "global":
         base = ["hostname ", "enable secret ", "enable password ", "banner motd #", "no banner motd", "username admin privilege 15 secret cisco", "interface ", "interface range fa0/1 - 2", "default interface ", "vlan ", "spanning-tree vlan 1 root primary", "no spanning-tree vlan 1 root primary", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "ip domain-name lab.local", "ip name-server 8.8.8.8", "no ip name-server ", "ip host www.lab.local 192.168.10.10", "no ip host ", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "ip dhcp excluded-address ", "ip dhcp pool ", "ip access-list standard ", "ip access-list extended ", "access-list 101 permit ip any any", "ip nat inside source static ", "service password-encryption", "no service password-encryption", "service dns", "no service dns", "do show running-config", "end", "exit", "help"]
     elif mode == "interface":
@@ -291,6 +291,8 @@ def expand_show(rest: list[str]) -> str:
             return "show interfaces status"
         if second == "switchport" or abbr(second, "switchport", 2):
             return "show interfaces switchport"
+        if second == "counters" or abbr(second, "counters", 4):
+            return "show interfaces counters"
         if second == "description" or abbr(second, "description", 4):
             return "show interfaces description"
         if len(rest) > 1:
@@ -1224,6 +1226,8 @@ def show_command(device: NetworkDevice, lower: str) -> str:
         return interface_status(device, port) if port else "% Interface not found."
     if lower == "show interfaces description":
         return interfaces_description(device)
+    if lower == "show interfaces counters":
+        return interfaces_counters(device)
     if lower == "show interfaces status":
         return interfaces_status(device)
     if lower == "show interfaces trunk":
@@ -2007,6 +2011,16 @@ def interfaces_description(device: NetworkDevice) -> str:
 
 def interfaces_status(device: NetworkDevice) -> str:
     return "\n".join(["Port                  Status      Mode    VLAN  Type", *[f"{p.get('name','').ljust(22)}{('connected' if p.get('linkId') else 'notconnect').ljust(12)}{p.get('mode','').ljust(8)}{str(p.get('vlan',1)).ljust(6)}{p.get('kind','')}" for p in device.get("ports", [])]])
+
+
+def interfaces_counters(device: NetworkDevice) -> str:
+    rows = ["Port                  InOctets     InUcastPkts  OutOctets    OutUcastPkts"]
+    for port in device.get("ports", []):
+        if port.get("kind") == "console":
+            continue
+        counters = port.get("counters") or {}
+        rows.append(f"{port.get('name','').ljust(22)}{str(counters.get('inOctets', 0)).ljust(13)}{str(counters.get('inUcastPkts', 0)).ljust(13)}{str(counters.get('outOctets', 0)).ljust(13)}{counters.get('outUcastPkts', 0)}")
+    return "\n".join(rows)
 
 
 def protocols_status(device: NetworkDevice) -> str:
