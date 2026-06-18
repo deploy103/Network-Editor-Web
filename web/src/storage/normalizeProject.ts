@@ -198,6 +198,8 @@ function normalizeConfig(config: DeviceConfig | undefined, hostname: string, kin
     dnsRecords: normalizeDnsRecords(config?.dnsRecords, base.dnsRecords),
     accessRules: normalizeAccessRules(config?.accessRules ?? legacy?.firewallRules),
     natRules: Array.isArray(config?.natRules) ? config.natRules : [],
+    lineConfigs: normalizeLineConfigs(config?.lineConfigs),
+    routingProtocols: normalizeRoutingProtocols(config?.routingProtocols),
     services,
     wireless: normalizeWireless(base.wireless, legacy?.wireless)
   };
@@ -264,6 +266,38 @@ function normalizeAccessRules(rules: DeviceConfig["accessRules"] | Array<{ id?: 
 
 function normalizeAccessProtocol(value: unknown): DeviceConfig["accessRules"][number]["protocol"] {
   return value === "icmp" || value === "tcp" || value === "udp" || value === "http" || value === "dns" || value === "dhcp" ? value : "ip";
+}
+
+function normalizeLineConfigs(lines: DeviceConfig["lineConfigs"] | undefined): DeviceConfig["lineConfigs"] {
+  if (!Array.isArray(lines)) return [];
+  return lines
+    .filter((line) => line.kind === "console" || line.kind === "vty")
+    .map((line) => ({
+      id: line.id || createId("line"),
+      kind: line.kind,
+      range: line.range || (line.kind === "console" ? "0" : "0 4"),
+      password: line.password || "",
+      login: line.login === true,
+      transportInput: line.transportInput || (line.kind === "vty" ? "all" : ""),
+      execTimeout: line.execTimeout || "10 0",
+      loggingSynchronous: line.loggingSynchronous === true
+    }));
+}
+
+function normalizeRoutingProtocols(protocols: DeviceConfig["routingProtocols"] | undefined): DeviceConfig["routingProtocols"] {
+  if (!Array.isArray(protocols)) return [];
+  return protocols
+    .filter((protocol) => protocol.protocol === "rip" || protocol.protocol === "ospf" || protocol.protocol === "eigrp")
+    .map((protocol) => ({
+      id: protocol.id || createId("routing"),
+      protocol: protocol.protocol,
+      processId: protocol.protocol === "rip" ? undefined : protocol.processId || "1",
+      networks: Array.isArray(protocol.networks) ? protocol.networks.filter(Boolean) : [],
+      version: protocol.version || (protocol.protocol === "rip" ? "2" : undefined),
+      autoSummary: protocol.autoSummary === true,
+      passiveInterfaces: Array.isArray(protocol.passiveInterfaces) ? protocol.passiveInterfaces.filter(Boolean) : [],
+      redistributeStatic: protocol.redistributeStatic === true
+    }));
 }
 
 function normalizeWireless(base: DeviceConfig["wireless"], wireless: (DeviceConfig["wireless"] & { security?: string; wepKey?: string }) | undefined): DeviceConfig["wireless"] {

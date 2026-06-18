@@ -1,7 +1,7 @@
 import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Cable, CircleDot, CircleHelp, Copy, Cpu, Download, Edit3, FileJson, Info, Mail, Maximize2, Minimize2, Monitor, MousePointer2, Network, Plus, Power, Router, RotateCcw, Save, Server, Settings, Shield, Terminal, Trash2, Wifi, Wrench, X, ZoomIn, ZoomOut } from "lucide-react";
 import { cableCatalog, canPortUseCable, createDevice, deviceCatalog, displayKind, getDeviceModel, getModuleSpec, installModule, removeModule } from "../data/deviceCatalog";
-import { cliCompletions, cliPrompt, initialCliSession, runCliCommand } from "../engine/cli";
+import { cliEngine } from "../engine/cliEngine";
 import { diagnoseProject } from "../engine/diagnostics";
 import { isIpv4, maskToPrefix, networkAddress } from "../engine/ip";
 import { downloadProject } from "../exporters/packetTracerExport";
@@ -2504,7 +2504,7 @@ const cliCommandHints = [
 function CliTab({ device, project, onUpdate, onProjectChange }: { device: NetworkDevice; project: NetworkProject; onUpdate: (device: NetworkDevice) => void; onProjectChange: (project: NetworkProject, message: string) => void }) {
   const [lines, setLines] = useState<string[]>([]);
   const [input, setInput] = useState("");
-  const [session, setSession] = useState(initialCliSession);
+  const [session, setSession] = useState(cliEngine.initialSession);
   const [helpOpen, setHelpOpen] = useState(false);
   const [helpQuery, setHelpQuery] = useState("");
   const [completionItems, setCompletionItems] = useState<string[]>([]);
@@ -2516,7 +2516,7 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
   useEffect(() => {
     setLines([]);
     setInput("");
-    setSession(initialCliSession());
+    setSession(cliEngine.initialSession());
     setHelpOpen(false);
     setHelpQuery("");
     setCompletionItems([]);
@@ -2529,7 +2529,7 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
   }, [lines]);
 
   async function run() {
-    const prompt = cliPrompt(device, session);
+    const prompt = cliEngine.prompt(device, session);
     const normalizedInput = input.trim().toLowerCase().replace(/\s+/g, " ");
     const submittedInput = input;
     setHistoryIndex(null);
@@ -2548,7 +2548,7 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
       setInput("");
       return;
     }
-    const result = runCliCommand(device, session, input);
+    const result = await cliEngine.run(device, session, input);
     setSession(result.session);
     onUpdate(result.device);
     setLines((items) => [...items, `${prompt} ${submittedInput}`, result.output].filter(Boolean));
@@ -2556,7 +2556,7 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
   }
 
   function completeInput() {
-    const matches = cliCompletions(device, session, input);
+    const matches = cliEngine.completions(device, session, input);
     if (matches.length === 1) {
       const next = matches[0].endsWith(" ") ? matches[0] : `${matches[0]} `;
       setInput(next);
@@ -2633,7 +2633,7 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
       )}
       <div ref={outputRef} className="terminal-output">{lines.map((line, index) => <pre key={index}>{line}</pre>)}</div>
       <form className="cli-input-row" onSubmit={(event) => { event.preventDefault(); void run(); }}>
-        <span>{cliPrompt(device, session)}</span>
+        <span>{cliEngine.prompt(device, session)}</span>
         <input
           aria-label="CLI 명령"
           value={input}
@@ -2642,7 +2642,7 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
           placeholder="show ip interface brief"
         />
       </form>
-      <small>{cliPrompt(device, session)} | Tab 자동완성, ↑/↓ 기록, ?, help, sh route, conf t, interface, vlan, ip route, show run, write memory</small>
+      <small>{cliEngine.prompt(device, session)} | Tab 자동완성, ↑/↓ 기록, ?, help, sh route, conf t, interface, vlan, ip route, show run, write memory</small>
     </section>
   );
 }
