@@ -8,6 +8,7 @@ const portKinds: PortKind[] = ["ethernet", "fast-ethernet", "gigabit-ethernet", 
 const portModes: PortMode[] = ["access", "trunk", "routed"];
 const cableTypes: CableType[] = ["auto", "console", "copper-straight", "copper-cross", "fiber", "serial-dce", "serial-dte", "wireless"];
 const linkStatuses: LinkStatus[] = ["up", "down", "blocked"];
+const defaultLogging: NonNullable<DeviceConfig["logging"]> = { console: true, buffered: true, hosts: [], trap: "informational" };
 
 function isDeviceKind(value: unknown): value is DeviceKind {
   return typeof value === "string" && deviceKinds.includes(value as DeviceKind);
@@ -202,6 +203,7 @@ function normalizeConfig(config: DeviceConfig | undefined, hostname: string, kin
     sshVersion: config?.sshVersion === "1" ? "1" : "2",
     rsaKeyGenerated: config?.rsaKeyGenerated === true,
     passwordEncryption: config?.passwordEncryption === true,
+    logging: normalizeLogging(base.logging ?? defaultLogging, config?.logging),
     staticRoutes: normalizeStaticRoutes(config?.staticRoutes),
     vlans: Array.isArray(config?.vlans) && config.vlans.length ? config.vlans : base.vlans,
     dhcpPools: normalizeDhcpPools(config?.dhcpPools),
@@ -259,6 +261,15 @@ function normalizeDhcpPools(pools: DeviceConfig["dhcpPools"] | undefined): Devic
       enabled: pool.enabled !== false
     };
   });
+}
+
+function normalizeLogging(base: NonNullable<DeviceConfig["logging"]>, logging: DeviceConfig["logging"] | undefined): NonNullable<DeviceConfig["logging"]> {
+  return {
+    console: logging?.console !== false,
+    buffered: logging?.buffered !== false,
+    hosts: Array.isArray(logging?.hosts) ? logging.hosts.filter(Boolean) : base.hosts,
+    trap: logging?.trap || base.trap
+  };
 }
 
 function normalizeDhcpExcludedRanges(ranges: DeviceConfig["dhcpExcludedRanges"] | undefined): NonNullable<DeviceConfig["dhcpExcludedRanges"]> {
