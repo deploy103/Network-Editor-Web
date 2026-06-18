@@ -80,6 +80,11 @@ export function runCliCommand(device: NetworkDevice, session: CliSession, rawCom
     const startupConfig = runningConfig(device).split("\n");
     return result({ ...device, config: { ...device.config, startupConfig } }, session, "Building configuration...\n[OK]");
   }
+  if (lower === "copy startup-config running-config") {
+    if (session.mode !== "privileged") return result(device, session, "% Privileged EXEC 모드에서만 사용할 수 있습니다. enable을 입력하세요.");
+    if (!device.config.startupConfig.length) return result(device, session, "% Startup config is not saved.");
+    return result(applyStartupConfig(device), session, "Destination filename [running-config]?\n[OK]");
+  }
   if (lower === "reload" || lower === "reboot") {
     if (session.mode !== "privileged") return result(device, session, "% Privileged EXEC 모드에서만 사용할 수 있습니다. enable을 입력하세요.");
     return result(device, { ...session, pendingAction: "reload" }, "Proceed with reload? [confirm]");
@@ -108,6 +113,10 @@ export function runCliCommand(device: NetworkDevice, session: CliSession, rawCom
   if (lower.startsWith("clear ")) {
     if (session.mode !== "privileged") return result(device, session, "% Privileged EXEC 모드에서만 사용할 수 있습니다. enable을 입력하세요.");
     return clearCommand(device, session, lower);
+  }
+  if (lower === "dir" || lower === "dir flash:" || lower === "show flash" || lower === "show flash:") {
+    if (session.mode !== "privileged") return result(device, session, "% Privileged EXEC 모드에서만 사용할 수 있습니다. enable을 입력하세요.");
+    return result(device, session, flashDirectory(device));
   }
 
   return result(device, session, "% Unsupported command. Type help or ?.");
@@ -147,7 +156,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
   const base = session.mode === "exec"
     ? ["enable", "show version", "show clock", "show interfaces", "show ip interface brief", "show ip route", "show route", "show cdp neighbors", "show arp", "ping ", "traceroute ", "terminal length 0", "help"]
     : session.mode === "privileged"
-      ? ["disable", "configure terminal", "conf t", "show running-config", "show startup-config", "show version", "show clock", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show interfaces", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface brief", "show ip route", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show vlan brief", "show mac address-table", "show cdp neighbors", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
+      ? ["disable", "configure terminal", "conf t", "show running-config", "show startup-config", "show version", "show clock", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show interfaces", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface brief", "show ip route", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show vlan brief", "show mac address-table", "show cdp neighbors", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
         ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "interface ", "int ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-lookup", "no ip domain-lookup", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "access-list ", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
@@ -198,6 +207,7 @@ function expandCliHead(command: string, session: CliSession): string {
   if (first === "wr" || isAbbrev(first, "write", 2)) return expandWriteCommand(rest);
   if (isAbbrev(first, "erase", 2)) return expandEraseCommand(rest);
   if (isAbbrev(first, "copy", 2) && rest.length) return expandCopyCommand(rest);
+  if (first === "dir") return rest.length ? `dir ${rest.join(" ")}` : "dir";
   if (isAbbrev(first, "show", 2) && rest.length) return expandShowCommand(rest);
   if (isAbbrev(first, "interface", 3) || first === "int") return `interface ${rest.join(" ")}`;
   if (isAbbrev(first, "hostname", 4)) return `hostname ${rest.join(" ")}`;
@@ -280,6 +290,12 @@ function expandCopyCommand(rest: string[]): string {
   if (isAbbrev(lowerRest[0], "run") && isAbbrev(lowerRest[1], "start")) {
     return "copy running-config startup-config";
   }
+  if (isAbbrev(lowerRest[0], "startup-config") && isAbbrev(lowerRest[1], "running-config")) {
+    return "copy startup-config running-config";
+  }
+  if (isAbbrev(lowerRest[0], "start") && isAbbrev(lowerRest[1], "run")) {
+    return "copy startup-config running-config";
+  }
   return `copy ${rest.join(" ")}`;
 }
 
@@ -352,6 +368,10 @@ function expandShowCommand(rest: string[]): string {
   if (isAbbrev(first, "clock", 2)) return "show clock";
   if (isAbbrev(first, "inventory", 3)) return "show inventory";
   if (isAbbrev(first, "logging", 3)) return "show logging";
+  if (isAbbrev(first, "flash", 2)) return "show flash";
+  if (isAbbrev(first, "file") && isAbbrev(second, "systems")) return "show file systems";
+  if (isAbbrev(first, "processes", 3) && isAbbrev(second, "cpu")) return "show processes cpu";
+  if (isAbbrev(first, "memory", 3)) return "show memory";
   if (isAbbrev(first, "users", 2)) return "show users";
   if (isAbbrev(first, "line", 2)) return "show line";
   if (isAbbrev(first, "terminal", 4)) return "show terminal";
@@ -993,6 +1013,10 @@ function showCommand(device: NetworkDevice, lower: string): string {
   if (lower === "show clock") return new Date().toLocaleString("ko-KR", { hour12: false });
   if (lower === "show inventory") return [`NAME: "${device.label}", DESCR: "${device.model}"`, `PID: ${device.modelId}, VID: PTWEB, SN: ${device.id}`, ...device.modules.map((module) => `NAME: "${module.slotId}", PID: ${module.moduleId}`)].join("\n");
   if (lower === "show logging") return device.runtime.logs.length ? device.runtime.logs.map((log) => `${new Date(log.createdAt).toLocaleString("ko-KR", { hour12: false })} ${log.level.toUpperCase()}: ${log.message}`).join("\n") : "No logging messages.";
+  if (lower === "show flash" || lower === "show flash:") return flashDirectory(device);
+  if (lower === "show file systems") return fileSystems(device);
+  if (lower === "show processes cpu") return "CPU utilization for five seconds: 1%/0%; one minute: 1%; five minutes: 1%";
+  if (lower === "show memory") return "Processor Pool Total: 262144 Used: 98304 Free: 163840\nI/O Pool Total: 65536 Used: 8192 Free: 57344";
   if (lower === "show users") return ["Line       User       Host(s)              Idle       Location", "* 0 con 0  console    idle                 00:00:00   local"].join("\n");
   if (lower === "show line") return lineStatus(device);
   if (lower === "show terminal") return ["Line 0, Location: local", "Length: 24 lines, Width: 80 columns", "History is enabled, history size is 80", "Editing is enabled. Completion is enabled."].join("\n");
@@ -1031,6 +1055,30 @@ function clearCommand(device: NetworkDevice, session: CliSession, lower: string)
   if (lower === "clear mac address-table") return result({ ...device, runtime: { ...device.runtime, macTable: [] } }, session, "");
   if (lower === "clear ip dhcp binding") return result({ ...device, runtime: { ...device.runtime, dhcpLeases: [] } }, session, "");
   return result(device, session, "% Unsupported clear command.");
+}
+
+function flashDirectory(device: NetworkDevice): string {
+  const startupBytes = device.config.startupConfig.join("\n").length;
+  const imageBytes = 8192 + device.ports.length * 256;
+  return [
+    "Directory of flash:/",
+    "",
+    `    1  -rw-       ${String(imageBytes).padStart(8)}  ptweb-${device.modelId}.bin`,
+    `    2  -rw-       ${String(startupBytes).padStart(8)}  startup-config`,
+    "64016384 bytes total (63901696 bytes free)"
+  ].join("\n");
+}
+
+function fileSystems(device: NetworkDevice): string {
+  return [
+    "File Systems:",
+    "",
+    "     Size(b)     Free(b)      Type  Flags  Prefixes",
+    `*   64016384    63901696     flash     rw  flash:`,
+    `       ${String(device.config.startupConfig.join("\n").length || 1).padStart(6)}       0     nvram     rw  nvram:`,
+    "           -       -    network     rw  tftp:",
+    "           -       -    opaque      rw  system:"
+  ].join("\n");
 }
 
 function runningConfig(device: NetworkDevice): string {

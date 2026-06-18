@@ -29,16 +29,22 @@ function remoteCliEngine(baseUrl: string): CliEngine {
     initialSession: initialCliSession,
     prompt: cliPrompt,
     run: async (device, session, command) => {
-      const response = await fetch(`${baseUrl}/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ device, session, command })
-      });
-      if (!response.ok) {
+      try {
+        const response = await fetch(`${baseUrl}/run`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ device, session, command })
+        });
+        if (!response.ok) {
+          const fallback = runCliCommand(device, session, command);
+          return { ...fallback, output: `% Remote CLI engine failed (${response.status}). Falling back to local simulator.\n${fallback.output}`.trim() };
+        }
+        return response.json() as Promise<CliResult>;
+      } catch (error) {
         const fallback = runCliCommand(device, session, command);
-        return { ...fallback, output: `% Remote CLI engine failed (${response.status}). Falling back to local simulator.\n${fallback.output}`.trim() };
+        const message = error instanceof Error ? error.message : "network error";
+        return { ...fallback, output: `% Remote CLI engine unavailable (${message}). Falling back to local simulator.\n${fallback.output}`.trim() };
       }
-      return response.json() as Promise<CliResult>;
     },
     completions: cliCompletions
   };
