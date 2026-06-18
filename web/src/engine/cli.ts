@@ -161,7 +161,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
   const base = session.mode === "exec"
     ? ["enable", "show version", "show clock", "show interfaces", "show ip interface brief", "show ip route", "show route", "show cdp neighbors", "show arp", "ping ", "traceroute ", "terminal length 0", "help"]
     : session.mode === "privileged"
-      ? ["disable", "configure terminal", "conf t", "show running-config", "show startup-config", "show version", "show clock", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show spanning-tree", "show interfaces", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show vlan brief", "show mac address-table", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
+      ? ["disable", "configure terminal", "conf t", "show running-config", "show startup-config", "show version", "show clock", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show spanning-tree", "show interfaces", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show vlan brief", "show mac address-table", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show ip access-lists", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
         ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "interface ", "int ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-lookup", "no ip domain-lookup", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
@@ -412,6 +412,10 @@ function expandShowCommand(rest: string[]): string {
     }
     if (isAbbrev(second, "dhcp") && isAbbrev(lowerRest[2], "binding")) return "show ip dhcp binding";
     if (isAbbrev(second, "dhcp") && isAbbrev(lowerRest[2], "pool")) return "show ip dhcp pool";
+    if (isAbbrev(second, "access-lists", 3) || isAbbrev(second, "access-list", 3)) return ["show access-list", ...rest.slice(2)].join(" ");
+    if (isAbbrev(second, "ospf", 2)) return expandShowIpOspf(rest.slice(2));
+    if (isAbbrev(second, "eigrp", 2)) return expandShowIpEigrp(rest.slice(2));
+    if (isAbbrev(second, "rip", 2)) return expandShowIpRip(rest.slice(2));
   }
   if (isAbbrev(first, "interfaces", 3) || first === "int") {
     if (isAbbrev(second, "status", 2)) return "show interfaces status";
@@ -421,6 +425,27 @@ function expandShowCommand(rest: string[]): string {
     return "show interfaces";
   }
   return `show ${rest.join(" ")}`;
+}
+
+function expandShowIpOspf(rest: string[]): string {
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  if (isAbbrev(lowerRest[0], "neighbor", 3) || isAbbrev(lowerRest[0], "neighbors", 3)) return "show ip ospf neighbor";
+  if (isAbbrev(lowerRest[0], "interface", 3)) return isAbbrev(lowerRest[1], "brief", 1) ? "show ip ospf interface brief" : "show ip ospf interface";
+  return "show ip ospf";
+}
+
+function expandShowIpEigrp(rest: string[]): string {
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  if (isAbbrev(lowerRest[0], "neighbors", 3) || isAbbrev(lowerRest[0], "neighbor", 3)) return "show ip eigrp neighbors";
+  if (isAbbrev(lowerRest[0], "interfaces", 3) || isAbbrev(lowerRest[0], "interface", 3)) return "show ip eigrp interfaces";
+  if (isAbbrev(lowerRest[0], "topology", 3)) return "show ip eigrp topology";
+  return "show ip eigrp";
+}
+
+function expandShowIpRip(rest: string[]): string {
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  if (isAbbrev(lowerRest[0], "database", 3)) return "show ip rip database";
+  return "show ip rip";
 }
 
 function expandSwitchportCommand(tokens: string[]): string {
@@ -1192,6 +1217,14 @@ function showCommand(device: NetworkDevice, lower: string): string {
   if (lower === "show ip route") return routeTable(device);
   if (lower.startsWith("show ip route ")) return routeTable(device, lower.slice("show ip route ".length).trim());
   if (lower === "show ip protocols") return ipProtocols(device);
+  if (lower === "show ip ospf") return ospfProcessStatus(device);
+  if (lower === "show ip ospf neighbor") return ospfNeighbors(device);
+  if (lower === "show ip ospf interface" || lower === "show ip ospf interface brief") return ospfInterfaceStatus(device, lower.endsWith("brief"));
+  if (lower === "show ip eigrp neighbors") return eigrpNeighbors(device);
+  if (lower === "show ip eigrp interfaces") return eigrpInterfaces(device);
+  if (lower === "show ip eigrp topology") return eigrpTopology(device);
+  if (lower === "show ip eigrp") return eigrpStatus(device);
+  if (lower === "show ip rip" || lower === "show ip rip database") return ripDatabase(device);
   if (lower === "show ip dhcp binding") return device.runtime.dhcpLeases.map((lease) => `${lease.ipAddress.padEnd(16)}${lease.macAddress.padEnd(20)}${lease.deviceId}`).join("\n") || "No DHCP bindings.";
   if (lower === "show ip dhcp pool") return device.config.dhcpPools.map((pool) => [`풀 ${pool.name}`, `  네트워크 ${pool.network} ${pool.mask}`, `  기본 라우터 ${pool.defaultGateway}`, `  DNS 서버 ${pool.dnsServer}`, `  시작 범위 ${pool.startIp}, 최대 임대 ${pool.maxLeases}`, `  상태 ${pool.enabled ? "활성" : "비활성"}`].join("\n")).join("\n\n") || "DHCP 풀이 없습니다.";
   if (lower === "show hosts") return device.config.dnsRecords.map((record) => `${record.name.padEnd(32)}${record.value}`).join("\n") || "호스트 레코드가 없습니다.";
@@ -1448,6 +1481,106 @@ function ipProtocols(device: NetworkDevice): string {
   return lines.length ? lines.join("\n") : "No routing protocols configured.";
 }
 
+function ospfProcessStatus(device: NetworkDevice): string {
+  const protocols = routingProtocols(device).filter((protocol) => protocol.protocol === "ospf");
+  if (!protocols.length) return "%OSPF: Router process not configured";
+  return protocols.map((protocol) => [
+    ` Routing Process "ospf ${protocol.processId ?? "1"}" with ID ${routerId(device)}`,
+    " Start time: 00:00:00.000, Time elapsed: simulated",
+    " Supports only single TOS(TOS0) routes",
+    ` Number of areas in this router is 1. 1 normal 0 stub 0 nssa`,
+    protocol.networks.length ? ` Routing for Networks:\n${protocol.networks.map((network) => `  ${network}`).join("\n")}` : " No networks configured"
+  ].join("\n")).join("\n\n");
+}
+
+function ospfNeighbors(device: NetworkDevice): string {
+  if (!routingProtocols(device).some((protocol) => protocol.protocol === "ospf")) return "%OSPF: Router process not configured";
+  return [
+    "Neighbor ID     Pri   State           Dead Time   Address         Interface",
+    "No OSPF neighbors are currently discovered in this device-only CLI context."
+  ].join("\n");
+}
+
+function ospfInterfaceStatus(device: NetworkDevice, brief: boolean): string {
+  const protocols = routingProtocols(device).filter((protocol) => protocol.protocol === "ospf");
+  if (!protocols.length) return "%OSPF: Router process not configured";
+  const routedPorts = device.ports.filter((port) => port.adminUp && port.ipAddress && port.subnetMask);
+  if (brief) {
+    return [
+      "Interface    PID   Area            IP Address/Mask    Cost  State Nbrs F/C",
+      ...routedPorts.map((port) => `${shortPortAlias(port.name).padEnd(12)}${(protocols[0].processId ?? "1").padEnd(6)}0               ${`${port.ipAddress}/${maskToPrefix(port.subnetMask)}`.padEnd(19)}${"1".padEnd(6)}DR    0/0`)
+    ].join("\n");
+  }
+  return routedPorts.map((port) => [
+    `${port.name} is up, line protocol is ${device.powerOn && port.linkId ? "up" : "down"}`,
+    `  Internet Address ${port.ipAddress}/${maskToPrefix(port.subnetMask)}, Area 0`,
+    `  Process ID ${protocols[0].processId ?? "1"}, Router ID ${routerId(device)}, Network Type BROADCAST, Cost: 1`,
+    "  Timer intervals configured, Hello 10, Dead 40, Wait 40, Retransmit 5",
+    "  Neighbor Count is 0, Adjacent neighbor count is 0"
+  ].join("\n")).join("\n\n") || "No OSPF-enabled interfaces.";
+}
+
+function eigrpStatus(device: NetworkDevice): string {
+  const protocols = routingProtocols(device).filter((protocol) => protocol.protocol === "eigrp");
+  if (!protocols.length) return "%DUAL-5-NBRCHANGE: EIGRP is not configured";
+  return protocols.map((protocol) => [
+    `IP-EIGRP AS(${protocol.processId ?? "1"}) is running`,
+    `  Router-ID: ${routerId(device)}`,
+    `  Topology: ${protocol.networks.length} configured network(s)`,
+    `  Automatic summarization: ${protocol.autoSummary ? "enabled" : "disabled"}`
+  ].join("\n")).join("\n\n");
+}
+
+function eigrpNeighbors(device: NetworkDevice): string {
+  if (!routingProtocols(device).some((protocol) => protocol.protocol === "eigrp")) return "% EIGRP not configured";
+  return [
+    "EIGRP-IPv4 Neighbors for AS",
+    "H   Address                 Interface              Hold Uptime   SRTT   RTO  Q  Seq",
+    "No EIGRP neighbors are currently discovered in this device-only CLI context."
+  ].join("\n");
+}
+
+function eigrpInterfaces(device: NetworkDevice): string {
+  const protocols = routingProtocols(device).filter((protocol) => protocol.protocol === "eigrp");
+  if (!protocols.length) return "% EIGRP not configured";
+  const routedPorts = device.ports.filter((port) => port.adminUp && port.ipAddress && port.subnetMask);
+  return [
+    `EIGRP-IPv4 Interfaces for AS(${protocols[0].processId ?? "1"})`,
+    "Interface              Peers  Xmit Queue   Mean SRTT   Pacing Time   Multicast",
+    ...routedPorts.map((port) => `${port.name.padEnd(22)}0      0            0           0             0`)
+  ].join("\n");
+}
+
+function eigrpTopology(device: NetworkDevice): string {
+  const protocols = routingProtocols(device).filter((protocol) => protocol.protocol === "eigrp");
+  if (!protocols.length) return "% EIGRP not configured";
+  return [
+    `EIGRP-IPv4 Topology Table for AS(${protocols[0].processId ?? "1"})/ID(${routerId(device)})`,
+    "Codes: P - Passive, A - Active, U - Update, Q - Query, R - Reply",
+    ...connectedNetworks(device).map((entry) => `P ${entry.network}/${entry.prefix}, 1 successors, FD is 28160\n        via Connected, ${entry.portName}`)
+  ].join("\n");
+}
+
+function ripDatabase(device: NetworkDevice): string {
+  const protocols = routingProtocols(device).filter((protocol) => protocol.protocol === "rip");
+  if (!protocols.length) return "% RIP is not configured";
+  return [
+    "RIP database",
+    ...protocols.flatMap((protocol) => protocol.networks.length ? protocol.networks.map((network) => `${network.padEnd(18)} auto-summary ${protocol.autoSummary ? "enabled" : "disabled"}`) : ["No RIP networks configured."]),
+    ...connectedNetworks(device).map((entry) => `${entry.network}/${entry.prefix} directly connected, ${entry.portName}`)
+  ].join("\n");
+}
+
+function connectedNetworks(device: NetworkDevice): Array<{ network: string; prefix: number; portName: string }> {
+  return device.ports
+    .filter((port) => port.adminUp && port.ipAddress && port.subnetMask && isIpv4(port.ipAddress) && isIpv4(port.subnetMask))
+    .map((port) => ({ network: networkAddress(port.ipAddress, port.subnetMask), prefix: maskToPrefix(port.subnetMask), portName: port.name }));
+}
+
+function routerId(device: NetworkDevice): string {
+  return device.ports.find((port) => port.ipAddress)?.ipAddress || "0.0.0.0";
+}
+
 function help(mode: CliMode): string {
   if (mode === "global") return "hostname <name>, interface <name>, vlan <id>, ip route <network> <mask> <next-hop>, ip dhcp pool <name>, ip host <name> <address>, access-list <list> permit|deny <protocol> <source> <destination>, nat <local> <global> <outside>, service <name>, show ..., end";
   if (mode === "interface") return "description <text>, ip address <ip> <mask>, ip access-group <list> in|out, switchport mode access|trunk, switchport access vlan <id>, switchport trunk allowed vlan <list>, clock rate <value>, shutdown, no shutdown, exit";
@@ -1456,7 +1589,7 @@ function help(mode: CliMode): string {
   if (mode === "line") return "password <value>, login, no login, transport input <all|ssh|telnet|none>, exec-timeout <min> <sec>, logging synchronous, exit";
   if (mode === "router") return "network <network> [wildcard-mask], version <n>, auto-summary, no auto-summary, passive-interface <name>, redistribute static, exit";
   if (mode === "acl") return "permit|deny <protocol> <source> <destination>, permit|deny <source> [wildcard], no <sequence>, exit";
-  return "enable, configure terminal, show run, show version, show interfaces, show interfaces switchport, show interfaces trunk, show ip interface, show ip interface brief, show interfaces status, show vlan brief, show ip route, show ip dhcp pool, show hosts, show access-list, show nat, show cdp neighbors, show arp, show ip dhcp binding, clear ..., write memory, reload, write erase";
+  return "enable, configure terminal, show run, show version, show interfaces, show interfaces switchport, show interfaces trunk, show ip interface, show ip interface brief, show interfaces status, show vlan brief, show ip route, show ip protocols, show ip ospf neighbor, show ip eigrp neighbors, show ip rip database, show ip dhcp pool, show hosts, show access-list, show nat, show cdp neighbors, show arp, show ip dhcp binding, clear ..., write memory, reload, write erase";
 }
 
 function searchHelp(term: string): string {
@@ -1477,6 +1610,13 @@ function searchHelp(term: string): string {
     "show vlan brief",
     "show ip route",
     "show ip protocols",
+    "show ip ospf",
+    "show ip ospf neighbor",
+    "show ip ospf interface brief",
+    "show ip eigrp neighbors",
+    "show ip eigrp interfaces",
+    "show ip eigrp topology",
+    "show ip rip database",
     "show ip dhcp pool",
     "show hosts",
     "show access-list",
