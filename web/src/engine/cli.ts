@@ -28,6 +28,7 @@ type LineConfig = NonNullable<DeviceConfig["lineConfigs"]>[number];
 type RoutingProtocol = NonNullable<DeviceConfig["routingProtocols"]>[number];
 type AccessRule = DeviceConfig["accessRules"][number];
 type NatRule = DeviceConfig["natRules"][number];
+type LocalUser = NonNullable<DeviceConfig["localUsers"]>[number];
 
 export function initialCliSession(): CliSession {
   return { mode: "exec" };
@@ -175,9 +176,9 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
   const base = session.mode === "exec"
     ? ["enable", "show version", "show clock", "show privilege", "show history", "show interfaces", "show ip interface brief", "show ip route", "show route", "show cdp neighbors", "show arp", "ping ", "traceroute ", "terminal length 0", "help"]
     : session.mode === "privileged"
-      ? ["disable", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show clock", "show privilege", "show history", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show spanning-tree", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route summary", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show mac address-table", "show mac address-table dynamic", "show mac address-table interface ", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show ip access-lists", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
+      ? ["disable", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show clock", "show privilege", "show history", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show spanning-tree", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip ssh", "show ip route", "show ip route summary", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show mac address-table", "show mac address-table dynamic", "show mac address-table interface ", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show ip access-lists", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
-        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "interface ", "int ", "default interface ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-lookup", "no ip domain-lookup", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
+        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "username admin secret cisco", "no username ", "interface ", "int ", "default interface ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-name lab.local", "no ip domain-name", "ip domain-lookup", "no ip domain-lookup", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
           ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "ip access-group 101 in", "ip access-group 101 out", "no ip access-group 101 in", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk allowed vlan ", "no switchport", "spanning-tree portfast", "no spanning-tree portfast", "spanning-tree bpduguard enable", "spanning-tree bpduguard disable", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
           : session.mode === "vlan"
@@ -234,6 +235,7 @@ function expandCliHead(command: string, session: CliSession): string {
   if (isAbbrev(first, "show", 2) && rest.length) return expandShowCommand(rest);
   if (isAbbrev(first, "interface", 3) || first === "int") return `interface ${rest.join(" ")}`;
   if (isAbbrev(first, "hostname", 4)) return `hostname ${rest.join(" ")}`;
+  if (isAbbrev(first, "username", 4)) return `username ${rest.join(" ")}`;
   if (isAbbrev(first, "default", 3)) return expandDefaultCommand(rest);
   if (isAbbrev(first, "banner", 3)) return expandBannerCommand(rest);
   if (isAbbrev(first, "line", 2)) return expandLineCommand(rest);
@@ -342,11 +344,13 @@ function expandNoCommand(rest: string[]): string {
     if (isAbbrev(lowerRest[1], "secret")) return "no enable secret";
     if (isAbbrev(lowerRest[1], "password")) return "no enable password";
   }
+  if (isAbbrev(first, "username", 4)) return `no username ${rest.slice(1).join(" ")}`;
   if (isAbbrev(first, "banner", 3) && isAbbrev(lowerRest[1], "motd")) return "no banner motd";
   if (first === "ip") {
     if (isAbbrev(lowerRest[1], "address")) return "no ip address";
     if (isAbbrev(lowerRest[1], "route")) return `no ip route ${rest.slice(2).join(" ")}`;
     if (isAbbrev(lowerRest[1], "default-gateway", 3)) return "no ip default-gateway";
+    if (isAbbrev(lowerRest[1], "domain-name", 3)) return "no ip domain-name";
     if (isAbbrev(lowerRest[1], "domain-lookup", 3)) return "no ip domain-lookup";
     if (isAbbrev(lowerRest[1], "dhcp") && isAbbrev(lowerRest[2], "pool")) return `no ip dhcp pool ${rest.slice(3).join(" ")}`;
     if (isAbbrev(lowerRest[1], "host")) return `no ip host ${rest.slice(2).join(" ")}`;
@@ -369,6 +373,7 @@ function expandIpCommand(rest: string[], session: CliSession): string {
   if (session.mode === "interface" && isAbbrev(first, "access-group", 3)) return `ip access-group ${rest.slice(1).join(" ")}`;
   if (isAbbrev(first, "route")) return `ip route ${rest.slice(1).join(" ")}`;
   if (isAbbrev(first, "default-gateway", 3)) return `ip default-gateway ${rest.slice(1).join(" ")}`;
+  if (isAbbrev(first, "domain-name", 3)) return `ip domain-name ${rest.slice(1).join(" ")}`;
   if (isAbbrev(first, "domain-lookup", 3)) return "ip domain-lookup";
   if (isAbbrev(first, "host")) return `ip host ${rest.slice(1).join(" ")}`;
   if (isAbbrev(first, "dhcp") && isAbbrev(lowerRest[1], "pool")) return `ip dhcp pool ${rest.slice(2).join(" ")}`;
@@ -430,6 +435,7 @@ function expandShowCommand(rest: string[]): string {
   if (first === "ip") {
     if (isAbbrev(second, "route", 2)) return ["show ip route", ...rest.slice(2)].join(" ");
     if (isAbbrev(second, "protocols", 3)) return "show ip protocols";
+    if (isAbbrev(second, "ssh", 2)) return "show ip ssh";
     if (isAbbrev(second, "arp")) return "show ip arp";
     if (isAbbrev(second, "interface", 3)) {
       if (isAbbrev(lowerRest[2], "brief", 1)) return "show ip interface brief";
@@ -710,8 +716,12 @@ function isGlobalStartupLine(lower: string): boolean {
     lower.startsWith("ip host ") ||
     lower.startsWith("ip default-gateway ") ||
     lower === "no ip default-gateway" ||
+    lower.startsWith("ip domain-name ") ||
+    lower === "no ip domain-name" ||
     lower === "ip domain-lookup" ||
     lower === "no ip domain-lookup" ||
+    lower.startsWith("username ") ||
+    lower.startsWith("no username ") ||
     lower.startsWith("ip access-list ") ||
     lower.startsWith("no ip access-list ") ||
     lower.startsWith("ip nat inside source static ") ||
@@ -766,8 +776,15 @@ function applyStartupGlobalLine(device: NetworkDevice, command: string, lower: s
     return isIpv4(gateway) ? { ...device, config: { ...device.config, defaultGateway: gateway } } : device;
   }
   if (lower === "no ip default-gateway") return { ...device, config: { ...device.config, defaultGateway: undefined } };
+  if (lower.startsWith("ip domain-name ")) return { ...device, config: { ...device.config, domainName: command.slice("ip domain-name ".length).trim() || undefined } };
+  if (lower === "no ip domain-name") return { ...device, config: { ...device.config, domainName: undefined } };
   if (lower === "ip domain-lookup") return { ...device, config: { ...device.config, domainLookup: true } };
   if (lower === "no ip domain-lookup") return { ...device, config: { ...device.config, domainLookup: false } };
+  if (lower.startsWith("username ")) {
+    const user = parseLocalUser(command);
+    return user ? upsertLocalUser(device, user) : device;
+  }
+  if (lower.startsWith("no username ")) return removeLocalUser(device, command.slice("no username ".length).trim().split(/\s+/)[0] ?? "");
   if (lower.startsWith("ip route ")) {
     const [, , network, mask, nextHop] = command.split(/\s+/);
     if (!isIpv4(network) || !isIpv4(mask) || !isIpv4(nextHop)) return device;
@@ -1009,8 +1026,26 @@ function globalCommand(device: NetworkDevice, session: CliSession, command: stri
     return result({ ...device, config: { ...device.config, defaultGateway: gateway } }, session, "");
   }
   if (lower === "no ip default-gateway") return result({ ...device, config: { ...device.config, defaultGateway: undefined } }, session, "");
+  if (lower.startsWith("ip domain-name ")) {
+    const domainName = command.slice("ip domain-name ".length).trim().replace(/[^a-zA-Z0-9_.-]/g, "");
+    if (!domainName) return result(device, session, "% Invalid domain name.");
+    return result({ ...device, config: { ...device.config, domainName } }, session, "");
+  }
+  if (lower === "no ip domain-name") return result({ ...device, config: { ...device.config, domainName: undefined } }, session, "");
   if (lower === "ip domain-lookup") return result({ ...device, config: { ...device.config, domainLookup: true } }, session, "");
   if (lower === "no ip domain-lookup") return result({ ...device, config: { ...device.config, domainLookup: false } }, session, "");
+
+  if (lower.startsWith("username ")) {
+    const user = parseLocalUser(command);
+    if (!user) return result(device, session, "% Usage: username <name> [privilege <level>] secret|password <value>");
+    return result(upsertLocalUser(device, user), session, "");
+  }
+
+  if (lower.startsWith("no username ")) {
+    const name = command.slice("no username ".length).trim().split(/\s+/)[0] ?? "";
+    if (!name) return result(device, session, "% Usage: no username <name>");
+    return result(removeLocalUser(device, name), session, "");
+  }
 
   if (lower.startsWith("no ip route ")) {
     const [, , , network, mask, nextHop] = command.split(/\s+/);
@@ -1298,6 +1333,7 @@ function showCommand(device: NetworkDevice, lower: string): string {
   if (lower === "show ip route summary") return routeSummary(device);
   if (lower.startsWith("show ip route ")) return routeTable(device, lower.slice("show ip route ".length).trim());
   if (lower === "show ip protocols") return ipProtocols(device);
+  if (lower === "show ip ssh") return ipSshStatus(device);
   if (lower === "show ip ospf") return ospfProcessStatus(device);
   if (lower === "show ip ospf neighbor") return ospfNeighbors(device);
   if (lower === "show ip ospf interface" || lower === "show ip ospf interface brief") return ospfInterfaceStatus(device, lower.endsWith("brief"));
@@ -1371,8 +1407,10 @@ function runningConfig(device: NetworkDevice): string {
     ...(device.config.enableSecret ? [`enable secret ${device.config.enableSecret}`] : []),
     ...(device.config.enablePassword ? [`enable password ${device.config.enablePassword}`] : []),
     ...(device.config.domainLookup === false ? ["no ip domain-lookup"] : []),
+    ...(device.config.domainName ? [`ip domain-name ${device.config.domainName}`] : []),
     ...(device.config.defaultGateway ? [`ip default-gateway ${device.config.defaultGateway}`] : []),
     ...(device.config.motdBanner ? [`banner motd #${device.config.motdBanner}#`] : []),
+    ...localUsers(device).map(localUserConfig),
     ...device.config.vlans.map((vlan) => [`vlan ${vlan.id}`, ` name ${vlan.name}`]).flat(),
     ...device.ports.flatMap((port) => interfaceConfig(port)),
     ...device.config.staticRoutes.map((route) => `ip route ${route.network} ${route.mask} ${route.nextHop}`),
@@ -1403,6 +1441,13 @@ function lineConfig(line: LineConfig): string[] {
     ...(line.execTimeout ? [` exec-timeout ${line.execTimeout}`] : []),
     line.loggingSynchronous ? " logging synchronous" : " no logging synchronous"
   ];
+}
+
+function localUserConfig(user: LocalUser): string {
+  const privilege = Number.isInteger(user.privilege) ? ` privilege ${user.privilege}` : "";
+  return user.secret
+    ? `username ${user.name}${privilege} secret ${user.secret}`
+    : `username ${user.name}${privilege} password ${user.password ?? ""}`;
 }
 
 function routingProtocolConfig(protocol: RoutingProtocol): string[] {
@@ -1624,6 +1669,19 @@ function ipProtocols(device: NetworkDevice): string {
   return lines.length ? lines.join("\n") : "No routing protocols configured.";
 }
 
+function ipSshStatus(device: NetworkDevice): string {
+  const enabled = Boolean(device.config.domainName && localUsers(device).length && lineConfigs(device).some((line) => line.transportInput.includes("ssh") || line.transportInput.includes("all")));
+  return [
+    `SSH ${enabled ? "Enabled" : "Disabled"} - version 2.0`,
+    `Authentication methods: ${localUsers(device).length ? "publickey,keyboard-interactive,password" : "none configured"}`,
+    `Authentication Publickey Algorithms: ssh-rsa`,
+    `Hostkey Algorithms: ssh-rsa`,
+    `Authentication timeout: 120 secs; Authentication retries: 3`,
+    `Minimum expected Diffie Hellman key size: 1024 bits`,
+    `Domain name: ${device.config.domainName || "not set"}`
+  ].join("\n");
+}
+
 function ospfProcessStatus(device: NetworkDevice): string {
   const protocols = routingProtocols(device).filter((protocol) => protocol.protocol === "ospf");
   if (!protocols.length) return "%OSPF: Router process not configured";
@@ -1747,7 +1805,7 @@ function routerId(device: NetworkDevice): string {
 }
 
 function help(mode: CliMode): string {
-  if (mode === "global") return "hostname <name>, interface <name>, vlan <id>, ip route <network> <mask> <next-hop>, ip nat inside source static <local> <global>, ip dhcp pool <name>, ip host <name> <address>, access-list <list> permit|deny <protocol> <source> <destination>, nat <local> <global> <outside>, service <name>, show ..., end";
+  if (mode === "global") return "hostname <name>, username <name> secret <value>, interface <name>, vlan <id>, ip domain-name <name>, ip route <network> <mask> <next-hop>, ip nat inside source static <local> <global>, ip dhcp pool <name>, ip host <name> <address>, access-list <list> permit|deny <protocol> <source> <destination>, nat <local> <global> <outside>, service <name>, show ..., end";
   if (mode === "interface") return "description <text>, ip address <ip> <mask>, ip nat inside|outside, ip access-group <list> in|out, switchport mode access|trunk, switchport access vlan <id>, switchport trunk allowed vlan <list>, clock rate <value>, shutdown, no shutdown, exit";
   if (mode === "vlan") return "name <vlan-name>, exit, end";
   if (mode === "dhcp") return "network <network> <mask>, default-router <ip>, dns-server <ip>, start-ip <ip>, max-leases <n>, shutdown, no shutdown, exit";
@@ -1770,6 +1828,7 @@ function searchHelp(term: string): string {
     "show history",
     "show ip interface",
     "show ip interface brief",
+    "show ip ssh",
     "show interfaces",
     "show interfaces description",
     "show interfaces switchport",
@@ -1802,8 +1861,10 @@ function searchHelp(term: string): string {
     "traceroute <ip-or-host>",
     "tracert <ip-or-host>",
     "configure terminal",
+    "username admin secret cisco",
     "interface <name>",
     "default interface <name>",
+    "ip domain-name lab.local",
     "ip address <ip> <mask>",
     "description <text>",
     "switchport mode access",
@@ -2065,6 +2126,45 @@ function lineConfigs(device: NetworkDevice): LineConfig[] {
 
 function routingProtocols(device: NetworkDevice): RoutingProtocol[] {
   return device.config.routingProtocols ?? [];
+}
+
+function localUsers(device: NetworkDevice): LocalUser[] {
+  return device.config.localUsers ?? [];
+}
+
+function parseLocalUser(command: string): LocalUser | null {
+  const tokens = command.split(/\s+/);
+  const name = tokens[1]?.replace(/[^a-zA-Z0-9_.-]/g, "");
+  if (!name) return null;
+  const privilegeIndex = tokens.findIndex((token) => token.toLowerCase() === "privilege");
+  const privilege = privilegeIndex >= 0 ? Number(tokens[privilegeIndex + 1]) : undefined;
+  const secretIndex = tokens.findIndex((token) => token.toLowerCase() === "secret");
+  const passwordIndex = tokens.findIndex((token) => token.toLowerCase() === "password");
+  const credentialIndex = secretIndex >= 0 ? secretIndex : passwordIndex;
+  const credential = credentialIndex >= 0 ? tokens.slice(credentialIndex + 1).join(" ") : "";
+  if (!credential) return null;
+  const normalizedPrivilege = Number.isInteger(privilege) && privilege !== undefined && privilege >= 0 && privilege <= 15 ? privilege : undefined;
+  return {
+    id: createId("user"),
+    name,
+    privilege: normalizedPrivilege,
+    secret: secretIndex >= 0 ? credential : undefined,
+    password: passwordIndex >= 0 && secretIndex < 0 ? credential : undefined
+  };
+}
+
+function upsertLocalUser(device: NetworkDevice, user: LocalUser): NetworkDevice {
+  return {
+    ...device,
+    config: {
+      ...device.config,
+      localUsers: [...localUsers(device).filter((item) => item.name.toLowerCase() !== user.name.toLowerCase()), user]
+    }
+  };
+}
+
+function removeLocalUser(device: NetworkDevice, name: string): NetworkDevice {
+  return { ...device, config: { ...device.config, localUsers: localUsers(device).filter((user) => user.name.toLowerCase() !== name.toLowerCase()) } };
 }
 
 function parseLineTarget(command: string): { kind: "console" | "vty"; range: string } | null {

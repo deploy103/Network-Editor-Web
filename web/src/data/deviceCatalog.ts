@@ -241,6 +241,7 @@ export function defaultConfig(hostname: string, kind: DeviceKind): DeviceConfig 
     hostname,
     startupConfig: [],
     domainLookup: true,
+    domainName: undefined,
     lineConfigs: [],
     routingProtocols: [],
     staticRoutes: [],
@@ -249,6 +250,7 @@ export function defaultConfig(hostname: string, kind: DeviceKind): DeviceConfig 
     dnsRecords: kind === "server" ? [{ id: createId("dns"), name: "www.lab.local", value: "192.168.1.10" }] : [],
     accessRules: [],
     natRules: [],
+    localUsers: [],
     services: { http: kind === "server", dhcp: false, dns: kind === "server", tftp: false, syslog: false },
     wireless: { ssid: kind === "wireless" ? "Lab-Wireless" : "", auth: "open", key: "", channel: 6, range: 180 }
   };

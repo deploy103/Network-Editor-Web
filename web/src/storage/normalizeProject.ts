@@ -197,17 +197,32 @@ function normalizeConfig(config: DeviceConfig | undefined, hostname: string, kin
     ...config,
     hostname: config?.hostname || hostname,
     startupConfig: Array.isArray(config?.startupConfig) ? config.startupConfig : Array.isArray(legacy?.runningConfig) ? legacy.runningConfig : [],
+    domainName: config?.domainName,
     staticRoutes: normalizeStaticRoutes(config?.staticRoutes),
     vlans: Array.isArray(config?.vlans) && config.vlans.length ? config.vlans : base.vlans,
     dhcpPools: normalizeDhcpPools(config?.dhcpPools),
     dnsRecords: normalizeDnsRecords(config?.dnsRecords, base.dnsRecords),
     accessRules: normalizeAccessRules(config?.accessRules ?? legacy?.firewallRules),
     natRules: Array.isArray(config?.natRules) ? config.natRules : [],
+    localUsers: normalizeLocalUsers(config?.localUsers),
     lineConfigs: normalizeLineConfigs(config?.lineConfigs),
     routingProtocols: normalizeRoutingProtocols(config?.routingProtocols),
     services,
     wireless: normalizeWireless(base.wireless, legacy?.wireless)
   };
+}
+
+function normalizeLocalUsers(users: DeviceConfig["localUsers"] | undefined): NonNullable<DeviceConfig["localUsers"]> {
+  if (!Array.isArray(users)) return [];
+  return users
+    .filter((user) => user.name)
+    .map((user) => ({
+      id: user.id || createId("user"),
+      name: user.name,
+      secret: user.secret,
+      password: user.password,
+      privilege: Number.isInteger(user.privilege) ? user.privilege : undefined
+    }));
 }
 
 function normalizeStaticRoutes(routes: DeviceConfig["staticRoutes"] | undefined): DeviceConfig["staticRoutes"] {
