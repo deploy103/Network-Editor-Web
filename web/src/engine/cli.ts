@@ -485,7 +485,17 @@ function applyStartupConfig(device: NetworkDevice): NetworkDevice {
     if (lower.startsWith("interface ")) {
       const name = command.slice("interface ".length).trim();
       const port = findPort(next, name);
-      context = port ? { mode: "interface", portId: port.id } : { mode: "global" };
+      if (port) {
+        context = { mode: "interface", portId: port.id };
+      } else {
+        const svi = createSviInterface(next, name);
+        if (svi) {
+          next = svi.device;
+          context = { mode: "interface", portId: svi.port.id };
+        } else {
+          context = { mode: "global" };
+        }
+      }
       continue;
     }
 
@@ -721,9 +731,11 @@ function globalCommand(device: NetworkDevice, session: CliSession, command: stri
 
   if (lower.startsWith("interface ")) {
     const name = command.slice(command.indexOf(" ") + 1);
-    const port = findPort(device, name);
-    if (!port) return result(device, session, `% Interface ${name} not found.`);
-    return result(device, { mode: "interface", interfaceId: port.id }, "");
+    const existing = findPort(device, name);
+    if (existing) return result(device, { mode: "interface", interfaceId: existing.id }, "");
+    const svi = createSviInterface(device, name);
+    if (svi) return result(svi.device, { mode: "interface", interfaceId: svi.port.id }, "");
+    return result(device, session, `% Interface ${name} not found.`);
   }
 
   if (lower.startsWith("vlan ")) {
@@ -1365,6 +1377,36 @@ function unique(values: string[]): string[] {
 function ensureVlan(device: NetworkDevice, id: number): NetworkDevice {
   if (device.config.vlans.some((vlan) => vlan.id === id)) return device;
   return { ...device, config: { ...device.config, vlans: [...device.config.vlans, { id, name: `VLAN${id}` }].sort((a, b) => a.id - b.id) } };
+}
+
+function createSviInterface(device: NetworkDevice, name: string): { device: NetworkDevice; port: NetworkPort } | null {
+  const match = name.trim().match(/^vlan\s*(\d+)$/i);
+  if (!match) return null;
+  const vlan = Number(match[1]);
+  if (!validVlan(vlan)) return null;
+  const port: NetworkPort = {
+    id: createId("port"),
+    name: `Vlan${vlan}`,
+    kind: "ethernet",
+    description: "",
+    macAddress: virtualMac(device.ports.length),
+    mode: "routed",
+    vlan,
+    allowedVlans: [vlan],
+    ipAddress: "",
+    subnetMask: "",
+    gateway: "",
+    dnsServer: "",
+    adminUp: true,
+    ipCapable: true
+  };
+  const next = ensureVlan({ ...device, ports: [...device.ports, port] }, vlan);
+  return { device: next, port };
+}
+
+function virtualMac(index: number): string {
+  const value = Math.max(0, index).toString(16).padStart(6, "0").slice(-6);
+  return `02:00:00:${value.slice(0, 2)}:${value.slice(2, 4)}:${value.slice(4, 6)}`;
 }
 
 function findPort(device: NetworkDevice, name: string): NetworkPort | undefined {
