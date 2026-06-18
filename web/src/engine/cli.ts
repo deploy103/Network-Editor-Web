@@ -443,7 +443,7 @@ function expandShowCommand(rest: string[]): string {
   if (first === "arp") return "show arp";
   if (first === "host" || first === "hosts") return "show hosts";
   if (first === "nat") return "show nat";
-  if (isAbbrev(first, "vlan")) return "show vlan brief";
+  if (isAbbrev(first, "vlan")) return lowerRest[1] ? `show vlan ${rest.slice(1).join(" ")}` : "show vlan brief";
   if (isAbbrev(first, "mac")) return ["show mac address-table", ...rest.slice(1)].join(" ");
   if (isAbbrev(first, "access-list", 3) || first === "access-lists") return ["show access-list", ...rest.slice(1)].join(" ");
   if (first === "cdp" && isAbbrev(second, "neighbors", 3)) return lowerRest[2]?.startsWith("det") ? "show cdp neighbors detail" : "show cdp neighbors";
@@ -1397,7 +1397,8 @@ function showCommand(device: NetworkDevice, lower: string): string {
   if (lower === "show interfaces status") {
     return ["Port                  Status      Mode    VLAN  Type", ...device.ports.map((port) => `${port.name.padEnd(22)}${(port.linkId ? "connected" : "notconnect").padEnd(12)}${port.mode.padEnd(8)}${String(port.vlan).padEnd(6)}${port.kind}`)].join("\n");
   }
-  if (lower === "show vlan brief") return ["VLAN  Name", ...device.config.vlans.map((vlan) => `${vlan.id.toString().padEnd(6)}${vlan.name}`)].join("\n");
+  if (lower === "show vlan brief") return vlanBrief(device);
+  if (lower.startsWith("show vlan ")) return vlanDetail(device, lower.slice("show vlan ".length).trim());
   if (lower === "show mac address-table" || lower.startsWith("show mac address-table ")) return macAddressTable(device, lower);
   if (lower === "show arp" || lower === "show ip arp") return device.runtime.arpTable.length ? ["Protocol  Address         Hardware Addr       Interface", ...device.runtime.arpTable.map((entry) => `Internet  ${entry.ipAddress.padEnd(16)}${entry.macAddress.padEnd(20)}${entry.portName}`)].join("\n") : "No ARP entries.";
   if (lower === "show ip route") return routeTable(device);
@@ -1612,6 +1613,28 @@ function switchportStatus(device: NetworkDevice): string {
       "Voice VLAN: none"
     ].join("\n"))
     .join("\n\n") || "% No switchport interfaces.";
+}
+
+function vlanBrief(device: NetworkDevice): string {
+  return ["VLAN  Name", ...device.config.vlans.map((vlan) => `${vlan.id.toString().padEnd(6)}${vlan.name}`)].join("\n");
+}
+
+function vlanDetail(device: NetworkDevice, filter: string): string {
+  const tokens = filter.split(/\s+/);
+  const id = tokens[0] === "id" ? Number(tokens[1]) : Number(tokens[0]);
+  const name = tokens[0] === "name" ? tokens.slice(1).join(" ").toLowerCase() : "";
+  const vlan = Number.isInteger(id)
+    ? device.config.vlans.find((item) => item.id === id)
+    : device.config.vlans.find((item) => item.name.toLowerCase() === name);
+  if (!vlan) return "% VLAN not found.";
+  const accessPorts = device.ports.filter((port) => port.mode === "access" && port.vlan === vlan.id).map((port) => port.name);
+  const trunkPorts = device.ports.filter((port) => port.mode === "trunk" && port.allowedVlans.includes(vlan.id)).map((port) => port.name);
+  return [
+    "VLAN  Name                             Status    Ports",
+    `${String(vlan.id).padEnd(6)}${vlan.name.padEnd(33)}active    ${accessPorts.join(", ") || "-"}`,
+    "",
+    `Trunk ports allowing VLAN ${vlan.id}: ${trunkPorts.join(", ") || "none"}`
+  ].join("\n");
 }
 
 function macAddressTable(device: NetworkDevice, lower: string): string {
