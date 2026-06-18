@@ -10,7 +10,7 @@ python3 - <<'PY'
 import sys
 
 sys.path.insert(0, "cli-engine-python")
-from ios_engine import run_cli_command
+from ios_engine import cli_completions, prompt, run_cli_command
 
 
 def assert_true(condition, message):
@@ -49,8 +49,10 @@ def run(command):
 
 
 assert_true(session["mode"] == "exec", "initial mode must be exec")
+assert_true(prompt(device, session).endswith(">"), "Python prompt must render exec mode")
 run("enable")
 assert_true(session["mode"] == "privileged", "enable must enter privileged mode")
+assert_true("show ip route" in cli_completions(device, session, "sh ip r"), "Python completions must expand abbreviated show route")
 assert_true(run("conf t").startswith("Enter configuration"), "conf t must enter global config")
 assert_true(session["mode"] == "global", "configure terminal must set global mode")
 run("enable secret cisco")

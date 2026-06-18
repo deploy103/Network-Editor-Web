@@ -69,6 +69,51 @@ def run_cli_command(device: NetworkDevice, session: IOSSession, raw_command: str
     return _result(next_device, next_session, "% Unsupported command. Type help or ?.")
 
 
+def cli_completions(device: NetworkDevice, session: IOSSession, input_text: str) -> list[str]:
+    normalized = " ".join(str(input_text or "").lower().split())
+    candidates = command_candidates(normalize_device(copy.deepcopy(device or {})), session or {"mode": "exec"})
+    if not normalized:
+        return candidates[:40]
+    return [candidate for candidate in candidates if abbreviated_candidate_match(normalized, candidate.lower())][:40]
+
+
+def command_candidates(device: NetworkDevice, session: IOSSession) -> list[str]:
+    mode = session.get("mode", "exec")
+    if session.get("pendingAction"):
+        return []
+    if mode == "exec":
+        base = ["enable", "show version", "show clock", "show ip interface brief", "show ip route", "show protocols", "show cdp neighbors", "show arp", "power on", "help"]
+    elif mode == "privileged":
+        base = ["disable", "configure terminal", "conf t", "show running-config", "show running-config | include ", "show running-config | section ", "show startup-config", "show version", "show inventory", "show flash", "show file systems", "show users", "show line", "show protocols", "show controllers", "show processes cpu", "show memory", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route summary", "show ip protocols", "show ip ospf", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show ip dhcp binding", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp server statistics", "show access-lists", "clear arp", "clear mac address-table", "clear ip dhcp binding", "clear ip dhcp conflict *", "clear ip nat translation *", "write memory", "copy running-config startup-config", "reload", "write erase", "power off", "power cycle", "help"]
+    elif mode == "global":
+        base = ["hostname ", "enable secret ", "enable password ", "banner motd #", "no banner motd", "username admin privilege 15 secret cisco", "interface ", "interface range fa0/1 - 2", "default interface ", "vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "ip domain-name lab.local", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "ip dhcp excluded-address ", "ip dhcp pool ", "ip access-list standard ", "ip access-list extended ", "access-list 101 permit ip any any", "ip nat inside source static ", "service password-encryption", "no service password-encryption", "do show running-config", "end", "exit", "help"]
+    elif mode == "interface":
+        base = ["description ", "no description", "ip address ", "no ip address", "ip helper-address ", "no ip helper-address ", "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "ip access-group 101 in", "ip access-group 101 out", "shutdown", "no shutdown", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk native vlan ", "switchport trunk allowed vlan ", "switchport nonegotiate", "no switchport nonegotiate", "spanning-tree portfast", "spanning-tree bpduguard enable", "clock rate ", "do show running-config interface ", "end", "exit", "help"]
+    elif mode == "dhcp":
+        base = ["network ", "default-router ", "dns-server ", "start-ip ", "max-leases ", "shutdown", "no shutdown", "end", "exit", "help"]
+    elif mode == "line":
+        base = ["password ", "login", "login local", "no login", "transport input all", "transport input ssh", "transport input telnet", "transport input none", "exec-timeout 10 0", "logging synchronous", "no logging synchronous", "end", "exit", "help"]
+    elif mode == "router":
+        base = ["network ", "no network ", "router-id 1.1.1.1", "version 2", "auto-summary", "no auto-summary", "passive-interface default", "no passive-interface default", "passive-interface ", "no passive-interface ", "default-information originate", "default-information originate always", "no default-information originate", "redistribute static", "no redistribute static", "end", "exit", "help"]
+    elif mode == "acl":
+        base = ["permit ip any any", "deny ip any any", "permit tcp any host 192.168.1.10 eq 80", "permit icmp any any", "no 10", "remark ", "do show access-lists", "end", "exit", "help"]
+    else:
+        base = ["exit", "end", "help"]
+    interface_items = []
+    for port in device.get("ports", []):
+        name = port.get("name", "")
+        interface_items.extend([f"interface {name}", f"show interface {name}", f"show running-config interface {name}"])
+    return unique(base + interface_items)
+
+
+def abbreviated_candidate_match(query: str, candidate: str) -> bool:
+    query_tokens = query.split()
+    candidate_tokens = candidate.split()
+    if len(query_tokens) > len(candidate_tokens):
+        return False
+    return all(candidate_tokens[index].startswith(token) for index, token in enumerate(query_tokens))
+
+
 def prompt(device: NetworkDevice, session: IOSSession) -> str:
     hostname = cfg(device).get("hostname") or device.get("label") or "Router"
     mode = (session or {}).get("mode", "exec")
