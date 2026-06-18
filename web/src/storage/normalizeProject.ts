@@ -264,9 +264,17 @@ function normalizeAccessRules(rules: DeviceConfig["accessRules"] | Array<{ id?: 
       destination: rule.destination || "any",
       interfaceName: legacy.interfaceName || legacy.listId || "outside",
       listName: legacy.listName || legacy.listId || "",
+      listType: legacy.listType || inferAccessListType(legacy.listName || legacy.listId || legacy.interfaceName || "", rule.protocol, rule.destination),
       hits: Number.isInteger(legacy.hits) ? legacy.hits : 0
     };
   });
+}
+
+function inferAccessListType(name: string, protocol: unknown, destination: unknown): "standard" | "extended" {
+  const id = Number(name);
+  if (Number.isInteger(id) && ((id >= 1 && id <= 99) || (id >= 1300 && id <= 1999))) return "standard";
+  if (protocol === "ip" && (!destination || destination === "any")) return "standard";
+  return "extended";
 }
 
 function normalizeAccessProtocol(value: unknown): DeviceConfig["accessRules"][number]["protocol"] {

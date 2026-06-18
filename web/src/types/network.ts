@@ -105,6 +105,7 @@ export interface AccessRule {
   destination: string;
   interfaceName: string;
   listName?: string;
+  listType?: "standard" | "extended";
   hits: number;
 }
 
