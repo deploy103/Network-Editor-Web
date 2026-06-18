@@ -126,6 +126,8 @@ export interface DeviceConfig {
   motdBanner?: string;
   domainLookup?: boolean;
   domainName?: string;
+  sshVersion?: "1" | "2";
+  rsaKeyGenerated?: boolean;
   defaultGateway?: string;
   staticRoutes: StaticRoute[];
   vlans: Array<{ id: number; name: string }>;

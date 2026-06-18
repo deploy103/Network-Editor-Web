@@ -198,6 +198,8 @@ function normalizeConfig(config: DeviceConfig | undefined, hostname: string, kin
     hostname: config?.hostname || hostname,
     startupConfig: Array.isArray(config?.startupConfig) ? config.startupConfig : Array.isArray(legacy?.runningConfig) ? legacy.runningConfig : [],
     domainName: config?.domainName,
+    sshVersion: config?.sshVersion === "1" ? "1" : "2",
+    rsaKeyGenerated: config?.rsaKeyGenerated === true,
     staticRoutes: normalizeStaticRoutes(config?.staticRoutes),
     vlans: Array.isArray(config?.vlans) && config.vlans.length ? config.vlans : base.vlans,
     dhcpPools: normalizeDhcpPools(config?.dhcpPools),
