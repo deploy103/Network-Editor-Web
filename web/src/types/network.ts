@@ -59,6 +59,8 @@ export interface NetworkPort {
   ipCapable?: boolean;
   stpPortfast?: boolean;
   bpduGuard?: boolean;
+  accessGroupIn?: string;
+  accessGroupOut?: string;
   linkId?: string;
   moduleSlotId?: string;
   moduleId?: string;
@@ -102,6 +104,7 @@ export interface AccessRule {
   source: string;
   destination: string;
   interfaceName: string;
+  listName?: string;
   hits: number;
 }
 

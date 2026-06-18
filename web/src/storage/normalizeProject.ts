@@ -175,7 +175,9 @@ function normalizePort(port: NetworkPort): NetworkPort {
     adminUp: port.adminUp !== false && legacy.status !== "administratively-down",
     ipCapable: Boolean(port.ipCapable || mode === "routed" || port.ipAddress || legacy.interfaceConfig?.ipAddress),
     stpPortfast: port.stpPortfast === true,
-    bpduGuard: port.bpduGuard === true
+    bpduGuard: port.bpduGuard === true,
+    accessGroupIn: port.accessGroupIn || "",
+    accessGroupOut: port.accessGroupOut || ""
   };
 }
 
@@ -261,6 +263,7 @@ function normalizeAccessRules(rules: DeviceConfig["accessRules"] | Array<{ id?: 
       source: rule.source || "any",
       destination: rule.destination || "any",
       interfaceName: legacy.interfaceName || legacy.listId || "outside",
+      listName: legacy.listName || legacy.listId || "",
       hits: Number.isInteger(legacy.hits) ? legacy.hits : 0
     };
   });

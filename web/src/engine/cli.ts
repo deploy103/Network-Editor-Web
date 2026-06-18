@@ -24,6 +24,7 @@ export interface CliResult {
 
 type LineConfig = NonNullable<DeviceConfig["lineConfigs"]>[number];
 type RoutingProtocol = NonNullable<DeviceConfig["routingProtocols"]>[number];
+type AccessRule = DeviceConfig["accessRules"][number];
 
 export function initialCliSession(): CliSession {
   return { mode: "exec" };
@@ -158,9 +159,9 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
     : session.mode === "privileged"
       ? ["disable", "configure terminal", "conf t", "show running-config", "show startup-config", "show version", "show clock", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show spanning-tree", "show interfaces", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface brief", "show ip route", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show vlan brief", "show mac address-table", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
-        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "interface ", "int ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-lookup", "no ip domain-lookup", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "access-list ", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
+        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "interface ", "int ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-lookup", "no ip domain-lookup", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
-          ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk allowed vlan ", "no switchport", "spanning-tree portfast", "no spanning-tree portfast", "spanning-tree bpduguard enable", "spanning-tree bpduguard disable", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
+          ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "ip access-group 101 in", "ip access-group 101 out", "no ip access-group 101 in", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk allowed vlan ", "no switchport", "spanning-tree portfast", "no spanning-tree portfast", "spanning-tree bpduguard enable", "spanning-tree bpduguard disable", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
           : session.mode === "vlan"
             ? ["name ", "end", "exit", "help"]
             : session.mode === "dhcp"
@@ -319,6 +320,7 @@ function expandNoCommand(rest: string[]): string {
     if (isAbbrev(lowerRest[1], "domain-lookup", 3)) return "no ip domain-lookup";
     if (isAbbrev(lowerRest[1], "dhcp") && isAbbrev(lowerRest[2], "pool")) return `no ip dhcp pool ${rest.slice(3).join(" ")}`;
     if (isAbbrev(lowerRest[1], "host")) return `no ip host ${rest.slice(2).join(" ")}`;
+    if (isAbbrev(lowerRest[1], "access-group", 3)) return `no ip access-group ${rest.slice(2).join(" ")}`;
   }
   if (isAbbrev(first, "vlan")) return `no vlan ${rest.slice(1).join(" ")}`;
   if (isAbbrev(first, "access-list", 3)) return `no access-list ${rest.slice(1).join(" ")}`;
@@ -332,6 +334,7 @@ function expandIpCommand(rest: string[], session: CliSession): string {
   const lowerRest = rest.map((token) => token.toLowerCase());
   const first = lowerRest[0] ?? "";
   if (session.mode === "interface" && isAbbrev(first, "address")) return `ip address ${rest.slice(1).join(" ")}`;
+  if (session.mode === "interface" && isAbbrev(first, "access-group", 3)) return `ip access-group ${rest.slice(1).join(" ")}`;
   if (isAbbrev(first, "route")) return `ip route ${rest.slice(1).join(" ")}`;
   if (isAbbrev(first, "default-gateway", 3)) return `ip default-gateway ${rest.slice(1).join(" ")}`;
   if (isAbbrev(first, "domain-lookup", 3)) return "ip domain-lookup";
@@ -498,7 +501,11 @@ function applyStartupConfig(device: NetworkDevice): NetworkDevice {
   for (const line of startupConfig) {
     const command = line.trim();
     const lower = command.toLowerCase();
-    if (!command || command === "!") continue;
+    if (!command) continue;
+    if (command === "!") {
+      context = { mode: "global" };
+      continue;
+    }
 
     if (lower.startsWith("hostname ")) {
       const hostname = command.slice("hostname ".length).trim().replace(/[^a-zA-Z0-9_.-]/g, "").slice(0, 32);
@@ -568,6 +575,12 @@ function applyStartupConfig(device: NetworkDevice): NetworkDevice {
       continue;
     }
 
+    if (isGlobalStartupLine(lower)) {
+      context = { mode: "global" };
+      next = applyStartupGlobalLine(next, command, lower);
+      continue;
+    }
+
     if (context.mode === "interface") {
       next = applyStartupInterfaceLine(next, context.portId, command, lower);
       continue;
@@ -598,6 +611,21 @@ function applyStartupConfig(device: NetworkDevice): NetworkDevice {
   return next;
 }
 
+function isGlobalStartupLine(lower: string): boolean {
+  return lower.startsWith("enable ") ||
+    lower.startsWith("banner ") ||
+    lower.startsWith("ip route ") ||
+    lower.startsWith("ip host ") ||
+    lower.startsWith("ip default-gateway ") ||
+    lower === "no ip default-gateway" ||
+    lower === "ip domain-lookup" ||
+    lower === "no ip domain-lookup" ||
+    lower.startsWith("access-list ") ||
+    lower.startsWith("nat ") ||
+    lower.startsWith("service ") ||
+    lower.startsWith("no service ");
+}
+
 function resetPortForBoot(device: NetworkDevice, port: NetworkPort): NetworkPort {
   const isVirtualInterface = port.name.toLowerCase().startsWith("vlan");
   const defaultMode = port.kind === "console"
@@ -616,6 +644,8 @@ function resetPortForBoot(device: NetworkDevice, port: NetworkPort): NetworkPort
     vlan: vlanFromInterfaceName(port.name) ?? 1,
     allowedVlans: [1],
     adminUp: true,
+    accessGroupIn: "",
+    accessGroupOut: "",
     clockRate: undefined
   };
 }
@@ -655,10 +685,8 @@ function applyStartupGlobalLine(device: NetworkDevice, command: string, lower: s
       : device;
   }
   if (lower.startsWith("access-list ")) {
-    const [, interfaceName, action, protocol, source, destination] = command.split(/\s+/);
-    return interfaceName && isAction(action) && isProtocol(protocol) && source && destination
-      ? { ...device, config: { ...device.config, accessRules: [...device.config.accessRules, { id: createId("acl"), interfaceName, action, protocol, source, destination, hits: 0 }] } }
-      : device;
+    const rule = parseAccessList(command);
+    return rule ? { ...device, config: { ...device.config, accessRules: [...device.config.accessRules, rule] } } : device;
   }
   if (lower.startsWith("nat ")) {
     const [, insideLocal, insideGlobal, outsideInterface] = command.split(/\s+/);
@@ -691,6 +719,15 @@ function applyStartupInterfaceLine(device: NetworkDevice, portId: string, comman
   if (lower === "no spanning-tree portfast") return updatePort(device, port.id, { stpPortfast: false });
   if (lower === "spanning-tree bpduguard enable") return updatePort(device, port.id, { bpduGuard: true });
   if (lower === "spanning-tree bpduguard disable") return updatePort(device, port.id, { bpduGuard: false });
+  if (lower.startsWith("ip access-group ")) {
+    const acl = parseAccessGroup(command);
+    return acl ? updatePort(device, port.id, acl.direction === "in" ? { accessGroupIn: acl.name } : { accessGroupOut: acl.name }) : device;
+  }
+  if (lower.startsWith("no ip access-group ")) {
+    const acl = parseAccessGroup(command.slice(3));
+    if (!acl) return device;
+    return updatePort(device, port.id, acl.direction === "in" ? { accessGroupIn: "" } : { accessGroupOut: "" });
+  }
   if (lower.startsWith("switchport access vlan ")) {
     const vlan = numberAfter(command, "switchport access vlan");
     return validVlan(vlan) ? ensureVlan(updatePort(device, port.id, { mode: "access", vlan }), vlan) : device;
@@ -867,22 +904,24 @@ function globalCommand(device: NetworkDevice, session: CliSession, command: stri
   }
 
   if (lower.startsWith("access-list ")) {
-    const [, interfaceName, action, protocol, source, destination] = command.split(/\s+/);
-    if (!interfaceName || !isAction(action) || !isProtocol(protocol) || !source || !destination) {
-      return result(device, session, "% Usage: access-list <interface> permit|deny <protocol> <source> <destination>");
-    }
+    const rule = parseAccessList(command);
+    if (!rule) return result(device, session, aclUsage());
     return result({
       ...device,
       config: {
         ...device.config,
-        accessRules: [...device.config.accessRules, { id: createId("acl"), interfaceName, action, protocol, source, destination, hits: 0 }]
+        accessRules: [...device.config.accessRules, rule]
       }
     }, session, "");
   }
 
   if (lower.startsWith("no access-list ")) {
-    const interfaceName = command.slice("no access-list ".length).trim();
-    return result({ ...device, config: { ...device.config, accessRules: device.config.accessRules.filter((rule) => rule.interfaceName !== interfaceName) } }, session, "");
+    const listName = command.slice("no access-list ".length).trim().split(/\s+/)[0] ?? "";
+    if (!listName) return result(device, session, "% Usage: no access-list <list>");
+    return result({
+      ...device,
+      config: { ...device.config, accessRules: device.config.accessRules.filter((rule) => aclListName(rule).toLowerCase() !== listName.toLowerCase()) }
+    }, session, "");
   }
 
   if (lower.startsWith("nat ")) {
@@ -927,6 +966,16 @@ function interfaceCommand(device: NetworkDevice, session: CliSession, command: s
   if (lower === "no spanning-tree portfast") return result(updatePort(device, port.id, { stpPortfast: false }), session, "");
   if (lower === "spanning-tree bpduguard enable") return result(updatePort(device, port.id, { bpduGuard: true }), session, "");
   if (lower === "spanning-tree bpduguard disable") return result(updatePort(device, port.id, { bpduGuard: false }), session, "");
+  if (lower.startsWith("ip access-group ")) {
+    const acl = parseAccessGroup(command);
+    if (!acl) return result(device, session, "% Usage: ip access-group <list> in|out");
+    return result(updatePort(device, port.id, acl.direction === "in" ? { accessGroupIn: acl.name } : { accessGroupOut: acl.name }), session, "");
+  }
+  if (lower.startsWith("no ip access-group ")) {
+    const acl = parseAccessGroup(command.slice(3));
+    if (!acl) return result(device, session, "% Usage: no ip access-group <list> in|out");
+    return result(updatePort(device, port.id, acl.direction === "in" ? { accessGroupIn: "" } : { accessGroupOut: "" }), session, "");
+  }
   if (lower.startsWith("description ")) return result(updatePort(device, port.id, { description: command.slice("description ".length).trim().slice(0, 80) }), session, "");
   if (lower === "no description") return result(updatePort(device, port.id, { description: "" }), session, "");
   if (lower.startsWith("switchport access vlan ")) {
@@ -1068,7 +1117,7 @@ function showCommand(device: NetworkDevice, lower: string): string {
   if (lower === "show ip dhcp binding") return device.runtime.dhcpLeases.map((lease) => `${lease.ipAddress.padEnd(16)}${lease.macAddress.padEnd(20)}${lease.deviceId}`).join("\n") || "No DHCP bindings.";
   if (lower === "show ip dhcp pool") return device.config.dhcpPools.map((pool) => [`풀 ${pool.name}`, `  네트워크 ${pool.network} ${pool.mask}`, `  기본 라우터 ${pool.defaultGateway}`, `  DNS 서버 ${pool.dnsServer}`, `  시작 범위 ${pool.startIp}, 최대 임대 ${pool.maxLeases}`, `  상태 ${pool.enabled ? "활성" : "비활성"}`].join("\n")).join("\n\n") || "DHCP 풀이 없습니다.";
   if (lower === "show hosts") return device.config.dnsRecords.map((record) => `${record.name.padEnd(32)}${record.value}`).join("\n") || "호스트 레코드가 없습니다.";
-  if (lower === "show access-list" || lower === "show access-lists") return device.config.accessRules.map((rule) => `${rule.action} ${rule.protocol} ${rule.source} ${rule.destination} interface ${rule.interfaceName} (${rule.hits}회 적중)`).join("\n") || "접근 규칙이 없습니다.";
+  if (lower === "show access-list" || lower === "show access-lists") return accessListStatus(device);
   if (lower === "show nat") return device.config.natRules.map((rule) => `${rule.insideLocal} -> ${rule.insideGlobal} outside ${rule.outsideInterface} (${rule.hits}회 적중)`).join("\n") || "NAT 규칙이 없습니다.";
   return "% Unsupported show command.";
 }
@@ -1116,7 +1165,7 @@ function runningConfig(device: NetworkDevice): string {
     ...device.ports.flatMap((port) => interfaceConfig(port)),
     ...device.config.staticRoutes.map((route) => `ip route ${route.network} ${route.mask} ${route.nextHop}`),
     ...device.config.dnsRecords.map((record) => `ip host ${record.name} ${record.value}`),
-    ...device.config.accessRules.map((rule) => `access-list ${rule.interfaceName} ${rule.action} ${rule.protocol} ${rule.source} ${rule.destination}`),
+    ...device.config.accessRules.map(accessRuleConfig),
     ...device.config.natRules.map((rule) => `nat ${rule.insideLocal} ${rule.insideGlobal} ${rule.outsideInterface}`),
     ...Object.entries(device.config.services).map(([name, enabled]) => `${enabled ? "" : "no "}service ${name}`),
     ...device.config.dhcpPools.flatMap((pool) => [
@@ -1161,6 +1210,8 @@ function interfaceConfig(port: NetworkPort): string[] {
   if (port.mode === "routed" && port.ipAddress) lines.push(` ip address ${port.ipAddress} ${port.subnetMask}`);
   if (port.mode === "access") lines.push(" switchport mode access", ` switchport access vlan ${port.vlan}`);
   if (port.mode === "trunk") lines.push(" switchport mode trunk", ` switchport trunk allowed vlan ${port.allowedVlans.join(",")}`);
+  if (port.accessGroupIn) lines.push(` ip access-group ${port.accessGroupIn} in`);
+  if (port.accessGroupOut) lines.push(` ip access-group ${port.accessGroupOut} out`);
   if (port.stpPortfast) lines.push(" spanning-tree portfast");
   if (port.bpduGuard) lines.push(" spanning-tree bpduguard enable");
   if (port.kind === "serial" && port.clockRate) lines.push(` clock rate ${port.clockRate}`);
@@ -1296,8 +1347,8 @@ function ipProtocols(device: NetworkDevice): string {
 }
 
 function help(mode: CliMode): string {
-  if (mode === "global") return "hostname <name>, interface <name>, vlan <id>, ip route <network> <mask> <next-hop>, ip dhcp pool <name>, ip host <name> <address>, access-list <interface> permit|deny <protocol> <source> <destination>, nat <local> <global> <outside>, service <name>, show ..., end";
-  if (mode === "interface") return "description <text>, ip address <ip> <mask>, switchport mode access|trunk, switchport access vlan <id>, switchport trunk allowed vlan <list>, clock rate <value>, shutdown, no shutdown, exit";
+  if (mode === "global") return "hostname <name>, interface <name>, vlan <id>, ip route <network> <mask> <next-hop>, ip dhcp pool <name>, ip host <name> <address>, access-list <list> permit|deny <protocol> <source> <destination>, nat <local> <global> <outside>, service <name>, show ..., end";
+  if (mode === "interface") return "description <text>, ip address <ip> <mask>, ip access-group <list> in|out, switchport mode access|trunk, switchport access vlan <id>, switchport trunk allowed vlan <list>, clock rate <value>, shutdown, no shutdown, exit";
   if (mode === "vlan") return "name <vlan-name>, exit, end";
   if (mode === "dhcp") return "network <network> <mask>, default-router <ip>, dns-server <ip>, start-ip <ip>, max-leases <n>, shutdown, no shutdown, exit";
   if (mode === "line") return "password <value>, login, no login, transport input <all|ssh|telnet|none>, exec-timeout <min> <sec>, logging synchronous, exit";
@@ -1339,6 +1390,8 @@ function searchHelp(term: string): string {
     "switchport mode access",
     "switchport mode trunk",
     "ip route <network> <mask> <next-hop>",
+    "access-list 101 permit ip any any",
+    "ip access-group 101 in",
     "ip dhcp pool <name>",
     "ip host <name> <address>"
   ];
@@ -1372,6 +1425,116 @@ function pipeSection(lines: string[], term: string): string {
     }
   }
   return sections.join("\n") || "% No matching sections.";
+}
+
+function parseAccessList(command: string): AccessRule | null {
+  const tokens = command.trim().split(/\s+/);
+  const listName = tokens[1] ?? "";
+  const action = tokens[2]?.toLowerCase();
+  if (!listName || !isAction(action)) return null;
+  if (tokens[3]?.toLowerCase() === "remark") return null;
+
+  if (isStandardAcl(listName)) {
+    const source = parseAclAddress(tokens, 3);
+    if (!source) return null;
+    return {
+      id: createId("acl"),
+      listName,
+      interfaceName: listName,
+      action,
+      protocol: "ip",
+      source: source.text,
+      destination: "any",
+      hits: 0
+    };
+  }
+
+  const protocol = tokens[3]?.toLowerCase();
+  if (!isProtocol(protocol)) return null;
+  const source = parseAclAddress(tokens, 4);
+  if (!source) return null;
+  const destination = parseAclAddress(tokens, source.nextIndex);
+  if (!destination) return null;
+  const options = tokens.slice(destination.nextIndex).join(" ");
+  return {
+    id: createId("acl"),
+    listName,
+    interfaceName: listName,
+    action,
+    protocol,
+    source: source.text,
+    destination: options ? `${destination.text} ${options}` : destination.text,
+    hits: 0
+  };
+}
+
+function parseAclAddress(tokens: string[], index: number): { text: string; nextIndex: number } | null {
+  const token = tokens[index];
+  const lower = token?.toLowerCase();
+  if (!token) return null;
+  if (lower === "any") return { text: "any", nextIndex: index + 1 };
+  if (lower === "host") {
+    const host = tokens[index + 1];
+    return host && isIpv4(host) ? { text: `host ${host}`, nextIndex: index + 2 } : null;
+  }
+  if (isIpv4(token)) {
+    const wildcardOrMask = tokens[index + 1];
+    return wildcardOrMask && isIpv4(wildcardOrMask)
+      ? { text: `${token} ${wildcardOrMask}`, nextIndex: index + 2 }
+      : { text: token, nextIndex: index + 1 };
+  }
+  return { text: token, nextIndex: index + 1 };
+}
+
+function parseAccessGroup(command: string): { name: string; direction: "in" | "out" } | null {
+  const [, rawName, rawDirection] = command.match(/^ip access-group\s+(\S+)\s+(in|out)$/i) ?? [];
+  const direction = rawDirection?.toLowerCase();
+  if (!rawName || (direction !== "in" && direction !== "out")) return null;
+  return { name: rawName, direction };
+}
+
+function aclUsage(): string {
+  return "% Usage: access-list <list> permit|deny <protocol> <source> <destination>";
+}
+
+function accessListStatus(device: NetworkDevice): string {
+  if (!device.config.accessRules.length) return "No access lists configured.";
+  const groups = new Map<string, AccessRule[]>();
+  for (const rule of device.config.accessRules) {
+    const name = aclListName(rule);
+    groups.set(name, [...(groups.get(name) ?? []), rule]);
+  }
+  return [...groups.entries()].flatMap(([name, rules]) => [
+    `${rules.every(isStandardAccessRule) ? "Standard" : "Extended"} IP access list ${name}`,
+    ...rules.map((rule, index) => `    ${String((index + 1) * 10).padEnd(4)} ${accessRuleBody(rule)} (${rule.hits} matches)`)
+  ]).join("\n");
+}
+
+function accessRuleConfig(rule: AccessRule): string {
+  return `access-list ${aclListName(rule)} ${accessRuleBody(rule)}`;
+}
+
+function accessRuleBody(rule: AccessRule): string {
+  return isStandardAccessRule(rule)
+    ? `${rule.action} ${rule.source}`
+    : `${rule.action} ${rule.protocol} ${rule.source} ${rule.destination}`;
+}
+
+function isStandardAccessRule(rule: AccessRule): boolean {
+  return isStandardAcl(aclListName(rule)) && rule.protocol === "ip" && normalizeAclEndpoint(rule.destination) === "any";
+}
+
+function aclListName(rule: AccessRule): string {
+  return rule.listName || rule.interfaceName || "ACL";
+}
+
+function normalizeAclEndpoint(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function isStandardAcl(value: string): boolean {
+  const id = Number(value);
+  return Number.isInteger(id) && ((id >= 1 && id <= 99) || (id >= 1300 && id <= 1999));
 }
 
 function updatePort(device: NetworkDevice, portId: string, patch: Partial<NetworkPort>): NetworkDevice {
@@ -1487,7 +1650,9 @@ function createSviInterface(device: NetworkDevice, name: string): { device: Netw
     gateway: "",
     dnsServer: "",
     adminUp: true,
-    ipCapable: true
+    ipCapable: true,
+    accessGroupIn: "",
+    accessGroupOut: ""
   };
   const next = ensureVlan({ ...device, ports: [...device.ports, port] }, vlan);
   return { device: next, port };
