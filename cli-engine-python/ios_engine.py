@@ -88,7 +88,7 @@ def command_candidates(device: NetworkDevice, session: IOSSession) -> list[str]:
     elif mode == "global":
         base = ["hostname ", "enable secret ", "enable password ", "banner motd #", "no banner motd", "username admin privilege 15 secret cisco", "interface ", "interface range fa0/1 - 2", "default interface ", "vlan ", "spanning-tree vlan 1 root primary", "no spanning-tree vlan 1 root primary", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "ip domain-name lab.local", "ip name-server 8.8.8.8", "no ip name-server ", "ip host www.lab.local 192.168.10.10", "no ip host ", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "ip dhcp excluded-address ", "ip dhcp pool ", "ip access-list standard ", "ip access-list extended ", "access-list 101 permit ip any any", "ip nat inside source static ", "service password-encryption", "no service password-encryption", "service dns", "no service dns", "do show running-config", "end", "exit", "help"]
     elif mode == "interface":
-        base = ["description ", "no description", "ip address ", "no ip address", "ip helper-address ", "no ip helper-address ", "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "ip access-group 101 in", "ip access-group 101 out", "shutdown", "no shutdown", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk native vlan ", "switchport trunk allowed vlan ", "switchport nonegotiate", "no switchport nonegotiate", "spanning-tree portfast", "spanning-tree bpduguard enable", "clock rate ", "do show running-config interface ", "end", "exit", "help"]
+        base = ["description ", "no description", "ip address ", "no ip address", "ip helper-address ", "no ip helper-address ", "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "ip access-group 101 in", "ip access-group 101 out", "shutdown", "no shutdown", "duplex auto", "duplex full", "speed auto", "speed 100", "mtu 1500", "bandwidth 100000", "no bandwidth", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk native vlan ", "switchport trunk allowed vlan ", "switchport nonegotiate", "no switchport nonegotiate", "spanning-tree portfast", "spanning-tree bpduguard enable", "clock rate ", "do show running-config interface ", "end", "exit", "help"]
     elif mode == "dhcp":
         base = ["network ", "default-router ", "dns-server ", "start-ip ", "max-leases ", "shutdown", "no shutdown", "end", "exit", "help"]
     elif mode == "line":
@@ -864,6 +864,42 @@ def run_interface(device: NetworkDevice, session: IOSSession, command: str, lowe
     if lower == "no ip address":
         update_ports(ports, {"ipAddress": "", "subnetMask": "", "gateway": "", "dnsServer": ""})
         return _result(device, session, "")
+    if lower.startswith("duplex "):
+        value = command.split()[1]
+        if value not in ("auto", "full", "half"):
+            return _result(device, session, "% Duplex must be auto, full, or half.")
+        update_ports(ports, {"duplex": value})
+        return _result(device, session, "")
+    if lower == "no duplex":
+        update_ports(ports, {"duplex": "auto"})
+        return _result(device, session, "")
+    if lower.startswith("speed "):
+        value = command.split()[1]
+        if value != "auto" and not value.isdigit():
+            return _result(device, session, "% Speed must be auto or a numeric Mbps value.")
+        update_ports(ports, {"speed": value})
+        return _result(device, session, "")
+    if lower == "no speed":
+        update_ports(ports, {"speed": "auto"})
+        return _result(device, session, "")
+    if lower.startswith("mtu "):
+        mtu = number_after(command, "mtu")
+        if mtu < 576 or mtu > 9216:
+            return _result(device, session, "% MTU must be between 576 and 9216.")
+        update_ports(ports, {"mtu": mtu})
+        return _result(device, session, "")
+    if lower == "no mtu":
+        update_ports(ports, {"mtu": 1500})
+        return _result(device, session, "")
+    if lower.startswith("bandwidth "):
+        bandwidth = number_after(command, "bandwidth")
+        if bandwidth <= 0:
+            return _result(device, session, "% Bandwidth must be a positive Kbit value.")
+        update_ports(ports, {"bandwidth": bandwidth})
+        return _result(device, session, "")
+    if lower == "no bandwidth":
+        update_ports(ports, {"bandwidth": None})
+        return _result(device, session, "")
     if lower.startswith("ip helper-address "):
         helper = command.split()[2]
         if not is_ipv4(helper):
@@ -1310,6 +1346,14 @@ def interface_config(port: dict[str, Any] | None) -> list[str]:
     lines = [f"interface {port.get('name')}"]
     if port.get("description"):
         lines.append(f" description {port['description']}")
+    if port.get("duplex") and port.get("duplex") != "auto":
+        lines.append(f" duplex {port.get('duplex')}")
+    if port.get("speed") and port.get("speed") != "auto":
+        lines.append(f" speed {port.get('speed')}")
+    if port.get("mtu") and port.get("mtu") != 1500:
+        lines.append(f" mtu {port.get('mtu')}")
+    if port.get("bandwidth"):
+        lines.append(f" bandwidth {port.get('bandwidth')}")
     if port.get("mode") == "routed" and port.get("ipAddress"):
         lines.append(f" ip address {port.get('ipAddress')} {port.get('subnetMask')}")
     if port.get("mode") == "access":
@@ -1457,6 +1501,9 @@ def normalize_port(port: dict[str, Any], index: int) -> None:
     port.setdefault("accessGroupOut", "")
     port.setdefault("helperAddresses", [])
     port.setdefault("switchportNonegotiate", False)
+    port.setdefault("duplex", "auto")
+    port.setdefault("speed", "auto")
+    port.setdefault("mtu", 1500)
 
 
 def cfg(device: NetworkDevice) -> dict[str, Any]:
@@ -1608,7 +1655,7 @@ def create_svi(device: NetworkDevice, vlan: int) -> dict[str, Any]:
 
 def reset_port(port: dict[str, Any]) -> None:
     mode = "routed" if port.get("name", "").lower().startswith("vlan") or port.get("kind") in ("serial",) else "access"
-    port.update({"description": "", "ipAddress": "", "subnetMask": "", "gateway": "", "dnsServer": "", "mode": mode, "vlan": 1, "allowedVlans": [1], "nativeVlan": 1, "adminUp": True, "accessGroupIn": "", "accessGroupOut": "", "helperAddresses": [], "natRole": None, "switchportNonegotiate": False})
+    port.update({"description": "", "ipAddress": "", "subnetMask": "", "gateway": "", "dnsServer": "", "mode": mode, "vlan": 1, "allowedVlans": [1], "nativeVlan": 1, "adminUp": True, "accessGroupIn": "", "accessGroupOut": "", "helperAddresses": [], "natRole": None, "switchportNonegotiate": False, "duplex": "auto", "speed": "auto", "mtu": 1500, "bandwidth": None})
 
 
 def ensure_vlan(device: NetworkDevice, vlan_id: int) -> None:
@@ -1817,6 +1864,17 @@ def route_table(device: NetworkDevice, filter_text: str = "") -> str:
     return "\n".join(["Codes: C - connected, S - static, L - local", gateway, "", *(lines or ["No routes installed."])])
 
 
+def default_bandwidth(port: dict[str, Any]) -> int:
+    kind = str(port.get("kind", ""))
+    if "gigabit" in kind:
+        return 1_000_000
+    if "fast" in kind:
+        return 100_000
+    if "serial" in kind:
+        return 1_544
+    return 10_000
+
+
 def apply_show_filter(output: str, pipe: str) -> str:
     tokens = pipe.split(maxsplit=1)
     if not tokens:
@@ -1883,7 +1941,7 @@ def interface_status(device: NetworkDevice, port: dict[str, Any] | None) -> str:
     if not port:
         return "% Interface not found."
     operational = device.get("powerOn", True) and port.get("adminUp", True) and bool(port.get("linkId"))
-    return "\n".join([f"{port.get('name')} is {'up' if device.get('powerOn', True) and port.get('adminUp', True) else 'down'}, line protocol is {'up' if operational else 'down'}", *( [f"  Description: {port.get('description')}"] if port.get("description") else []), f"  Hardware is {port.get('kind')}, address is {port.get('macAddress')}", f"  Internet address is {port.get('ipAddress') + ' ' + port.get('subnetMask') if port.get('ipAddress') else 'unassigned'}", f"  Mode {port.get('mode')}", f"  {'Connected' if port.get('linkId') else 'Not connected'}"])
+    return "\n".join([f"{port.get('name')} is {'up' if device.get('powerOn', True) and port.get('adminUp', True) else 'down'}, line protocol is {'up' if operational else 'down'}", *( [f"  Description: {port.get('description')}"] if port.get("description") else []), f"  Hardware is {port.get('kind')}, address is {port.get('macAddress')}", f"  Internet address is {port.get('ipAddress') + ' ' + port.get('subnetMask') if port.get('ipAddress') else 'unassigned'}", f"  MTU {port.get('mtu', 1500)} bytes, BW {port.get('bandwidth') or default_bandwidth(port)} Kbit/sec", f"  Full-duplex setting is {port.get('duplex', 'auto')}, media speed is {port.get('speed', 'auto')}", f"  Mode {port.get('mode')}", f"  {'Connected' if port.get('linkId') else 'Not connected'}"])
 
 
 def ip_interface_status(device: NetworkDevice, selected: dict[str, Any] | None = None) -> str:
