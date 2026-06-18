@@ -175,7 +175,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
   const base = session.mode === "exec"
     ? ["enable", "show version", "show clock", "show privilege", "show history", "show interfaces", "show ip interface brief", "show ip route", "show route", "show cdp neighbors", "show arp", "ping ", "traceroute ", "terminal length 0", "help"]
     : session.mode === "privileged"
-      ? ["disable", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show clock", "show privilege", "show history", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show spanning-tree", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route summary", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show mac address-table", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show ip access-lists", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
+      ? ["disable", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show clock", "show privilege", "show history", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show spanning-tree", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route summary", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show mac address-table", "show mac address-table dynamic", "show mac address-table interface ", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show ip access-lists", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
         ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "interface ", "int ", "default interface ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-lookup", "no ip domain-lookup", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
@@ -424,7 +424,7 @@ function expandShowCommand(rest: string[]): string {
   if (first === "host" || first === "hosts") return "show hosts";
   if (first === "nat") return "show nat";
   if (isAbbrev(first, "vlan")) return "show vlan brief";
-  if (isAbbrev(first, "mac")) return "show mac address-table";
+  if (isAbbrev(first, "mac")) return ["show mac address-table", ...rest.slice(1)].join(" ");
   if (isAbbrev(first, "access-list", 3) || first === "access-lists") return ["show access-list", ...rest.slice(1)].join(" ");
   if (first === "cdp" && isAbbrev(second, "neighbors", 3)) return lowerRest[2]?.startsWith("det") ? "show cdp neighbors detail" : "show cdp neighbors";
   if (first === "ip") {
@@ -1292,7 +1292,7 @@ function showCommand(device: NetworkDevice, lower: string): string {
     return ["Port                  Status      Mode    VLAN  Type", ...device.ports.map((port) => `${port.name.padEnd(22)}${(port.linkId ? "connected" : "notconnect").padEnd(12)}${port.mode.padEnd(8)}${String(port.vlan).padEnd(6)}${port.kind}`)].join("\n");
   }
   if (lower === "show vlan brief") return ["VLAN  Name", ...device.config.vlans.map((vlan) => `${vlan.id.toString().padEnd(6)}${vlan.name}`)].join("\n");
-  if (lower === "show mac address-table") return device.runtime.macTable.length ? ["Vlan  Mac Address         Type      Ports", ...device.runtime.macTable.map((entry) => `${String(entry.vlan).padEnd(6)}${entry.macAddress.padEnd(20)}${entry.type.padEnd(10)}${entry.portName}`)].join("\n") : "No entries learned.";
+  if (lower === "show mac address-table" || lower.startsWith("show mac address-table ")) return macAddressTable(device, lower);
   if (lower === "show arp" || lower === "show ip arp") return device.runtime.arpTable.length ? ["Protocol  Address         Hardware Addr       Interface", ...device.runtime.arpTable.map((entry) => `Internet  ${entry.ipAddress.padEnd(16)}${entry.macAddress.padEnd(20)}${entry.portName}`)].join("\n") : "No ARP entries.";
   if (lower === "show ip route") return routeTable(device);
   if (lower === "show ip route summary") return routeSummary(device);
@@ -1492,6 +1492,22 @@ function switchportStatus(device: NetworkDevice): string {
       "Voice VLAN: none"
     ].join("\n"))
     .join("\n\n") || "% No switchport interfaces.";
+}
+
+function macAddressTable(device: NetworkDevice, lower: string): string {
+  let entries = [...device.runtime.macTable];
+  const vlanMatch = lower.match(/\bvlan\s+(\d+)/);
+  const interfaceMatch = lower.match(/\binterface\s+(.+)$/);
+  if (lower.includes(" dynamic")) entries = entries.filter((entry) => entry.type === "dynamic");
+  if (lower.includes(" static")) entries = entries.filter((entry) => entry.type === "static");
+  if (vlanMatch) entries = entries.filter((entry) => entry.vlan === Number(vlanMatch[1]));
+  if (interfaceMatch) {
+    const port = findPort(device, interfaceMatch[1]);
+    entries = entries.filter((entry) => port ? entry.portName === port.name : entry.portName.toLowerCase() === interfaceMatch[1].toLowerCase());
+  }
+  return entries.length
+    ? ["Vlan  Mac Address         Type      Ports", ...entries.map((entry) => `${String(entry.vlan).padEnd(6)}${entry.macAddress.padEnd(20)}${entry.type.padEnd(10)}${entry.portName}`)].join("\n")
+    : "No entries learned.";
 }
 
 function trunkStatus(device: NetworkDevice): string {
@@ -1761,6 +1777,7 @@ function searchHelp(term: string): string {
     "show interface <name>",
     "show interfaces status",
     "show vlan brief",
+    "show mac address-table dynamic",
     "show ip route",
     "show ip route summary",
     "show controllers",

@@ -96,6 +96,7 @@ const stp = run("sh spanning-tree");
 assert(stp.includes("P2p Edge"), "spanning-tree portfast must show edge port");
 assert(run("sh int desc").includes("Interface"), "show interfaces description must be supported");
 assert(run("sh controllers").includes("controller"), "show controllers must be supported");
+assert(run("sh mac address-table dynamic").includes("No entries"), "show mac address-table dynamic must be supported");
 const acl = run("sh access-lists");
 assert(acl.includes("Extended IP access list 101"), "show access-lists must group IOS ACLs by list");
 assert(acl.includes("permit ip any any"), "show access-lists must show IOS ACL entry body");
