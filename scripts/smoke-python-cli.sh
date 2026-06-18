@@ -114,6 +114,7 @@ assert_true("192.168.10.254" in run("sh ip int vlan 1"), "show ip interface must
 assert_true("Off" in run("sh interfaces switchport"), "show switchport must show nonegotiate off")
 physical = run("show interface fa0/1")
 assert_true("MTU 1600" in physical and "full" in physical and "100" in physical, "show interface must render physical link settings")
+assert_true("InOctets" in run("show interfaces counters"), "show interfaces counters must be supported")
 assert_true("python-ios" in run("show flash"), "show flash must render Python IOS image")
 assert_true("PID:" in run("show inventory"), "show inventory must render device identity")
 assert_true("Line" in run("show users"), "show users must be supported")
