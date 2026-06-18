@@ -340,6 +340,7 @@ function normalizeRoutingProtocols(protocols: DeviceConfig["routingProtocols"] |
       processId: protocol.protocol === "rip" ? undefined : protocol.processId || "1",
       networks: Array.isArray(protocol.networks) ? protocol.networks.filter(Boolean) : [],
       version: protocol.version || (protocol.protocol === "rip" ? "2" : undefined),
+      routerId: protocol.routerId,
       autoSummary: protocol.autoSummary === true,
       passiveInterfaces: Array.isArray(protocol.passiveInterfaces) ? protocol.passiveInterfaces.filter(Boolean) : [],
       redistributeStatic: protocol.redistributeStatic === true
