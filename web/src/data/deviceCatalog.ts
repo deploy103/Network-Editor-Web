@@ -226,6 +226,8 @@ export function createPort(template: PortTemplate, index: number, moduleMeta?: {
     dnsServer: "",
     adminUp: true,
     ipCapable: Boolean(template.ipCapable || template.mode === "routed"),
+    stpPortfast: false,
+    bpduGuard: false,
     moduleSlotId: moduleMeta?.slotId,
     moduleId: moduleMeta?.moduleId
   };

@@ -156,11 +156,11 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
   const base = session.mode === "exec"
     ? ["enable", "show version", "show clock", "show interfaces", "show ip interface brief", "show ip route", "show route", "show cdp neighbors", "show arp", "ping ", "traceroute ", "terminal length 0", "help"]
     : session.mode === "privileged"
-      ? ["disable", "configure terminal", "conf t", "show running-config", "show startup-config", "show version", "show clock", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show interfaces", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface brief", "show ip route", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show vlan brief", "show mac address-table", "show cdp neighbors", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
+      ? ["disable", "configure terminal", "conf t", "show running-config", "show startup-config", "show version", "show clock", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show spanning-tree", "show interfaces", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface brief", "show ip route", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show vlan brief", "show mac address-table", "show cdp neighbors", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
         ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "interface ", "int ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-lookup", "no ip domain-lookup", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "access-list ", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
-          ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk allowed vlan ", "no switchport", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
+          ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk allowed vlan ", "no switchport", "spanning-tree portfast", "no spanning-tree portfast", "spanning-tree bpduguard enable", "spanning-tree bpduguard disable", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
           : session.mode === "vlan"
             ? ["name ", "end", "exit", "help"]
             : session.mode === "dhcp"
@@ -219,6 +219,7 @@ function expandCliHead(command: string, session: CliSession): string {
   if (first === "no") return expandNoCommand(rest);
   if (first === "ip") return expandIpCommand(rest, session);
   if (isAbbrev(first, "switchport", 2)) return expandSwitchportCommand(tokens);
+  if (isAbbrev(first, "spanning-tree", 2)) return expandSpanningTreeCommand(tokens);
   if (isAbbrev(first, "vlan", 1)) return `vlan ${rest.join(" ")}`;
   if (isAbbrev(first, "access-list", 3)) return `access-list ${rest.join(" ")}`;
   if (first === "nat") return `nat ${rest.join(" ")}`;
@@ -305,6 +306,7 @@ function expandNoCommand(rest: string[]): string {
   if (isAbbrev(first, "shutdown", 2)) return "no shutdown";
   if (isAbbrev(first, "description", 4)) return "no description";
   if (isAbbrev(first, "switchport", 2)) return "no switchport";
+  if (isAbbrev(first, "spanning-tree", 2) && isAbbrev(lowerRest[1], "portfast", 4)) return "no spanning-tree portfast";
   if (isAbbrev(first, "enable", 2)) {
     if (isAbbrev(lowerRest[1], "secret")) return "no enable secret";
     if (isAbbrev(lowerRest[1], "password")) return "no enable password";
@@ -372,6 +374,7 @@ function expandShowCommand(rest: string[]): string {
   if (isAbbrev(first, "file") && isAbbrev(second, "systems")) return "show file systems";
   if (isAbbrev(first, "processes", 3) && isAbbrev(second, "cpu")) return "show processes cpu";
   if (isAbbrev(first, "memory", 3)) return "show memory";
+  if (isAbbrev(first, "spanning-tree", 2)) return "show spanning-tree";
   if (isAbbrev(first, "users", 2)) return "show users";
   if (isAbbrev(first, "line", 2)) return "show line";
   if (isAbbrev(first, "terminal", 4)) return "show terminal";
@@ -418,6 +421,17 @@ function expandSwitchportCommand(tokens: string[]): string {
     return `switchport trunk allowed vlan ${vlanValues.join(" ")}`;
   }
   return `switchport ${rest.join(" ")}`;
+}
+
+function expandSpanningTreeCommand(tokens: string[]): string {
+  const rest = tokens.slice(1);
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  if (isAbbrev(lowerRest[0], "portfast", 4)) return "spanning-tree portfast";
+  if (isAbbrev(lowerRest[0], "bpduguard", 4)) {
+    if (isAbbrev(lowerRest[1], "disable", 3)) return "spanning-tree bpduguard disable";
+    return "spanning-tree bpduguard enable";
+  }
+  return `spanning-tree ${rest.join(" ")}`;
 }
 
 const privilegedShowCommands = [
@@ -673,6 +687,10 @@ function applyStartupInterfaceLine(device: NetworkDevice, portId: string, comman
   if (lower === "switchport mode access") return updatePort(device, port.id, { mode: "access", ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" });
   if (lower === "switchport mode trunk") return updatePort(device, port.id, { mode: "trunk", allowedVlans: port.allowedVlans.length ? port.allowedVlans : [1], ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" });
   if (lower === "no switchport") return updatePort(device, port.id, { mode: "routed", ipCapable: true });
+  if (lower === "spanning-tree portfast") return updatePort(device, port.id, { stpPortfast: true });
+  if (lower === "no spanning-tree portfast") return updatePort(device, port.id, { stpPortfast: false });
+  if (lower === "spanning-tree bpduguard enable") return updatePort(device, port.id, { bpduGuard: true });
+  if (lower === "spanning-tree bpduguard disable") return updatePort(device, port.id, { bpduGuard: false });
   if (lower.startsWith("switchport access vlan ")) {
     const vlan = numberAfter(command, "switchport access vlan");
     return validVlan(vlan) ? ensureVlan(updatePort(device, port.id, { mode: "access", vlan }), vlan) : device;
@@ -905,6 +923,10 @@ function interfaceCommand(device: NetworkDevice, session: CliSession, command: s
   if (lower === "switchport mode access") return result(updatePort(device, port.id, { mode: "access", ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" }), session, "");
   if (lower === "switchport mode trunk") return result(updatePort(device, port.id, { mode: "trunk", allowedVlans: port.allowedVlans.length ? port.allowedVlans : [1], ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" }), session, "");
   if (lower === "no switchport") return result(updatePort(device, port.id, { mode: "routed", ipCapable: true }), session, "");
+  if (lower === "spanning-tree portfast") return result(updatePort(device, port.id, { stpPortfast: true }), session, "");
+  if (lower === "no spanning-tree portfast") return result(updatePort(device, port.id, { stpPortfast: false }), session, "");
+  if (lower === "spanning-tree bpduguard enable") return result(updatePort(device, port.id, { bpduGuard: true }), session, "");
+  if (lower === "spanning-tree bpduguard disable") return result(updatePort(device, port.id, { bpduGuard: false }), session, "");
   if (lower.startsWith("description ")) return result(updatePort(device, port.id, { description: command.slice("description ".length).trim().slice(0, 80) }), session, "");
   if (lower === "no description") return result(updatePort(device, port.id, { description: "" }), session, "");
   if (lower.startsWith("switchport access vlan ")) {
@@ -1021,6 +1043,7 @@ function showCommand(device: NetworkDevice, lower: string): string {
   if (lower === "show line") return lineStatus(device);
   if (lower === "show terminal") return ["Line 0, Location: local", "Length: 24 lines, Width: 80 columns", "History is enabled, history size is 80", "Editing is enabled. Completion is enabled."].join("\n");
   if (lower === "show protocols") return protocolsStatus(device);
+  if (lower === "show spanning-tree") return spanningTreeStatus(device);
   if (lower === "show startup-config") return device.config.startupConfig.join("\n") || "% Startup config is not saved.";
   if (lower === "show ip interface brief") {
     return ["Interface              IP-Address      OK? Method Status", ...device.ports.map((port) => `${port.name.padEnd(22)}${(port.ipAddress || "unassigned").padEnd(16)}YES manual ${port.adminUp && device.powerOn ? "up" : "down"}`)].join("\n");
@@ -1138,6 +1161,8 @@ function interfaceConfig(port: NetworkPort): string[] {
   if (port.mode === "routed" && port.ipAddress) lines.push(` ip address ${port.ipAddress} ${port.subnetMask}`);
   if (port.mode === "access") lines.push(" switchport mode access", ` switchport access vlan ${port.vlan}`);
   if (port.mode === "trunk") lines.push(" switchport mode trunk", ` switchport trunk allowed vlan ${port.allowedVlans.join(",")}`);
+  if (port.stpPortfast) lines.push(" spanning-tree portfast");
+  if (port.bpduGuard) lines.push(" spanning-tree bpduguard enable");
   if (port.kind === "serial" && port.clockRate) lines.push(` clock rate ${port.clockRate}`);
   lines.push(port.adminUp ? " no shutdown" : " shutdown");
   return lines;
@@ -1197,6 +1222,22 @@ function protocolsStatus(device: NetworkDevice): string {
     .filter((port) => port.kind !== "console")
     .map((port) => `${port.name} is ${device.powerOn && port.adminUp ? "up" : "down"}, line protocol is ${device.powerOn && port.adminUp && port.linkId ? "up" : "down"}${port.ipAddress ? `\n  Internet address is ${port.ipAddress}/${maskToPrefix(port.subnetMask)}` : ""}`)
     .join("\n\n") || "No protocol interfaces.";
+}
+
+function spanningTreeStatus(device: NetworkDevice): string {
+  const vlans = device.config.vlans.length ? device.config.vlans : [{ id: 1, name: "default" }];
+  return vlans.map((vlan) => [
+    `VLAN${String(vlan.id).padStart(4, "0")}`,
+    "  Spanning tree enabled protocol ieee",
+    `  Root ID    Priority    ${32768 + vlan.id}`,
+    `             Address     ${device.ports[0]?.macAddress ?? "02:00:00:00:00:00"}`,
+    "             This bridge is the root",
+    "",
+    "  Interface              Role Sts Cost      Prio.Nbr Type",
+    ...device.ports
+      .filter((port) => port.kind !== "console" && (port.mode === "access" ? port.vlan === vlan.id : port.mode === "trunk" ? port.allowedVlans.includes(vlan.id) : false))
+      .map((port, index) => `${port.name.padEnd(23)}Desg ${port.adminUp && device.powerOn ? "FWD" : "BLK"} ${String(port.kind.includes("gigabit") ? 4 : 19).padEnd(9)}128.${String(index + 1).padEnd(4)}${port.stpPortfast ? "P2p Edge" : "P2p"}${port.bpduGuard ? " BPDU Guard" : ""}`)
+  ].join("\n")).join("\n\n");
 }
 
 function routeTable(device: NetworkDevice, filter = ""): string {
