@@ -62,7 +62,9 @@ export interface NetworkPort {
   bpduGuard?: boolean;
   accessGroupIn?: string;
   accessGroupOut?: string;
+  helperAddresses?: string[];
   natRole?: "inside" | "outside";
+  switchportNonegotiate?: boolean;
   linkId?: string;
   moduleSlotId?: string;
   moduleId?: string;
