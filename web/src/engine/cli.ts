@@ -9,6 +9,7 @@ export type CliPendingAction = "reload" | "erase-startup" | "enable-password";
 export interface CliSession {
   mode: CliMode;
   interfaceId?: string;
+  interfaceIds?: string[];
   vlanId?: number;
   dhcpPoolId?: string;
   lineId?: string;
@@ -38,7 +39,7 @@ export function cliPrompt(device: NetworkDevice, session: CliSession): string {
   const hostname = device.config.hostname || device.label;
   if (session.mode === "exec") return `${hostname}>`;
   if (session.mode === "global") return `${hostname}(config)#`;
-  if (session.mode === "interface") return `${hostname}(config-if)#`;
+  if (session.mode === "interface") return `${hostname}${session.interfaceIds && session.interfaceIds.length > 1 ? "(config-if-range)#" : "(config-if)#"}`;
   if (session.mode === "vlan") return `${hostname}(config-vlan)#`;
   if (session.mode === "dhcp") return `${hostname}(dhcp-config)#`;
   if (session.mode === "line") return `${hostname}(config-line)#`;
@@ -178,7 +179,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
     : session.mode === "privileged"
       ? ["disable", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show clock", "show privilege", "show history", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show spanning-tree", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip ssh", "show ip route", "show ip route summary", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show mac address-table", "show mac address-table dynamic", "show mac address-table interface ", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show ip access-lists", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
-        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "username admin secret cisco", "no username ", "interface ", "int ", "default interface ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-name lab.local", "no ip domain-name", "ip ssh version 2", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "crypto key zeroize rsa", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service password-encryption", "no service password-encryption", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
+        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "username admin secret cisco", "no username ", "interface ", "int ", "interface range fa0/1 - 2", "default interface ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-name lab.local", "no ip domain-name", "ip ssh version 2", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "crypto key zeroize rsa", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service password-encryption", "no service password-encryption", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
           ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "ip access-group 101 in", "ip access-group 101 out", "no ip access-group 101 in", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk allowed vlan ", "no switchport", "spanning-tree portfast", "no spanning-tree portfast", "spanning-tree bpduguard enable", "spanning-tree bpduguard disable", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
           : session.mode === "vlan"
@@ -965,6 +966,12 @@ function globalCommand(device: NetworkDevice, session: CliSession, command: stri
   if (lower.startsWith("banner motd ")) return result({ ...device, config: { ...device.config, motdBanner: parseBannerText(command.slice("banner motd ".length)) } }, session, "");
   if (lower === "no banner motd") return result({ ...device, config: { ...device.config, motdBanner: undefined } }, session, "");
 
+  if (lower.startsWith("interface range ")) {
+    const ports = parseInterfaceRange(device, command.slice("interface range ".length));
+    if (!ports.length) return result(device, session, "% Interface range not found.");
+    return result(device, { mode: "interface", interfaceId: ports[0].id, interfaceIds: ports.map((port) => port.id) }, "");
+  }
+
   if (lower.startsWith("interface ")) {
     const name = command.slice(command.indexOf(" ") + 1);
     const existing = findPort(device, name);
@@ -1169,59 +1176,61 @@ function globalCommand(device: NetworkDevice, session: CliSession, command: stri
 }
 
 function interfaceCommand(device: NetworkDevice, session: CliSession, command: string, lower: string): CliResult {
-  const port = device.ports.find((item) => item.id === session.interfaceId);
+  const selectedPorts = selectedInterfacePorts(device, session);
+  const port = selectedPorts[0];
   if (!port) return result(device, { mode: "global" }, "% Interface context is missing.");
 
   if (lower.startsWith("ip address ")) {
+    if (selectedPorts.length > 1) return result(device, session, "% IP address cannot be applied to an interface range.");
     const [, , ipAddress, subnetMask] = command.split(/\s+/);
     if (!ipAddress || !subnetMask) return result(device, session, "% Usage: ip address <ip> <mask>");
     if (!isIpv4(ipAddress) || !isIpv4(subnetMask)) return result(device, session, "% Invalid IP address or mask.");
     if (!port.ipCapable && port.mode !== "routed") return result(device, session, "% IP address is not supported on this layer-2 interface.");
-    return result(updatePort(device, port.id, { ipAddress, subnetMask, mode: "routed" }), session, "");
+    return result(updateSelectedPorts(device, selectedPorts, { ipAddress, subnetMask, mode: "routed" }), session, "");
   }
-  if (lower === "no ip address") return result(updatePort(device, port.id, { ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" }), session, "");
-  if (lower === "shutdown") return result(updatePort(device, port.id, { adminUp: false }), session, "");
-  if (lower === "no shutdown") return result(updatePort(device, port.id, { adminUp: true }), session, "");
-  if (lower === "switchport mode access") return result(updatePort(device, port.id, { mode: "access", ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" }), session, "");
-  if (lower === "switchport mode trunk") return result(updatePort(device, port.id, { mode: "trunk", allowedVlans: port.allowedVlans.length ? port.allowedVlans : [1], ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" }), session, "");
-  if (lower === "no switchport") return result(updatePort(device, port.id, { mode: "routed", ipCapable: true }), session, "");
-  if (lower === "spanning-tree portfast") return result(updatePort(device, port.id, { stpPortfast: true }), session, "");
-  if (lower === "no spanning-tree portfast") return result(updatePort(device, port.id, { stpPortfast: false }), session, "");
-  if (lower === "spanning-tree bpduguard enable") return result(updatePort(device, port.id, { bpduGuard: true }), session, "");
-  if (lower === "spanning-tree bpduguard disable") return result(updatePort(device, port.id, { bpduGuard: false }), session, "");
-  if (lower === "ip nat inside") return result(updatePort(device, port.id, { natRole: "inside" }), session, "");
-  if (lower === "ip nat outside") return result(updatePort(device, port.id, { natRole: "outside" }), session, "");
-  if (lower === "no ip nat inside" || lower === "no ip nat outside") return result(updatePort(device, port.id, { natRole: undefined }), session, "");
+  if (lower === "no ip address") return result(updateSelectedPorts(device, selectedPorts, { ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" }), session, "");
+  if (lower === "shutdown") return result(updateSelectedPorts(device, selectedPorts, { adminUp: false }), session, "");
+  if (lower === "no shutdown") return result(updateSelectedPorts(device, selectedPorts, { adminUp: true }), session, "");
+  if (lower === "switchport mode access") return result(updateSelectedPorts(device, selectedPorts, { mode: "access", ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" }), session, "");
+  if (lower === "switchport mode trunk") return result(updateSelectedPorts(device, selectedPorts, { mode: "trunk", allowedVlans: port.allowedVlans.length ? port.allowedVlans : [1], ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" }), session, "");
+  if (lower === "no switchport") return result(updateSelectedPorts(device, selectedPorts, { mode: "routed", ipCapable: true }), session, "");
+  if (lower === "spanning-tree portfast") return result(updateSelectedPorts(device, selectedPorts, { stpPortfast: true }), session, "");
+  if (lower === "no spanning-tree portfast") return result(updateSelectedPorts(device, selectedPorts, { stpPortfast: false }), session, "");
+  if (lower === "spanning-tree bpduguard enable") return result(updateSelectedPorts(device, selectedPorts, { bpduGuard: true }), session, "");
+  if (lower === "spanning-tree bpduguard disable") return result(updateSelectedPorts(device, selectedPorts, { bpduGuard: false }), session, "");
+  if (lower === "ip nat inside") return result(updateSelectedPorts(device, selectedPorts, { natRole: "inside" }), session, "");
+  if (lower === "ip nat outside") return result(updateSelectedPorts(device, selectedPorts, { natRole: "outside" }), session, "");
+  if (lower === "no ip nat inside" || lower === "no ip nat outside") return result(updateSelectedPorts(device, selectedPorts, { natRole: undefined }), session, "");
   if (lower.startsWith("ip access-group ")) {
     const acl = parseAccessGroup(command);
     if (!acl) return result(device, session, "% Usage: ip access-group <list> in|out");
-    return result(updatePort(device, port.id, acl.direction === "in" ? { accessGroupIn: acl.name } : { accessGroupOut: acl.name }), session, "");
+    return result(updateSelectedPorts(device, selectedPorts, acl.direction === "in" ? { accessGroupIn: acl.name } : { accessGroupOut: acl.name }), session, "");
   }
   if (lower.startsWith("no ip access-group ")) {
     const acl = parseAccessGroup(command.slice(3));
     if (!acl) return result(device, session, "% Usage: no ip access-group <list> in|out");
-    return result(updatePort(device, port.id, acl.direction === "in" ? { accessGroupIn: "" } : { accessGroupOut: "" }), session, "");
+    return result(updateSelectedPorts(device, selectedPorts, acl.direction === "in" ? { accessGroupIn: "" } : { accessGroupOut: "" }), session, "");
   }
-  if (lower.startsWith("description ")) return result(updatePort(device, port.id, { description: command.slice("description ".length).trim().slice(0, 80) }), session, "");
-  if (lower === "no description") return result(updatePort(device, port.id, { description: "" }), session, "");
+  if (lower.startsWith("description ")) return result(updateSelectedPorts(device, selectedPorts, { description: command.slice("description ".length).trim().slice(0, 80) }), session, "");
+  if (lower === "no description") return result(updateSelectedPorts(device, selectedPorts, { description: "" }), session, "");
   if (lower.startsWith("switchport access vlan ")) {
     const vlan = numberAfter(command, "switchport access vlan");
     if (!validVlan(vlan)) return result(device, session, "% VLAN id must be 1-4094.");
-    return result(ensureVlan(updatePort(device, port.id, { mode: "access", vlan }), vlan), session, "");
+    return result(ensureVlan(updateSelectedPorts(device, selectedPorts, { mode: "access", vlan }), vlan), session, "");
   }
   if (lower.startsWith("switchport trunk allowed vlan ")) {
     const allowedVlans = parseVlans(command.slice("switchport trunk allowed vlan ".length));
     if (allowedVlans.length === 0) return result(device, session, "% Provide at least one VLAN.");
-    let next = updatePort(device, port.id, { mode: "trunk", allowedVlans });
+    let next = updateSelectedPorts(device, selectedPorts, { mode: "trunk", allowedVlans });
     for (const vlan of allowedVlans) next = ensureVlan(next, vlan);
     return result(next, session, "");
   }
   if (lower.startsWith("clock rate ")) {
     const clockRate = numberAfter(command, "clock rate");
     if (port.kind !== "serial") return result(device, session, "% Clock rate applies to serial interfaces only.");
-    return result(updatePort(device, port.id, { clockRate }), session, "");
+    return result(updateSelectedPorts(device, selectedPorts, { clockRate }), session, "");
   }
-  if (lower === "no clock rate") return result(updatePort(device, port.id, { clockRate: undefined }), session, "");
+  if (lower === "no clock rate") return result(updateSelectedPorts(device, selectedPorts, { clockRate: undefined }), session, "");
   return result(device, session, "% Unsupported interface command.");
 }
 
@@ -2158,6 +2167,11 @@ function updatePort(device: NetworkDevice, portId: string, patch: Partial<Networ
   return { ...device, ports: device.ports.map((port) => port.id === portId ? { ...port, ...patch } : port) };
 }
 
+function updateSelectedPorts(device: NetworkDevice, ports: NetworkPort[], patch: Partial<NetworkPort>): NetworkDevice {
+  const selectedIds = new Set(ports.map((port) => port.id));
+  return { ...device, ports: device.ports.map((port) => selectedIds.has(port.id) ? { ...port, ...patch } : port) };
+}
+
 function updatePool(device: NetworkDevice, poolId: string, patch: Partial<DhcpPool>): NetworkDevice {
   return { ...device, config: { ...device.config, dhcpPools: device.config.dhcpPools.map((pool) => pool.id === poolId ? { ...pool, ...patch } : pool) } };
 }
@@ -2323,6 +2337,30 @@ function virtualMac(index: number): string {
 function findPort(device: NetworkDevice, name: string): NetworkPort | undefined {
   const wanted = normalizePortName(name);
   return device.ports.find((port) => normalizePortName(port.name) === wanted || compactAlias(port.name) === wanted);
+}
+
+function selectedInterfacePorts(device: NetworkDevice, session: CliSession): NetworkPort[] {
+  const ids = session.interfaceIds?.length ? session.interfaceIds : session.interfaceId ? [session.interfaceId] : [];
+  return ids.map((id) => device.ports.find((port) => port.id === id)).filter((port): port is NetworkPort => Boolean(port));
+}
+
+function parseInterfaceRange(device: NetworkDevice, value: string): NetworkPort[] {
+  const normalized = value.replace(/\s*,\s*/g, ",").replace(/\s*-\s*/g, "-").trim();
+  const names = normalized.split(",").flatMap(expandInterfaceRangeToken);
+  return names
+    .map((name) => findPort(device, name))
+    .filter((port): port is NetworkPort => Boolean(port))
+    .filter((port, index, list) => list.findIndex((item) => item.id === port.id) === index);
+}
+
+function expandInterfaceRangeToken(token: string): string[] {
+  const range = token.match(/^([a-zA-Z]+)(\d+\/)(\d+)-(\d+)$/);
+  if (!range) return [token.trim()].filter(Boolean);
+  const [, prefix, slot, startText, endText] = range;
+  const start = Number(startText);
+  const end = Number(endText);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || end < start) return [token];
+  return Array.from({ length: end - start + 1 }, (_, index) => `${prefix}${slot}${start + index}`);
 }
 
 function normalizePortName(name: string): string {
