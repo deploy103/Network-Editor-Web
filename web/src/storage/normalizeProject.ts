@@ -200,6 +200,7 @@ function normalizeConfig(config: DeviceConfig | undefined, hostname: string, kin
     domainName: config?.domainName,
     sshVersion: config?.sshVersion === "1" ? "1" : "2",
     rsaKeyGenerated: config?.rsaKeyGenerated === true,
+    passwordEncryption: config?.passwordEncryption === true,
     staticRoutes: normalizeStaticRoutes(config?.staticRoutes),
     vlans: Array.isArray(config?.vlans) && config.vlans.length ? config.vlans : base.vlans,
     dhcpPools: normalizeDhcpPools(config?.dhcpPools),

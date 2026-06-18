@@ -178,7 +178,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
     : session.mode === "privileged"
       ? ["disable", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show clock", "show privilege", "show history", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show spanning-tree", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip ssh", "show ip route", "show ip route summary", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show mac address-table", "show mac address-table dynamic", "show mac address-table interface ", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show ip access-lists", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
-        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "username admin secret cisco", "no username ", "interface ", "int ", "default interface ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-name lab.local", "no ip domain-name", "ip ssh version 2", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "crypto key zeroize rsa", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
+        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "username admin secret cisco", "no username ", "interface ", "int ", "default interface ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-name lab.local", "no ip domain-name", "ip ssh version 2", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "crypto key zeroize rsa", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service password-encryption", "no service password-encryption", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
           ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "ip access-group 101 in", "ip access-group 101 out", "no ip access-group 101 in", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk allowed vlan ", "no switchport", "spanning-tree portfast", "no spanning-tree portfast", "spanning-tree bpduguard enable", "spanning-tree bpduguard disable", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
           : session.mode === "vlan"
@@ -841,6 +841,8 @@ function applyStartupGlobalLine(device: NetworkDevice, command: string, lower: s
       ? { ...device, config: { ...device.config, natRules: [...device.config.natRules, { id: createId("nat"), insideLocal, insideGlobal, outsideInterface, hits: 0 }] } }
       : device;
   }
+  if (lower === "service password-encryption") return { ...device, config: { ...device.config, passwordEncryption: true } };
+  if (lower === "no service password-encryption") return { ...device, config: { ...device.config, passwordEncryption: false } };
   if (lower.startsWith("service ") || lower.startsWith("no service ")) {
     const disable = lower.startsWith("no ");
     const service = command.split(/\s+/).at(-1) as keyof NetworkDevice["config"]["services"] | undefined;
@@ -1154,6 +1156,8 @@ function globalCommand(device: NetworkDevice, session: CliSession, command: stri
     return result({ ...device, config: { ...device.config, natRules: device.config.natRules.filter((rule) => rule.insideLocal !== insideLocal) } }, session, "");
   }
 
+  if (lower === "service password-encryption") return result({ ...device, config: { ...device.config, passwordEncryption: true } }, session, "");
+  if (lower === "no service password-encryption") return result({ ...device, config: { ...device.config, passwordEncryption: false } }, session, "");
   if (lower.startsWith("service ") || lower.startsWith("no service ")) {
     const disable = lower.startsWith("no ");
     const service = command.split(/\s+/).at(-1) as keyof NetworkDevice["config"]["services"] | undefined;
@@ -1440,6 +1444,7 @@ function runningConfig(device: NetworkDevice): string {
     `hostname ${device.config.hostname}`,
     ...(device.config.enableSecret ? [`enable secret ${device.config.enableSecret}`] : []),
     ...(device.config.enablePassword ? [`enable password ${device.config.enablePassword}`] : []),
+    ...(device.config.passwordEncryption ? ["service password-encryption"] : []),
     ...(device.config.domainLookup === false ? ["no ip domain-lookup"] : []),
     ...(device.config.domainName ? [`ip domain-name ${device.config.domainName}`] : []),
     ...(device.config.sshVersion ? [`ip ssh version ${device.config.sshVersion}`] : []),
@@ -1901,6 +1906,7 @@ function searchHelp(term: string): string {
     "interface <name>",
     "default interface <name>",
     "ip domain-name lab.local",
+    "service password-encryption",
     "ip address <ip> <mask>",
     "description <text>",
     "switchport mode access",
