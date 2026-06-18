@@ -136,7 +136,45 @@ function routeFromDevice(project: NetworkProject, router: NetworkDevice, target:
     return routeFromDevice(project, nextHop.device, target, targetPort, seenRouters, mergeHops(hops, nextHopPath.hops));
   }
 
+  for (const neighbor of dynamicRoutingNeighbors(project, router)) {
+    if (seenRouters.has(neighbor.device.id)) continue;
+    const nextHopPath = hasLayer2Path(project, router.id, neighbor.device.id, portVlan(neighbor.localPort));
+    if (!nextHopPath.reachable) continue;
+    seenRouters.add(neighbor.device.id);
+    return routeFromDevice(project, neighbor.device, target, targetPort, seenRouters, mergeHops(hops, nextHopPath.hops));
+  }
+
   return { reachable: false, message: `${router.label}에서 ${targetPort.ipAddress}(으)로 가는 라우트가 없습니다.`, hops, routed: true };
+}
+
+function dynamicRoutingNeighbors(project: NetworkProject, router: NetworkDevice): Array<{ device: NetworkDevice; localPort: NetworkPort }> {
+  if (!routingProtocols(router).length) return [];
+  const neighbors: Array<{ device: NetworkDevice; localPort: NetworkPort }> = [];
+  for (const candidate of project.devices.filter((device) => device.id !== router.id && device.powerOn && isRoutingDevice(device) && shareRoutingProtocol(router, device))) {
+    for (const localPort of routedIpPorts(router)) {
+      const peerPort = routedIpPorts(candidate).find((port) => ipInSubnet(port.ipAddress, localPort.ipAddress, localPort.subnetMask));
+      if (peerPort && hasLayer2Path(project, router.id, candidate.id, portVlan(localPort)).reachable) {
+        neighbors.push({ device: candidate, localPort });
+        break;
+      }
+    }
+  }
+  return neighbors;
+}
+
+function routedIpPorts(device: NetworkDevice): NetworkPort[] {
+  return device.ports.filter((port) => port.adminUp && port.ipAddress && port.subnetMask);
+}
+
+function routingProtocols(device: NetworkDevice): NonNullable<NetworkDevice["config"]["routingProtocols"]> {
+  return device.config.routingProtocols ?? [];
+}
+
+function shareRoutingProtocol(a: NetworkDevice, b: NetworkDevice): boolean {
+  return routingProtocols(a).some((left) => routingProtocols(b).some((right) =>
+    left.protocol === right.protocol &&
+    (left.protocol !== "eigrp" || (left.processId ?? "") === (right.processId ?? ""))
+  ));
 }
 
 function hasLayer2Path(project: NetworkProject, sourceId: string, targetId: string, vlan: number): { reachable: boolean; hops: string[] } {
