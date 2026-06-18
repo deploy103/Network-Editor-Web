@@ -2533,8 +2533,9 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
     const commandText = commandOverride ?? input;
     const normalizedInput = commandText.trim().toLowerCase().replace(/\s+/g, " ");
     const submittedInput = commandText;
+    const sensitiveInput = session.pendingAction === "enable-password";
     setHistoryIndex(null);
-    if (submittedInput.trim()) {
+    if (submittedInput.trim() && !sensitiveInput) {
       setHistory((items) => [...items, submittedInput].slice(-80));
     }
     setCompletionItems([]);
@@ -2552,7 +2553,7 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
     const result = await cliEngine.run(device, session, commandText);
     setSession(result.session);
     onUpdate(result.device);
-    setLines((items) => [...items, `${prompt} ${submittedInput}`, result.output].filter(Boolean));
+    setLines((items) => [...items, sensitiveInput ? "" : `${prompt} ${submittedInput}`, result.output].filter(Boolean));
     setInput("");
   }
 
@@ -2654,6 +2655,7 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
         <span>{cliEngine.prompt(device, session)}</span>
         <input
           aria-label="CLI 명령"
+          type={session.pendingAction === "enable-password" ? "password" : "text"}
           value={input}
           onChange={(event) => { setInput(event.target.value); setCompletionItems([]); }}
           onKeyDown={handleInputKeyDown}
