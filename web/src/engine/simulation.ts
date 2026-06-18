@@ -409,7 +409,7 @@ function linkCarriesVlan(a: NetworkPort, b: NetworkPort, vlan: number): boolean 
 }
 
 function portAllowsVlan(port: NetworkPort, vlan: number): boolean {
-  if (port.mode === "trunk") return port.allowedVlans.includes(vlan);
+  if (port.mode === "trunk") return port.allowedVlans.includes(vlan) || port.nativeVlan === vlan;
   return port.vlan === vlan;
 }
 

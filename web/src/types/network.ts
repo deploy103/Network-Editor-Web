@@ -51,6 +51,7 @@ export interface NetworkPort {
   mode: PortMode;
   vlan: number;
   allowedVlans: number[];
+  nativeVlan?: number;
   ipAddress: string;
   subnetMask: string;
   gateway: string;
