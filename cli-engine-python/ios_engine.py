@@ -86,7 +86,7 @@ def command_candidates(device: NetworkDevice, session: IOSSession) -> list[str]:
     elif mode == "privileged":
         base = ["disable", "configure terminal", "conf t", "show running-config", "show running-config | include ", "show running-config | section ", "show startup-config", "show version", "show inventory", "show flash", "show file systems", "show users", "show line", "show protocols", "show controllers", "show processes cpu", "show memory", "show spanning-tree", "show spanning-tree vlan ", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route summary", "show ip protocols", "show ip ospf", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show ip dhcp binding", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp server statistics", "show access-lists", "clear arp", "clear mac address-table", "clear ip dhcp binding", "clear ip dhcp conflict *", "clear ip nat translation *", "write memory", "copy running-config startup-config", "reload", "write erase", "power off", "power cycle", "help"]
     elif mode == "global":
-        base = ["hostname ", "enable secret ", "enable password ", "banner motd #", "no banner motd", "username admin privilege 15 secret cisco", "interface ", "interface range fa0/1 - 2", "default interface ", "vlan ", "spanning-tree vlan 1 root primary", "no spanning-tree vlan 1 root primary", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "ip domain-name lab.local", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "ip dhcp excluded-address ", "ip dhcp pool ", "ip access-list standard ", "ip access-list extended ", "access-list 101 permit ip any any", "ip nat inside source static ", "service password-encryption", "no service password-encryption", "do show running-config", "end", "exit", "help"]
+        base = ["hostname ", "enable secret ", "enable password ", "banner motd #", "no banner motd", "username admin privilege 15 secret cisco", "interface ", "interface range fa0/1 - 2", "default interface ", "vlan ", "spanning-tree vlan 1 root primary", "no spanning-tree vlan 1 root primary", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "ip domain-name lab.local", "ip name-server 8.8.8.8", "no ip name-server ", "ip host www.lab.local 192.168.10.10", "no ip host ", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "ip dhcp excluded-address ", "ip dhcp pool ", "ip access-list standard ", "ip access-list extended ", "access-list 101 permit ip any any", "ip nat inside source static ", "service password-encryption", "no service password-encryption", "service dns", "no service dns", "do show running-config", "end", "exit", "help"]
     elif mode == "interface":
         base = ["description ", "no description", "ip address ", "no ip address", "ip helper-address ", "no ip helper-address ", "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "ip access-group 101 in", "ip access-group 101 out", "shutdown", "no shutdown", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk native vlan ", "switchport trunk allowed vlan ", "switchport nonegotiate", "no switchport nonegotiate", "spanning-tree portfast", "spanning-tree bpduguard enable", "clock rate ", "do show running-config interface ", "end", "exit", "help"]
     elif mode == "dhcp":
@@ -381,6 +381,10 @@ def expand_no(rest: list[str]) -> str:
             return "no ip default-gateway"
         if abbr(second, "domain-name", 3):
             return "no ip domain-name"
+        if abbr(second, "name-server", 3):
+            return "no ip name-server " + " ".join(rest[2:])
+        if abbr(second, "host"):
+            return "no ip host " + " ".join(rest[2:])
         if abbr(second, "dhcp") and len(lower) > 2 and abbr(lower[2], "excluded-address", 3):
             return "no ip dhcp excluded-address " + " ".join(rest[3:])
         if abbr(second, "dhcp") and len(lower) > 2 and abbr(lower[2], "pool"):
@@ -443,6 +447,8 @@ def expand_ip(rest: list[str], mode: str) -> str:
         return "ip nat " + " ".join(rest[1:])
     if abbr(first, "host"):
         return "ip host " + " ".join(rest[1:])
+    if abbr(first, "name-server", 3):
+        return "ip name-server " + " ".join(rest[1:])
     return "ip " + " ".join(rest)
 
 
@@ -704,6 +710,31 @@ def run_global(device: NetworkDevice, session: IOSSession, command: str, lower: 
         return _result(device, session, "")
     if lower == "no ip domain-name":
         config.pop("domainName", None)
+        return _result(device, session, "")
+    if lower.startswith("ip name-server "):
+        servers = [item for item in command[len("ip name-server "):].split() if is_ipv4(item)]
+        if not servers:
+            return _result(device, session, "% Usage: ip name-server <address> [address...]")
+        config["nameServers"] = unique((config.get("nameServers") or []) + servers)
+        config["services"]["dns"] = True
+        return _result(device, session, "")
+    if lower.startswith("no ip name-server"):
+        servers = [item for item in command[len("no ip name-server "):].split() if is_ipv4(item)] if lower != "no ip name-server" else []
+        config["nameServers"] = [server for server in (config.get("nameServers") or []) if servers and server not in servers] if servers else []
+        return _result(device, session, "")
+    if lower.startswith("ip host "):
+        parts = command.split()
+        if len(parts) < 4 or not is_ipv4(parts[-1]):
+            return _result(device, session, "% Usage: ip host <name> <address>")
+        name = parts[2]
+        address = parts[-1]
+        config["dnsRecords"] = [record for record in config.get("dnsRecords", []) if record.get("name", "").lower() != name.lower()]
+        config["dnsRecords"].append({"id": create_id("dns"), "name": name, "value": address})
+        config["services"]["dns"] = True
+        return _result(device, session, "")
+    if lower.startswith("no ip host "):
+        name = command[len("no ip host "):].strip().split()[0]
+        config["dnsRecords"] = [record for record in config.get("dnsRecords", []) if record.get("name", "").lower() != name.lower()]
         return _result(device, session, "")
     if lower == "ip domain-lookup":
         config["domainLookup"] = True
@@ -1207,7 +1238,10 @@ def show_command(device: NetworkDevice, lower: str) -> str:
         return access_lists(device, name)
     if lower == "show hosts":
         records = cfg(device).get("dnsRecords", [])
-        return "\n".join(f"{r.get('name','').ljust(32)}{r.get('value','')}" for r in records) if records else "No host records."
+        name_servers = cfg(device).get("nameServers", [])
+        lines = [f"Default domain is {cfg(device).get('domainName') or 'not set'}", f"Name servers are: {', '.join(name_servers) or 'not set'}"]
+        lines.extend(f"{r.get('name','').ljust(32)}{r.get('value','')}" for r in records)
+        return "\n".join(lines) if records or name_servers else "No host records."
     if lower in ("show cdp neighbors", "show cdp neighbors detail"):
         return "Device ID        Local Intrfce     Holdtme    Capability  Platform  Port ID\nNo CDP neighbors discovered by the Python device-local CLI engine."
     if lower == "show line":
@@ -1236,6 +1270,8 @@ def running_config(device: NetworkDevice) -> str:
     lines.extend(f"logging host {host}" for host in log.get("hosts", []))
     if config.get("domainName"):
         lines.append(f"ip domain-name {config['domainName']}")
+    for server in config.get("nameServers", []):
+        lines.append(f"ip name-server {server}")
     if config.get("domainLookup") is False:
         lines.append("no ip domain-lookup")
     if config.get("sshVersion"):
@@ -1254,6 +1290,7 @@ def running_config(device: NetworkDevice) -> str:
     for port in device.get("ports", []):
         lines.extend(interface_config(port))
     lines.extend(f"ip route {r.get('network')} {r.get('mask')} {r.get('nextHop')}" for r in config.get("staticRoutes", []))
+    lines.extend(f"ip host {record.get('name')} {record.get('value')}" for record in config.get("dnsRecords", []))
     for item in config.get("dhcpExcludedRanges", []):
         lines.append(f"ip dhcp excluded-address {item.get('startIp')}{' ' + item.get('endIp') if item.get('endIp') else ''}")
     for pool in config.get("dhcpPools", []):
@@ -1339,6 +1376,7 @@ def apply_startup_config(device: NetworkDevice) -> NetworkDevice:
         "dhcpPools": [],
         "dhcpExcludedRanges": [],
         "dnsRecords": [],
+        "nameServers": [],
         "accessRules": [],
         "natRules": [],
         "localUsers": [],
@@ -1386,6 +1424,7 @@ def normalize_device(device: NetworkDevice) -> NetworkDevice:
     config.setdefault("dhcpPools", [])
     config.setdefault("dhcpExcludedRanges", [])
     config.setdefault("dnsRecords", [])
+    config.setdefault("nameServers", [])
     config.setdefault("accessRules", [])
     config.setdefault("natRules", [])
     config.setdefault("localUsers", [])
