@@ -181,8 +181,16 @@ function diagnoseServices(project: NetworkProject): NetworkIssue[] {
       if (!rule.interfaceName || !rule.source || !rule.destination) {
         issues.push(issue("warning", `${device.label} ACL 규칙이 불완전합니다`, "Access rule에는 source, destination, interface 필드가 필요합니다."));
       }
-      if (rule.interfaceName && !device.ports.some((port) => port.name === rule.interfaceName)) {
+      if (!rule.listName && rule.interfaceName && !device.ports.some((port) => port.name === rule.interfaceName)) {
         issues.push(issue("warning", `${device.label} ACL interface가 없습니다`, `${rule.interfaceName}는 이 방화벽의 포트와 일치하지 않습니다.`));
+      }
+    }
+    const aclNames = new Set(device.config.accessRules.map((rule) => (rule.listName || rule.interfaceName || "").toLowerCase()).filter(Boolean));
+    for (const port of device.ports) {
+      for (const listName of [port.accessGroupIn, port.accessGroupOut].filter(Boolean)) {
+        if (listName && !aclNames.has(listName.toLowerCase())) {
+          issues.push(issue("warning", `${device.label} ${port.name} ACL 참조가 비어 있습니다`, `ip access-group ${listName}에 해당하는 access-list가 없습니다.`));
+        }
       }
     }
     for (const rule of device.config.natRules) {

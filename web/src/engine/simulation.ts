@@ -1,4 +1,4 @@
-import { ipInSubnet, isIpv4 } from "./ip";
+import { ipInSubnet, ipToNumber, isIpv4 } from "./ip";
 import { endpoint } from "./topology";
 import type { NetworkDevice, NetworkPort, NetworkProject, SimulationEvent } from "../types/network";
 
@@ -263,50 +263,95 @@ function appendRouteEvents(project: NetworkProject, route: RouteResult, source: 
 
 function applyFirewallRules(project: NetworkProject, hops: string[], sourceIp: string, targetIp: string): { project: NetworkProject; allowed: boolean; message: string } {
   let blocked = "";
-  let matchedDeviceId = "";
-  let matchedRuleId = "";
+  const accessHits = new Map<string, Set<string>>();
   const natHits = new Map<string, Set<string>>();
   for (let hopIndex = 0; hopIndex < hops.length; hopIndex += 1) {
     const deviceId = hops[hopIndex];
+    const filterDevice = project.devices.find((device) => device.id === deviceId && device.config.accessRules.length);
     const firewall = project.devices.find((device) => device.id === deviceId && device.kind === "firewall");
-    if (!firewall) continue;
+    if (!filterDevice && !firewall) continue;
+    const policyDevice = filterDevice ?? firewall;
+    if (!policyDevice) continue;
+    const ingressPortName = connectedPortName(project, hops[hopIndex - 1] ?? "", policyDevice.id);
+    const egressPortName = connectedPortName(project, hops[hopIndex + 1] ?? "", policyDevice.id);
+    const ingressPort = policyDevice.ports.find((port) => port.name === ingressPortName);
+    const egressPort = policyDevice.ports.find((port) => port.name === egressPortName);
     const adjacentPorts = new Set([
-      connectedPortName(project, hops[hopIndex - 1] ?? "", firewall.id),
-      connectedPortName(project, hops[hopIndex + 1] ?? "", firewall.id)
+      ingressPortName,
+      egressPortName
     ].filter(Boolean));
-    const matchingNatRules = firewall.config.natRules.filter((rule) => addressMatches(rule.insideLocal, sourceIp));
-    if (matchingNatRules.length > 0) {
-      natHits.set(firewall.id, new Set(matchingNatRules.map((rule) => rule.id)));
+
+    for (const binding of [
+      { port: ingressPort, listName: ingressPort?.accessGroupIn, direction: "in" },
+      { port: egressPort, listName: egressPort?.accessGroupOut, direction: "out" }
+    ]) {
+      if (!binding.listName) continue;
+      const decision = evaluateAcl(policyDevice, binding.listName, sourceIp, targetIp);
+      if (!decision) continue;
+      if (decision.ruleId) addHit(accessHits, policyDevice.id, decision.ruleId);
+      if (!decision.allowed) {
+        blocked = `${policyDevice.label} ${binding.port?.name ?? ""} ${binding.direction} ACL ${binding.listName}이(가) ${sourceIp}에서 ${targetIp}(으)로 가는 ICMP를 차단했습니다.`;
+        break;
+      }
     }
-    const rule = firewall.config.accessRules.find((item) =>
+    if (blocked) break;
+
+    const matchingNatRules = firewall?.config.natRules.filter((rule) => addressMatches(rule.insideLocal, sourceIp)) ?? [];
+    if (matchingNatRules.length > 0) {
+      natHits.set(policyDevice.id, new Set(matchingNatRules.map((rule) => rule.id)));
+    }
+    const legacyRule = policyDevice.config.accessRules.find((item) =>
+      !item.listName &&
       (item.protocol === "ip" || item.protocol === "icmp") &&
       addressMatches(item.source, sourceIp) &&
       addressMatches(item.destination, targetIp) &&
       (!item.interfaceName || adjacentPorts.has(item.interfaceName))
     );
-    if (!rule) continue;
-    matchedDeviceId = firewall.id;
-    matchedRuleId = rule.id;
-    if (rule.action === "deny") blocked = `${firewall.label}이(가) ${sourceIp}에서 ${targetIp}(으)로 가는 ICMP를 차단했습니다.`;
-    break;
+    if (!legacyRule) continue;
+    addHit(accessHits, policyDevice.id, legacyRule.id);
+    if (legacyRule.action === "deny") {
+      blocked = `${policyDevice.label}이(가) ${sourceIp}에서 ${targetIp}(으)로 가는 ICMP를 차단했습니다.`;
+      break;
+    }
   }
-  if (!matchedRuleId && natHits.size === 0) return { project, allowed: true, message: "" };
+  if (accessHits.size === 0 && natHits.size === 0) return { project, allowed: !blocked, message: blocked };
   const nextProject = {
     ...project,
     devices: project.devices.map((device) => {
+      const accessRuleIds = accessHits.get(device.id);
       const natRuleIds = natHits.get(device.id);
-      if (device.id !== matchedDeviceId && !natRuleIds) return device;
+      if (!accessRuleIds && !natRuleIds) return device;
       return {
         ...device,
         config: {
           ...device.config,
-          accessRules: device.config.accessRules.map((rule) => rule.id === matchedRuleId ? { ...rule, hits: rule.hits + 1 } : rule),
+          accessRules: device.config.accessRules.map((rule) => accessRuleIds?.has(rule.id) ? { ...rule, hits: rule.hits + 1 } : rule),
           natRules: device.config.natRules.map((rule) => natRuleIds?.has(rule.id) ? { ...rule, hits: rule.hits + 1 } : rule)
         }
       };
     })
   };
   return { project: nextProject, allowed: !blocked, message: blocked };
+}
+
+function evaluateAcl(device: NetworkDevice, listName: string, sourceIp: string, targetIp: string): { allowed: boolean; ruleId?: string } | null {
+  const rules = device.config.accessRules.filter((rule) => aclListName(rule).toLowerCase() === listName.toLowerCase());
+  if (!rules.length) return null;
+  const rule = rules.find((item) =>
+    (item.protocol === "ip" || item.protocol === "icmp") &&
+    addressMatches(item.source, sourceIp) &&
+    addressMatches(item.destination, targetIp)
+  );
+  if (!rule) return { allowed: false };
+  return { allowed: rule.action === "permit", ruleId: rule.id };
+}
+
+function aclListName(rule: NetworkDevice["config"]["accessRules"][number]): string {
+  return rule.listName || rule.interfaceName || "ACL";
+}
+
+function addHit(map: Map<string, Set<string>>, deviceId: string, ruleId: string): void {
+  map.set(deviceId, new Set([...(map.get(deviceId) ?? []), ruleId]));
 }
 
 function append(project: NetworkProject, success: boolean, message: string, sourceId: string, targetId: string, now: number) {
@@ -394,9 +439,9 @@ function connectedPortName(project: NetworkProject, neighborId: string, deviceId
 }
 
 function addressMatches(pattern: string, ipAddress: string): boolean {
-  const value = pattern.trim().toLowerCase();
+  const value = stripAclOptions(pattern.trim().toLowerCase());
   if (!value || value === "any") return true;
-  if (value.startsWith("host ")) return value.slice(5).trim() === ipAddress;
+  if (value.startsWith("host ")) return value.split(/\s+/)[1] === ipAddress;
   if (value.includes("/")) {
     const [network, prefix] = value.split("/");
     const prefixNumber = Number(prefix);
@@ -404,8 +449,20 @@ function addressMatches(pattern: string, ipAddress: string): boolean {
     return ipInSubnet(ipAddress, network, prefixToMask(prefixNumber));
   }
   const [network, mask] = value.split(/\s+/);
-  if (mask) return ipInSubnet(ipAddress, network, mask);
+  if (mask) return ipInSubnet(ipAddress, network, mask) || ipMatchesWildcard(ipAddress, network, mask);
   return value === ipAddress;
+}
+
+function stripAclOptions(value: string): string {
+  const tokens = value.split(/\s+/).filter(Boolean);
+  const optionIndex = tokens.findIndex((token) => token === "eq" || token === "neq" || token === "gt" || token === "lt" || token === "range" || token === "log" || token === "established");
+  return (optionIndex >= 0 ? tokens.slice(0, optionIndex) : tokens).join(" ");
+}
+
+function ipMatchesWildcard(ipAddress: string, network: string, wildcard: string): boolean {
+  if (!isIpv4(ipAddress) || !isIpv4(network) || !isIpv4(wildcard)) return false;
+  const inverseWildcard = (~ipToNumber(wildcard)) >>> 0;
+  return ((ipToNumber(ipAddress) ^ ipToNumber(network)) & inverseWildcard) === 0;
 }
 
 function prefixToMask(prefix: number): string {

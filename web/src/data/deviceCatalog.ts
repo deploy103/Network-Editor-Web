@@ -228,6 +228,8 @@ export function createPort(template: PortTemplate, index: number, moduleMeta?: {
     ipCapable: Boolean(template.ipCapable || template.mode === "routed"),
     stpPortfast: false,
     bpduGuard: false,
+    accessGroupIn: "",
+    accessGroupOut: "",
     moduleSlotId: moduleMeta?.slotId,
     moduleId: moduleMeta?.moduleId
   };
