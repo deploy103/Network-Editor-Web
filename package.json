@@ -1,23 +1,17 @@
 {
-  "name": "network-editor-web",
+  "name": "network-editor-web-monorepo",
   "private": true,
   "version": "0.1.0",
-  "type": "module",
+  "description": "Packet Tracer style web network simulator using TypeScript React, Rust WebAssembly, Go, and PostgreSQL.",
+  "workspaces": [
+    "web"
+  ],
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview --host 0.0.0.0"
-  },
-  "dependencies": {
-    "@vitejs/plugin-react": "6.0.2",
-    "lucide-react": "1.20.0",
-    "react": "19.2.7",
-    "react-dom": "19.2.7",
-    "vite": "8.0.16"
-  },
-  "devDependencies": {
-    "@types/react": "19.2.7",
-    "@types/react-dom": "19.2.3",
-    "typescript": "5.9.3"
+    "dev": "npm run dev --workspace web",
+    "build": "npm run build --workspace web",
+    "preview": "npm run preview --workspace web",
+    "build:rust": "bash scripts/build-wasm.sh",
+    "build:go": "cd server-go && go build ./...",
+    "check:all": "npm run build && npm run build:rust && npm run build:go"
   }
 }

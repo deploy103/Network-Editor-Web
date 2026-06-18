@@ -1,9 +1,9 @@
-node_modules/
-dist/
-alternative/
-id.txt
+node_modules
+dist
+web/dist
+web/node_modules
+engine-rust/target
+engine-rust/pkg
+server-go/bin
 .env
-.env.*
-*.local
 .DS_Store
-Thumbs.db
