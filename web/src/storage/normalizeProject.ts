@@ -177,7 +177,8 @@ function normalizePort(port: NetworkPort): NetworkPort {
     stpPortfast: port.stpPortfast === true,
     bpduGuard: port.bpduGuard === true,
     accessGroupIn: port.accessGroupIn || "",
-    accessGroupOut: port.accessGroupOut || ""
+    accessGroupOut: port.accessGroupOut || "",
+    natRole: port.natRole === "inside" || port.natRole === "outside" ? port.natRole : undefined
   };
 }
 

@@ -230,6 +230,7 @@ export function createPort(template: PortTemplate, index: number, moduleMeta?: {
     bpduGuard: false,
     accessGroupIn: "",
     accessGroupOut: "",
+    natRole: undefined,
     moduleSlotId: moduleMeta?.slotId,
     moduleId: moduleMeta?.moduleId
   };

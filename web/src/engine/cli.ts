@@ -27,6 +27,7 @@ export interface CliResult {
 type LineConfig = NonNullable<DeviceConfig["lineConfigs"]>[number];
 type RoutingProtocol = NonNullable<DeviceConfig["routingProtocols"]>[number];
 type AccessRule = DeviceConfig["accessRules"][number];
+type NatRule = DeviceConfig["natRules"][number];
 
 export function initialCliSession(): CliSession {
   return { mode: "exec" };
@@ -161,11 +162,11 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
   const base = session.mode === "exec"
     ? ["enable", "show version", "show clock", "show interfaces", "show ip interface brief", "show ip route", "show route", "show cdp neighbors", "show arp", "ping ", "traceroute ", "terminal length 0", "help"]
     : session.mode === "privileged"
-      ? ["disable", "configure terminal", "conf t", "show running-config", "show startup-config", "show version", "show clock", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show spanning-tree", "show interfaces", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show vlan brief", "show mac address-table", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show ip access-lists", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
+      ? ["disable", "configure terminal", "conf t", "show running-config", "show startup-config", "show version", "show clock", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show spanning-tree", "show interfaces", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show mac address-table", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show ip access-lists", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
-        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "interface ", "int ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-lookup", "no ip domain-lookup", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
+        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "interface ", "int ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-lookup", "no ip domain-lookup", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
-          ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "ip access-group 101 in", "ip access-group 101 out", "no ip access-group 101 in", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk allowed vlan ", "no switchport", "spanning-tree portfast", "no spanning-tree portfast", "spanning-tree bpduguard enable", "spanning-tree bpduguard disable", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
+          ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "ip access-group 101 in", "ip access-group 101 out", "no ip access-group 101 in", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk allowed vlan ", "no switchport", "spanning-tree portfast", "no spanning-tree portfast", "spanning-tree bpduguard enable", "spanning-tree bpduguard disable", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
           : session.mode === "vlan"
             ? ["name ", "end", "exit", "help"]
             : session.mode === "dhcp"
@@ -331,6 +332,7 @@ function expandNoCommand(rest: string[]): string {
     if (isAbbrev(lowerRest[1], "host")) return `no ip host ${rest.slice(2).join(" ")}`;
     if (isAbbrev(lowerRest[1], "access-group", 3)) return `no ip access-group ${rest.slice(2).join(" ")}`;
     if (isAbbrev(lowerRest[1], "access-list", 3)) return `no ip access-list ${rest.slice(2).join(" ")}`;
+    if (isAbbrev(lowerRest[1], "nat", 2)) return `no ip nat ${rest.slice(2).join(" ")}`;
   }
   if (isAbbrev(first, "vlan")) return `no vlan ${rest.slice(1).join(" ")}`;
   if (isAbbrev(first, "access-list", 3)) return `no access-list ${rest.slice(1).join(" ")}`;
@@ -351,6 +353,7 @@ function expandIpCommand(rest: string[], session: CliSession): string {
   if (isAbbrev(first, "host")) return `ip host ${rest.slice(1).join(" ")}`;
   if (isAbbrev(first, "dhcp") && isAbbrev(lowerRest[1], "pool")) return `ip dhcp pool ${rest.slice(2).join(" ")}`;
   if (isAbbrev(first, "access-list", 3)) return `ip access-list ${rest.slice(1).join(" ")}`;
+  if (isAbbrev(first, "nat", 2)) return `ip nat ${rest.slice(1).join(" ")}`;
   return `ip ${rest.join(" ")}`;
 }
 
@@ -416,6 +419,7 @@ function expandShowCommand(rest: string[]): string {
     if (isAbbrev(second, "ospf", 2)) return expandShowIpOspf(rest.slice(2));
     if (isAbbrev(second, "eigrp", 2)) return expandShowIpEigrp(rest.slice(2));
     if (isAbbrev(second, "rip", 2)) return expandShowIpRip(rest.slice(2));
+    if (isAbbrev(second, "nat", 2)) return expandShowIpNat(rest.slice(2));
   }
   if (isAbbrev(first, "interfaces", 3) || first === "int") {
     if (isAbbrev(second, "status", 2)) return "show interfaces status";
@@ -446,6 +450,13 @@ function expandShowIpRip(rest: string[]): string {
   const lowerRest = rest.map((token) => token.toLowerCase());
   if (isAbbrev(lowerRest[0], "database", 3)) return "show ip rip database";
   return "show ip rip";
+}
+
+function expandShowIpNat(rest: string[]): string {
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  if (isAbbrev(lowerRest[0], "translations", 2) || isAbbrev(lowerRest[0], "translation", 2)) return "show ip nat translations";
+  if (isAbbrev(lowerRest[0], "statistics", 3) || isAbbrev(lowerRest[0], "stats", 3)) return "show ip nat statistics";
+  return "show ip nat translations";
 }
 
 function expandSwitchportCommand(tokens: string[]): string {
@@ -483,6 +494,7 @@ const privilegedShowCommands = [
   "show startup-config",
   "show access-list",
   "show access-lists",
+  "show ip nat",
   "show nat"
 ];
 
@@ -672,6 +684,8 @@ function isGlobalStartupLine(lower: string): boolean {
     lower === "no ip domain-lookup" ||
     lower.startsWith("ip access-list ") ||
     lower.startsWith("no ip access-list ") ||
+    lower.startsWith("ip nat inside source static ") ||
+    lower.startsWith("no ip nat inside source static ") ||
     lower.startsWith("access-list ") ||
     lower.startsWith("nat ") ||
     lower.startsWith("service ") ||
@@ -698,6 +712,7 @@ function resetPortForBoot(device: NetworkDevice, port: NetworkPort): NetworkPort
     adminUp: true,
     accessGroupIn: "",
     accessGroupOut: "",
+    natRole: undefined,
     clockRate: undefined
   };
 }
@@ -744,6 +759,14 @@ function applyStartupGlobalLine(device: NetworkDevice, command: string, lower: s
     const acl = parseAccessListTarget(command.slice(3));
     return acl ? removeAccessList(device, acl.name) : device;
   }
+  if (lower.startsWith("ip nat inside source static ")) {
+    const nat = parseStaticNat(command, device);
+    return nat ? { ...device, config: { ...device.config, natRules: [...device.config.natRules, nat] } } : device;
+  }
+  if (lower.startsWith("no ip nat inside source static ")) {
+    const nat = parseStaticNat(command.slice(3), device);
+    return nat ? removeStaticNat(device, nat.insideLocal, nat.insideGlobal) : device;
+  }
   if (lower.startsWith("nat ")) {
     const [, insideLocal, insideGlobal, outsideInterface] = command.split(/\s+/);
     return insideLocal && insideGlobal && outsideInterface
@@ -775,6 +798,9 @@ function applyStartupInterfaceLine(device: NetworkDevice, portId: string, comman
   if (lower === "no spanning-tree portfast") return updatePort(device, port.id, { stpPortfast: false });
   if (lower === "spanning-tree bpduguard enable") return updatePort(device, port.id, { bpduGuard: true });
   if (lower === "spanning-tree bpduguard disable") return updatePort(device, port.id, { bpduGuard: false });
+  if (lower === "ip nat inside") return updatePort(device, port.id, { natRole: "inside" });
+  if (lower === "ip nat outside") return updatePort(device, port.id, { natRole: "outside" });
+  if (lower === "no ip nat inside" || lower === "no ip nat outside") return updatePort(device, port.id, { natRole: undefined });
   if (lower.startsWith("ip access-group ")) {
     const acl = parseAccessGroup(command);
     return acl ? updatePort(device, port.id, acl.direction === "in" ? { accessGroupIn: acl.name } : { accessGroupOut: acl.name }) : device;
@@ -921,6 +947,18 @@ function globalCommand(device: NetworkDevice, session: CliSession, command: stri
     return result(removeAccessList(device, acl.name), session, "");
   }
 
+  if (lower.startsWith("ip nat inside source static ")) {
+    const nat = parseStaticNat(command, device);
+    if (!nat) return result(device, session, "% Usage: ip nat inside source static <inside-local> <inside-global>");
+    return result({ ...device, config: { ...device.config, natRules: [...device.config.natRules.filter((rule) => !(rule.insideLocal === nat.insideLocal && rule.insideGlobal === nat.insideGlobal)), nat] } }, session, "");
+  }
+
+  if (lower.startsWith("no ip nat inside source static ")) {
+    const nat = parseStaticNat(command.slice(3), device);
+    if (!nat) return result(device, session, "% Usage: no ip nat inside source static <inside-local> <inside-global>");
+    return result(removeStaticNat(device, nat.insideLocal, nat.insideGlobal), session, "");
+  }
+
   if (lower.startsWith("ip route ")) {
     const [, , network, mask, nextHop] = command.split(/\s+/);
     if (!network || !mask || !nextHop) return result(device, session, "% Usage: ip route <network> <mask> <next-hop>");
@@ -1042,6 +1080,9 @@ function interfaceCommand(device: NetworkDevice, session: CliSession, command: s
   if (lower === "no spanning-tree portfast") return result(updatePort(device, port.id, { stpPortfast: false }), session, "");
   if (lower === "spanning-tree bpduguard enable") return result(updatePort(device, port.id, { bpduGuard: true }), session, "");
   if (lower === "spanning-tree bpduguard disable") return result(updatePort(device, port.id, { bpduGuard: false }), session, "");
+  if (lower === "ip nat inside") return result(updatePort(device, port.id, { natRole: "inside" }), session, "");
+  if (lower === "ip nat outside") return result(updatePort(device, port.id, { natRole: "outside" }), session, "");
+  if (lower === "no ip nat inside" || lower === "no ip nat outside") return result(updatePort(device, port.id, { natRole: undefined }), session, "");
   if (lower.startsWith("ip access-group ")) {
     const acl = parseAccessGroup(command);
     if (!acl) return result(device, session, "% Usage: ip access-group <list> in|out");
@@ -1225,12 +1266,14 @@ function showCommand(device: NetworkDevice, lower: string): string {
   if (lower === "show ip eigrp topology") return eigrpTopology(device);
   if (lower === "show ip eigrp") return eigrpStatus(device);
   if (lower === "show ip rip" || lower === "show ip rip database") return ripDatabase(device);
+  if (lower === "show ip nat translations") return natTranslations(device);
+  if (lower === "show ip nat statistics") return natStatistics(device);
   if (lower === "show ip dhcp binding") return device.runtime.dhcpLeases.map((lease) => `${lease.ipAddress.padEnd(16)}${lease.macAddress.padEnd(20)}${lease.deviceId}`).join("\n") || "No DHCP bindings.";
   if (lower === "show ip dhcp pool") return device.config.dhcpPools.map((pool) => [`풀 ${pool.name}`, `  네트워크 ${pool.network} ${pool.mask}`, `  기본 라우터 ${pool.defaultGateway}`, `  DNS 서버 ${pool.dnsServer}`, `  시작 범위 ${pool.startIp}, 최대 임대 ${pool.maxLeases}`, `  상태 ${pool.enabled ? "활성" : "비활성"}`].join("\n")).join("\n\n") || "DHCP 풀이 없습니다.";
   if (lower === "show hosts") return device.config.dnsRecords.map((record) => `${record.name.padEnd(32)}${record.value}`).join("\n") || "호스트 레코드가 없습니다.";
   if (lower === "show access-list" || lower === "show access-lists") return accessListStatus(device);
   if (lower.startsWith("show access-list ")) return accessListStatus(device, lower.slice("show access-list ".length).trim());
-  if (lower === "show nat") return device.config.natRules.map((rule) => `${rule.insideLocal} -> ${rule.insideGlobal} outside ${rule.outsideInterface} (${rule.hits}회 적중)`).join("\n") || "NAT 규칙이 없습니다.";
+  if (lower === "show nat") return natTranslations(device);
   return "% Unsupported show command.";
 }
 
@@ -1278,7 +1321,7 @@ function runningConfig(device: NetworkDevice): string {
     ...device.config.staticRoutes.map((route) => `ip route ${route.network} ${route.mask} ${route.nextHop}`),
     ...device.config.dnsRecords.map((record) => `ip host ${record.name} ${record.value}`),
     ...accessRulesConfig(device.config.accessRules),
-    ...device.config.natRules.map((rule) => `nat ${rule.insideLocal} ${rule.insideGlobal} ${rule.outsideInterface}`),
+    ...device.config.natRules.map((rule) => `ip nat inside source static ${rule.insideLocal} ${rule.insideGlobal}`),
     ...Object.entries(device.config.services).map(([name, enabled]) => `${enabled ? "" : "no "}service ${name}`),
     ...device.config.dhcpPools.flatMap((pool) => [
       `ip dhcp pool ${pool.name}`,
@@ -1322,6 +1365,7 @@ function interfaceConfig(port: NetworkPort): string[] {
   if (port.mode === "routed" && port.ipAddress) lines.push(` ip address ${port.ipAddress} ${port.subnetMask}`);
   if (port.mode === "access") lines.push(" switchport mode access", ` switchport access vlan ${port.vlan}`);
   if (port.mode === "trunk") lines.push(" switchport mode trunk", ` switchport trunk allowed vlan ${port.allowedVlans.join(",")}`);
+  if (port.natRole) lines.push(` ip nat ${port.natRole}`);
   if (port.accessGroupIn) lines.push(` ip access-group ${port.accessGroupIn} in`);
   if (port.accessGroupOut) lines.push(` ip access-group ${port.accessGroupOut} out`);
   if (port.stpPortfast) lines.push(" spanning-tree portfast");
@@ -1571,6 +1615,28 @@ function ripDatabase(device: NetworkDevice): string {
   ].join("\n");
 }
 
+function natTranslations(device: NetworkDevice): string {
+  if (!device.config.natRules.length) return "Pro  Inside global      Inside local       Outside local      Outside global";
+  return [
+    "Pro  Inside global      Inside local       Outside local      Outside global",
+    ...device.config.natRules.map((rule) => `---  ${rule.insideGlobal.padEnd(18)}${rule.insideLocal.padEnd(18)}---                ---`)
+  ].join("\n");
+}
+
+function natStatistics(device: NetworkDevice): string {
+  const inside = device.ports.filter((port) => port.natRole === "inside").map((port) => port.name).join(", ") || "none";
+  const outside = device.ports.filter((port) => port.natRole === "outside").map((port) => port.name).join(", ") || "none";
+  const hits = device.config.natRules.reduce((total, rule) => total + rule.hits, 0);
+  return [
+    `Total active translations: ${device.config.natRules.length} (static ${device.config.natRules.length}, dynamic 0)`,
+    `Outside interfaces: ${outside}`,
+    `Inside interfaces: ${inside}`,
+    `Hits: ${hits}  Misses: 0`,
+    "Expired translations: 0",
+    "Dynamic mappings: none"
+  ].join("\n");
+}
+
 function connectedNetworks(device: NetworkDevice): Array<{ network: string; prefix: number; portName: string }> {
   return device.ports
     .filter((port) => port.adminUp && port.ipAddress && port.subnetMask && isIpv4(port.ipAddress) && isIpv4(port.subnetMask))
@@ -1582,8 +1648,8 @@ function routerId(device: NetworkDevice): string {
 }
 
 function help(mode: CliMode): string {
-  if (mode === "global") return "hostname <name>, interface <name>, vlan <id>, ip route <network> <mask> <next-hop>, ip dhcp pool <name>, ip host <name> <address>, access-list <list> permit|deny <protocol> <source> <destination>, nat <local> <global> <outside>, service <name>, show ..., end";
-  if (mode === "interface") return "description <text>, ip address <ip> <mask>, ip access-group <list> in|out, switchport mode access|trunk, switchport access vlan <id>, switchport trunk allowed vlan <list>, clock rate <value>, shutdown, no shutdown, exit";
+  if (mode === "global") return "hostname <name>, interface <name>, vlan <id>, ip route <network> <mask> <next-hop>, ip nat inside source static <local> <global>, ip dhcp pool <name>, ip host <name> <address>, access-list <list> permit|deny <protocol> <source> <destination>, nat <local> <global> <outside>, service <name>, show ..., end";
+  if (mode === "interface") return "description <text>, ip address <ip> <mask>, ip nat inside|outside, ip access-group <list> in|out, switchport mode access|trunk, switchport access vlan <id>, switchport trunk allowed vlan <list>, clock rate <value>, shutdown, no shutdown, exit";
   if (mode === "vlan") return "name <vlan-name>, exit, end";
   if (mode === "dhcp") return "network <network> <mask>, default-router <ip>, dns-server <ip>, start-ip <ip>, max-leases <n>, shutdown, no shutdown, exit";
   if (mode === "line") return "password <value>, login, no login, transport input <all|ssh|telnet|none>, exec-timeout <min> <sec>, logging synchronous, exit";
@@ -1617,6 +1683,8 @@ function searchHelp(term: string): string {
     "show ip eigrp interfaces",
     "show ip eigrp topology",
     "show ip rip database",
+    "show ip nat translations",
+    "show ip nat statistics",
     "show ip dhcp pool",
     "show hosts",
     "show access-list",
@@ -1634,6 +1702,9 @@ function searchHelp(term: string): string {
     "switchport mode access",
     "switchport mode trunk",
     "ip route <network> <mask> <next-hop>",
+    "ip nat inside source static <inside-local> <inside-global>",
+    "ip nat inside",
+    "ip nat outside",
     "access-list 101 permit ip any any",
     "ip access-group 101 in",
     "ip dhcp pool <name>",
@@ -1750,6 +1821,23 @@ function parseAccessGroup(command: string): { name: string; direction: "in" | "o
   const direction = rawDirection?.toLowerCase();
   if (!rawName || (direction !== "in" && direction !== "out")) return null;
   return { name: rawName, direction };
+}
+
+function parseStaticNat(command: string, device: NetworkDevice): NatRule | null {
+  const [, , , , , insideLocal, insideGlobal] = command.split(/\s+/);
+  if (!insideLocal || !insideGlobal || !isIpv4(insideLocal) || !isIpv4(insideGlobal)) return null;
+  const outsideInterface = device.ports.find((port) => port.natRole === "outside")?.name || "outside";
+  return { id: createId("nat"), insideLocal, insideGlobal, outsideInterface, hits: 0 };
+}
+
+function removeStaticNat(device: NetworkDevice, insideLocal: string, insideGlobal?: string): NetworkDevice {
+  return {
+    ...device,
+    config: {
+      ...device.config,
+      natRules: device.config.natRules.filter((rule) => !(rule.insideLocal === insideLocal && (!insideGlobal || rule.insideGlobal === insideGlobal)))
+    }
+  };
 }
 
 function aclUsage(): string {
@@ -1971,7 +2059,8 @@ function createSviInterface(device: NetworkDevice, name: string): { device: Netw
     adminUp: true,
     ipCapable: true,
     accessGroupIn: "",
-    accessGroupOut: ""
+    accessGroupOut: "",
+    natRole: undefined
   };
   const next = ensureVlan({ ...device, ports: [...device.ports, port] }, vlan);
   return { device: next, port };
