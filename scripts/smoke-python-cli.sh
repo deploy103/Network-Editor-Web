@@ -50,6 +50,7 @@ def run(command):
 
 assert_true(session["mode"] == "exec", "initial mode must be exec")
 assert_true(prompt(device, session).endswith(">"), "Python prompt must render exec mode")
+assert_true("privileged EXEC" in run("conf t"), "configure terminal from exec must require enable")
 run("enable")
 assert_true(session["mode"] == "privileged", "enable must enter privileged mode")
 assert_true("show ip route" in cli_completions(device, session, "sh ip r"), "Python completions must expand abbreviated show route")
@@ -103,6 +104,8 @@ assert_true("PID:" in run("show inventory"), "show inventory must render device 
 assert_true("Line" in run("show users"), "show users must be supported")
 assert_true("ip helper-address 192.168.10.254" in run("show running-config | include helper-address"), "show run pipe include must filter output")
 assert_true("router ospf 1" in run("show running-config | section router"), "show run pipe section must include router section")
+assert_true("interface Vlan1" in run("show running-config | begin interface Vlan1"), "show run pipe begin must start at matched line")
+assert_true("banner motd" not in run("show running-config | exclude banner"), "show run pipe exclude must filter output")
 assert_true("FastEthernet0/1" in run("show protocols"), "show protocols must render interface protocol status")
 assert_true("controller" in run("show controllers"), "show controllers must render controller status")
 assert_true("CPU utilization" in run("show processes cpu"), "show processes cpu must be supported")
@@ -146,6 +149,11 @@ assert_true(device["powerOn"] is False, "power off must update device state")
 assert_true("powered off" in run("show version"), "show version must reflect powered-off state")
 assert_true("Power restored" in run("power on"), "power on must boot the device")
 assert_true(device["powerOn"] is True, "power on must update device state")
+run("enable")
+run("cisco")
+assert_true("Continue" in run("write erase"), "write erase must ask for confirmation")
+run("")
+assert_true("not saved" in run("show startup-config"), "write erase confirm must clear startup-config")
 
 print("Python CLI smoke tests passed")
 PY

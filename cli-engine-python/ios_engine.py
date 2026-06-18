@@ -541,6 +541,8 @@ def run_common(device: NetworkDevice, session: IOSSession, command: str, lower: 
 
 
 def run_exec(device: NetworkDevice, session: IOSSession, command: str, lower: str) -> dict[str, Any]:
+    if lower == "configure terminal":
+        return _result(device, session, "% Please enter privileged EXEC mode first. Type enable.")
     return _result(device, session, "% Invalid input detected at '^' marker.")
 
 
