@@ -244,6 +244,7 @@ export function defaultConfig(hostname: string, kind: DeviceKind): DeviceConfig 
     domainName: undefined,
     sshVersion: "2",
     rsaKeyGenerated: false,
+    passwordEncryption: false,
     lineConfigs: [],
     routingProtocols: [],
     staticRoutes: [],

@@ -128,6 +128,7 @@ export interface DeviceConfig {
   domainName?: string;
   sshVersion?: "1" | "2";
   rsaKeyGenerated?: boolean;
+  passwordEncryption?: boolean;
   defaultGateway?: string;
   staticRoutes: StaticRoute[];
   vlans: Array<{ id: number; name: string }>;
