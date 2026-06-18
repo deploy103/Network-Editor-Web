@@ -137,6 +137,7 @@ export interface DeviceConfig {
   rsaKeyGenerated?: boolean;
   passwordEncryption?: boolean;
   defaultGateway?: string;
+  logging?: { console: boolean; buffered: boolean; hosts: string[]; trap: string };
   staticRoutes: StaticRoute[];
   vlans: Array<{ id: number; name: string }>;
   dhcpPools: DhcpPool[];

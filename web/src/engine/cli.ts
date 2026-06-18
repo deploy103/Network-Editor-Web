@@ -179,7 +179,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
     : session.mode === "privileged"
       ? ["disable", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show clock", "show privilege", "show history", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show spanning-tree", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip ssh", "show ip route", "show ip route summary", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show mac address-table", "show mac address-table dynamic", "show mac address-table interface ", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show ip access-lists", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
-        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "username admin secret cisco", "no username ", "interface ", "int ", "interface range fa0/1 - 2", "default interface ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-name lab.local", "no ip domain-name", "ip ssh version 2", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "crypto key zeroize rsa", "ip dhcp excluded-address 192.168.1.1 192.168.1.20", "ip dhcp pool ", "no ip dhcp excluded-address ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service password-encryption", "no service password-encryption", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
+        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "username admin secret cisco", "no username ", "interface ", "int ", "interface range fa0/1 - 2", "default interface ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-name lab.local", "no ip domain-name", "ip ssh version 2", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "crypto key zeroize rsa", "logging host 192.168.1.100", "logging trap warnings", "logging buffered", "no logging console", "ip dhcp excluded-address 192.168.1.1 192.168.1.20", "ip dhcp pool ", "no ip dhcp excluded-address ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service password-encryption", "no service password-encryption", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
           ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "ip access-group 101 in", "ip access-group 101 out", "no ip access-group 101 in", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk native vlan ", "switchport trunk allowed vlan ", "no switchport", "spanning-tree portfast", "no spanning-tree portfast", "spanning-tree bpduguard enable", "spanning-tree bpduguard disable", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
           : session.mode === "vlan"
@@ -238,6 +238,7 @@ function expandCliHead(command: string, session: CliSession): string {
   if (isAbbrev(first, "hostname", 4)) return `hostname ${rest.join(" ")}`;
   if (isAbbrev(first, "username", 4)) return `username ${rest.join(" ")}`;
   if (isAbbrev(first, "crypto", 3)) return expandCryptoCommand(rest);
+  if (isAbbrev(first, "logging", 3)) return `logging ${rest.join(" ")}`;
   if (isAbbrev(first, "default", 3)) return expandDefaultCommand(rest);
   if (isAbbrev(first, "banner", 3)) return expandBannerCommand(rest);
   if (isAbbrev(first, "line", 2)) return expandLineCommand(rest);
@@ -741,6 +742,8 @@ function isGlobalStartupLine(lower: string): boolean {
     lower.startsWith("ip ssh version ") ||
     lower.startsWith("crypto key generate rsa") ||
     lower === "crypto key zeroize rsa" ||
+    lower.startsWith("logging ") ||
+    lower.startsWith("no logging ") ||
     lower === "ip domain-lookup" ||
     lower === "no ip domain-lookup" ||
     lower.startsWith("username ") ||
@@ -810,6 +813,7 @@ function applyStartupGlobalLine(device: NetworkDevice, command: string, lower: s
   }
   if (lower.startsWith("crypto key generate rsa")) return { ...device, config: { ...device.config, rsaKeyGenerated: true } };
   if (lower === "crypto key zeroize rsa") return { ...device, config: { ...device.config, rsaKeyGenerated: false } };
+  if (lower.startsWith("logging ") || lower.startsWith("no logging ")) return applyLoggingCommand(device, command, lower);
   if (lower === "ip domain-lookup") return { ...device, config: { ...device.config, domainLookup: true } };
   if (lower === "no ip domain-lookup") return { ...device, config: { ...device.config, domainLookup: false } };
   if (lower.startsWith("username ")) {
@@ -1100,6 +1104,10 @@ function globalCommand(device: NetworkDevice, session: CliSession, command: stri
     return result({ ...device, config: { ...device.config, rsaKeyGenerated: true, sshVersion: device.config.sshVersion ?? "2" } }, session, `The name for the keys will be: ${device.config.hostname}.${device.config.domainName || "local"}\n% The key modulus size is ${modulus} bits\n% Generating ${modulus} bit RSA keys, keys will be non-exportable...[OK]`);
   }
   if (lower === "crypto key zeroize rsa") return result({ ...device, config: { ...device.config, rsaKeyGenerated: false } }, session, "% All RSA keys zeroized.");
+  if (lower.startsWith("logging ") || lower.startsWith("no logging ")) {
+    const next = applyLoggingCommand(device, command, lower);
+    return next === device ? result(device, session, "% Unsupported logging command.") : result(next, session, "");
+  }
   if (lower === "ip domain-lookup") return result({ ...device, config: { ...device.config, domainLookup: true } }, session, "");
   if (lower === "no ip domain-lookup") return result({ ...device, config: { ...device.config, domainLookup: false } }, session, "");
 
@@ -1389,7 +1397,7 @@ function showCommand(device: NetworkDevice, lower: string): string {
   if (lower === "show version") return [`${device.model} Software, Network Editor Web`, `Device uptime is simulated`, `System image file is "ptweb:${device.modelId}"`, `${device.ports.length} interfaces`, `${device.powerOn ? "System returned to ROM by power-on" : "System is powered off"}`].join("\n");
   if (lower === "show clock") return new Date().toLocaleString("ko-KR", { hour12: false });
   if (lower === "show inventory") return [`NAME: "${device.label}", DESCR: "${device.model}"`, `PID: ${device.modelId}, VID: PTWEB, SN: ${device.id}`, ...device.modules.map((module) => `NAME: "${module.slotId}", PID: ${module.moduleId}`)].join("\n");
-  if (lower === "show logging") return device.runtime.logs.length ? device.runtime.logs.map((log) => `${new Date(log.createdAt).toLocaleString("ko-KR", { hour12: false })} ${log.level.toUpperCase()}: ${log.message}`).join("\n") : "No logging messages.";
+  if (lower === "show logging") return loggingStatus(device);
   if (lower === "show flash" || lower === "show flash:") return flashDirectory(device);
   if (lower === "show file systems") return fileSystems(device);
   if (lower === "show processes cpu") return "CPU utilization for five seconds: 1%/0%; one minute: 1%; five minutes: 1%";
@@ -1481,6 +1489,46 @@ function fileSystems(device: NetworkDevice): string {
   ].join("\n");
 }
 
+function loggingConfig(device: NetworkDevice): string[] {
+  const logging = device.config.logging ?? { console: true, buffered: true, hosts: [], trap: "informational" };
+  return [
+    logging.console ? "logging console" : "no logging console",
+    ...(logging.buffered ? ["logging buffered"] : []),
+    ...(logging.trap ? [`logging trap ${logging.trap}`] : []),
+    ...logging.hosts.map((host) => `logging host ${host}`)
+  ];
+}
+
+function loggingStatus(device: NetworkDevice): string {
+  const logging = device.config.logging ?? { console: true, buffered: true, hosts: [], trap: "informational" };
+  return [
+    `Syslog logging: ${logging.console || logging.buffered || logging.hosts.length ? "enabled" : "disabled"}`,
+    `    Console logging: ${logging.console ? "enabled" : "disabled"}`,
+    `    Buffer logging: ${logging.buffered ? "enabled" : "disabled"}`,
+    `    Trap logging: level ${logging.trap}`,
+    `    Logging to hosts: ${logging.hosts.join(", ") || "none"}`,
+    ...(device.runtime.logs.length ? device.runtime.logs.map((log) => `${new Date(log.createdAt).toLocaleString("ko-KR", { hour12: false })} ${log.level.toUpperCase()}: ${log.message}`) : ["No logging messages."])
+  ].join("\n");
+}
+
+function applyLoggingCommand(device: NetworkDevice, command: string, lower: string): NetworkDevice {
+  const logging = device.config.logging ?? { console: true, buffered: true, hosts: [], trap: "informational" };
+  if (lower === "logging console") return { ...device, config: { ...device.config, logging: { ...logging, console: true } } };
+  if (lower === "no logging console") return { ...device, config: { ...device.config, logging: { ...logging, console: false } } };
+  if (lower === "logging buffered") return { ...device, config: { ...device.config, logging: { ...logging, buffered: true } } };
+  if (lower === "no logging buffered") return { ...device, config: { ...device.config, logging: { ...logging, buffered: false } } };
+  if (lower.startsWith("logging trap ")) return { ...device, config: { ...device.config, logging: { ...logging, trap: command.slice("logging trap ".length).trim() || logging.trap } } };
+  if (lower.startsWith("logging host ")) {
+    const host = command.slice("logging host ".length).trim();
+    return isIpv4(host) ? { ...device, config: { ...device.config, logging: { ...logging, hosts: unique([...logging.hosts, host]) } } } : device;
+  }
+  if (lower.startsWith("no logging host ")) {
+    const host = command.slice("no logging host ".length).trim();
+    return { ...device, config: { ...device.config, logging: { ...logging, hosts: logging.hosts.filter((item) => item !== host) } } };
+  }
+  return device;
+}
+
 function controllersStatus(device: NetworkDevice, filter = ""): string {
   const wanted = filter.trim().toLowerCase();
   const ports = device.ports.filter((port) => {
@@ -1504,6 +1552,7 @@ function runningConfig(device: NetworkDevice): string {
     ...(device.config.enableSecret ? [`enable secret ${device.config.enableSecret}`] : []),
     ...(device.config.enablePassword ? [`enable password ${device.config.enablePassword}`] : []),
     ...(device.config.passwordEncryption ? ["service password-encryption"] : []),
+    ...loggingConfig(device),
     ...(device.config.domainLookup === false ? ["no ip domain-lookup"] : []),
     ...(device.config.domainName ? [`ip domain-name ${device.config.domainName}`] : []),
     ...(device.config.sshVersion ? [`ip ssh version ${device.config.sshVersion}`] : []),
