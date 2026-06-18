@@ -173,6 +173,8 @@ def expand_command(command: str, session: IOSSession) -> str:
         return expand_show(rest)
     if first == "wr" or abbr(first, "write", 2):
         return "write erase" if lrest and abbr(lrest[0], "erase") else "write memory"
+    if abbr(first, "clock", 2):
+        return "clock set " + " ".join(rest[1:]) if lrest and abbr(lrest[0], "set", 1) else "clock " + " ".join(rest)
     if first == "dir":
         return "show flash"
     if abbr(first, "copy", 2):
@@ -552,6 +554,12 @@ def run_privileged(device: NetworkDevice, session: IOSSession, command: str, low
     if lower in ("write memory", "copy running-config startup-config"):
         cfg(device)["startupConfig"] = running_config(device).splitlines()
         return _result(device, session, "Building configuration...\n[OK]")
+    if lower.startswith("clock set "):
+        value = command[len("clock set "):].strip()
+        if not value:
+            return _result(device, session, "% Usage: clock set <hh:mm:ss> <date>")
+        runtime(device)["clock"] = value
+        return _result(device, session, "")
     if lower == "copy startup-config running-config":
         return _result(apply_startup_config(device), session, "Destination filename [running-config]?\n[OK]")
     if lower in ("reload", "reboot"):
@@ -1081,7 +1089,7 @@ def show_command(device: NetworkDevice, lower: str) -> str:
     if lower == "show version":
         return f"{device.get('model', 'Cisco IOS')} Software, Network Editor Python IOS\nDevice uptime is simulated\nSystem image file is \"python-ios:{device.get('modelId', 'generic')}\"\n{len(device.get('ports', []))} interfaces\n{'System returned to ROM by power-on' if device.get('powerOn', True) else 'System is powered off'}"
     if lower == "show clock":
-        return time.strftime("%Y-%m-%d %H:%M:%S KST", time.localtime())
+        return runtime(device).get("clock") or time.strftime("%Y-%m-%d %H:%M:%S KST", time.localtime())
     if lower == "show inventory":
         return f"NAME: \"{device.get('label', 'Device')}\", DESCR: \"{device.get('model', 'Cisco IOS')}\"\nPID: {device.get('modelId', 'generic')}, VID: PYIOS, SN: {device.get('id', 'unknown')}"
     if lower in ("show flash", "show flash:"):
@@ -1201,6 +1209,8 @@ def running_config(device: NetworkDevice) -> str:
     log = config.get("logging") or {}
     if log.get("console") is False:
         lines.append("no logging console")
+    if log.get("buffered") is False:
+        lines.append("no logging buffered")
     if log.get("trap"):
         lines.append(f"logging trap {log['trap']}")
     lines.extend(f"logging host {host}" for host in log.get("hosts", []))
@@ -1708,6 +1718,10 @@ def apply_logging(device: NetworkDevice, command: str, lower: str) -> None:
         log["console"] = True
     elif lower == "no logging console":
         log["console"] = False
+    elif lower == "logging buffered":
+        log["buffered"] = True
+    elif lower == "no logging buffered":
+        log["buffered"] = False
     elif lower.startswith("logging trap "):
         log["trap"] = command[len("logging trap "):].strip()
     elif lower.startswith("logging host "):
@@ -1973,7 +1987,9 @@ def router_id(device: NetworkDevice) -> str:
 
 def logging_status(device: NetworkDevice) -> str:
     log = cfg(device).get("logging") or {}
-    return f"Syslog logging: {'enabled' if log.get('console', True) or log.get('hosts') else 'disabled'}\n    Console logging: {'enabled' if log.get('console', True) else 'disabled'}\n    Trap logging: level {log.get('trap','informational')}\n    Logging to hosts: {', '.join(log.get('hosts', [])) or 'none'}"
+    logs = runtime(device).get("logs", [])
+    runtime_lines = [f"{item.get('level', 'info').upper()}: {item.get('message', '')}" for item in logs] or ["No logging messages."]
+    return "\n".join([f"Syslog logging: {'enabled' if log.get('console', True) or log.get('buffered', True) or log.get('hosts') else 'disabled'}", f"    Console logging: {'enabled' if log.get('console', True) else 'disabled'}", f"    Buffer logging: {'enabled' if log.get('buffered', True) else 'disabled'}", f"    Trap logging: level {log.get('trap','informational')}", f"    Logging to hosts: {', '.join(log.get('hosts', [])) or 'none'}", *runtime_lines])
 
 
 def line_status(device: NetworkDevice) -> str:
