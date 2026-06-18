@@ -146,7 +146,7 @@ export interface DeviceConfig {
   natRules: NatRule[];
   localUsers?: Array<{ id: string; name: string; secret?: string; password?: string; privilege?: number }>;
   lineConfigs?: Array<{ id: string; kind: "console" | "vty"; range: string; password: string; login: boolean; loginLocal?: boolean; transportInput: string; execTimeout: string; loggingSynchronous: boolean }>;
-  routingProtocols?: Array<{ id: string; protocol: "rip" | "ospf" | "eigrp"; processId?: string; networks: string[]; version?: string; autoSummary: boolean; passiveInterfaces: string[]; redistributeStatic: boolean }>;
+  routingProtocols?: Array<{ id: string; protocol: "rip" | "ospf" | "eigrp"; processId?: string; networks: string[]; version?: string; routerId?: string; autoSummary: boolean; passiveInterfaces: string[]; redistributeStatic: boolean }>;
   services: {
     http: boolean;
     dhcp: boolean;

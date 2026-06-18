@@ -189,7 +189,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
               : session.mode === "line"
                 ? ["password ", "login", "login local", "no login", "transport input all", "transport input ssh", "transport input telnet", "transport input none", "exec-timeout 10 0", "logging synchronous", "no logging synchronous", "end", "exit", "help"]
                 : session.mode === "router"
-                  ? ["network ", "version 2", "auto-summary", "no auto-summary", "passive-interface ", "no passive-interface ", "redistribute static", "no redistribute static", "end", "exit", "help"]
+                  ? ["network ", "router-id 1.1.1.1", "version 2", "auto-summary", "no auto-summary", "passive-interface ", "no passive-interface ", "redistribute static", "no redistribute static", "end", "exit", "help"]
                   : session.aclType === "standard"
                     ? ["permit any", "permit host ", "permit 192.168.1.0 0.0.0.255", "deny any", "deny host ", "no 10", "do show access-lists", "end", "exit", "help"]
                     : ["permit ip any any", "deny ip any any", "permit tcp any host 192.168.1.10 eq 80", "permit icmp any any", "no 10", "do show access-lists", "end", "exit", "help"];
@@ -951,6 +951,10 @@ function applyStartupRouterLine(device: NetworkDevice, routingId: string, comman
     return network ? updateRoutingProtocol(device, routingId, (protocol) => ({ ...protocol, networks: unique([...protocol.networks, network]) })) : device;
   }
   if (lower.startsWith("version ")) return updateRoutingProtocol(device, routingId, (protocol) => ({ ...protocol, version: command.split(/\s+/)[1] ?? protocol.version }));
+  if (lower.startsWith("router-id ")) {
+    const id = command.split(/\s+/)[1] ?? "";
+    return isIpv4(id) ? updateRoutingProtocol(device, routingId, (protocol) => ({ ...protocol, routerId: id })) : device;
+  }
   if (lower === "auto-summary") return updateRoutingProtocol(device, routingId, (protocol) => ({ ...protocol, autoSummary: true }));
   if (lower === "no auto-summary") return updateRoutingProtocol(device, routingId, (protocol) => ({ ...protocol, autoSummary: false }));
   if (lower.startsWith("passive-interface ")) {
@@ -1333,6 +1337,11 @@ function routerCommand(device: NetworkDevice, session: CliSession, command: stri
     return result(updateRoutingProtocol(device, routing.id, (protocol) => ({ ...protocol, networks: unique([...protocol.networks, network]) })), session, "");
   }
   if (lower.startsWith("version ")) return result(updateRoutingProtocol(device, routing.id, (protocol) => ({ ...protocol, version: command.split(/\s+/)[1] ?? protocol.version })), session, "");
+  if (lower.startsWith("router-id ")) {
+    const id = command.split(/\s+/)[1] ?? "";
+    if (!isIpv4(id)) return result(device, session, "% Invalid router-id.");
+    return result(updateRoutingProtocol(device, routing.id, (protocol) => ({ ...protocol, routerId: id })), session, "");
+  }
   if (lower === "auto-summary") return result(updateRoutingProtocol(device, routing.id, (protocol) => ({ ...protocol, autoSummary: true })), session, "");
   if (lower === "no auto-summary") return result(updateRoutingProtocol(device, routing.id, (protocol) => ({ ...protocol, autoSummary: false })), session, "");
   if (lower.startsWith("passive-interface ")) {
@@ -1545,6 +1554,7 @@ function localUserConfig(user: LocalUser): string {
 function routingProtocolConfig(protocol: RoutingProtocol): string[] {
   return [
     `router ${protocol.protocol}${protocol.processId ? ` ${protocol.processId}` : ""}`,
+    ...(protocol.routerId ? [` router-id ${protocol.routerId}`] : []),
     ...(protocol.version ? [` version ${protocol.version}`] : []),
     ...protocol.networks.map((network) => ` network ${network}`),
     protocol.autoSummary ? " auto-summary" : " no auto-summary",
@@ -1801,7 +1811,7 @@ function ospfProcessStatus(device: NetworkDevice): string {
   const protocols = routingProtocols(device).filter((protocol) => protocol.protocol === "ospf");
   if (!protocols.length) return "%OSPF: Router process not configured";
   return protocols.map((protocol) => [
-    ` Routing Process "ospf ${protocol.processId ?? "1"}" with ID ${routerId(device)}`,
+    ` Routing Process "ospf ${protocol.processId ?? "1"}" with ID ${protocol.routerId ?? routerId(device)}`,
     " Start time: 00:00:00.000, Time elapsed: simulated",
     " Supports only single TOS(TOS0) routes",
     ` Number of areas in this router is 1. 1 normal 0 stub 0 nssa`,
@@ -1830,7 +1840,7 @@ function ospfInterfaceStatus(device: NetworkDevice, brief: boolean): string {
   return routedPorts.map((port) => [
     `${port.name} is up, line protocol is ${device.powerOn && port.linkId ? "up" : "down"}`,
     `  Internet Address ${port.ipAddress}/${maskToPrefix(port.subnetMask)}, Area 0`,
-    `  Process ID ${protocols[0].processId ?? "1"}, Router ID ${routerId(device)}, Network Type BROADCAST, Cost: 1`,
+    `  Process ID ${protocols[0].processId ?? "1"}, Router ID ${protocols[0].routerId ?? routerId(device)}, Network Type BROADCAST, Cost: 1`,
     "  Timer intervals configured, Hello 10, Dead 40, Wait 40, Retransmit 5",
     "  Neighbor Count is 0, Adjacent neighbor count is 0"
   ].join("\n")).join("\n\n") || "No OSPF-enabled interfaces.";
@@ -1841,7 +1851,7 @@ function eigrpStatus(device: NetworkDevice): string {
   if (!protocols.length) return "%DUAL-5-NBRCHANGE: EIGRP is not configured";
   return protocols.map((protocol) => [
     `IP-EIGRP AS(${protocol.processId ?? "1"}) is running`,
-    `  Router-ID: ${routerId(device)}`,
+    `  Router-ID: ${protocol.routerId ?? routerId(device)}`,
     `  Topology: ${protocol.networks.length} configured network(s)`,
     `  Automatic summarization: ${protocol.autoSummary ? "enabled" : "disabled"}`
   ].join("\n")).join("\n\n");
@@ -1871,7 +1881,7 @@ function eigrpTopology(device: NetworkDevice): string {
   const protocols = routingProtocols(device).filter((protocol) => protocol.protocol === "eigrp");
   if (!protocols.length) return "% EIGRP not configured";
   return [
-    `EIGRP-IPv4 Topology Table for AS(${protocols[0].processId ?? "1"})/ID(${routerId(device)})`,
+    `EIGRP-IPv4 Topology Table for AS(${protocols[0].processId ?? "1"})/ID(${protocols[0].routerId ?? routerId(device)})`,
     "Codes: P - Passive, A - Active, U - Update, Q - Query, R - Reply",
     ...connectedNetworks(device).map((entry) => `P ${entry.network}/${entry.prefix}, 1 successors, FD is 28160\n        via Connected, ${entry.portName}`)
   ].join("\n");
@@ -2339,7 +2349,7 @@ function defaultLineConfig(kind: "console" | "vty", range: string): LineConfig {
 }
 
 function defaultRoutingProtocol(protocol: RoutingProtocol["protocol"], processId?: string): RoutingProtocol {
-  return { id: createId("routing"), protocol, processId, networks: [], version: protocol === "rip" ? "2" : undefined, autoSummary: false, passiveInterfaces: [], redistributeStatic: false };
+  return { id: createId("routing"), protocol, processId, networks: [], version: protocol === "rip" ? "2" : undefined, routerId: undefined, autoSummary: false, passiveInterfaces: [], redistributeStatic: false };
 }
 
 function ensureLineConfig(device: NetworkDevice, kind: "console" | "vty", range: string): { device: NetworkDevice; line: LineConfig } {
