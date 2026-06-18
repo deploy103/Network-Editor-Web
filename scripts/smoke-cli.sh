@@ -81,7 +81,8 @@ run("network 192.168.10.0");
 run("exit");
 run("line vty 0 4");
 run("password cisco");
-run("login");
+run("login local");
+run("transport input ssh");
 run("exit");
 run("ip access-list extended WEB-FILTER");
 assert(cliPrompt(device, session).includes("(config-ext-nacl)#"), "named extended ACL must enter ACL submode");
@@ -144,6 +145,8 @@ assert(config.includes("ip nat inside source static 192.168.10.2 203.0.113.2"), 
 assert(config.includes("ip access-list extended WEB-FILTER"), "named ACL header must survive reload");
 assert(config.includes("10 permit tcp any host 192.168.10.2 eq 80"), "named ACL sequence entry must survive reload");
 assert(config.includes("line vty 0 4"), "line config must survive reload");
+assert(config.includes("login local"), "line login local must survive reload");
+assert(config.includes("transport input ssh"), "line transport input ssh must survive reload");
 assert(config.includes("router rip"), "router config must survive reload");
 assert(config.includes("router ospf 1"), "OSPF config must survive reload");
 assert(config.includes("router eigrp 10"), "EIGRP config must survive reload");

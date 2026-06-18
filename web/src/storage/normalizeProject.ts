@@ -309,6 +309,7 @@ function normalizeLineConfigs(lines: DeviceConfig["lineConfigs"] | undefined): D
       range: line.range || (line.kind === "console" ? "0" : "0 4"),
       password: line.password || "",
       login: line.login === true,
+      loginLocal: line.loginLocal === true,
       transportInput: line.transportInput || (line.kind === "vty" ? "all" : ""),
       execTimeout: line.execTimeout || "10 0",
       loggingSynchronous: line.loggingSynchronous === true
