@@ -1,17 +1,23 @@
-# CLI Engine Bridge
+# Python IOS CLI Engine
 
-This is a dependency-free Python bridge for moving CLI execution out of the React bundle.
+This dependency-free Python service owns IOS-style CLI command parsing, device state updates, and command output generation. The React frontend should only render the terminal and send commands to this process.
 
 ## Run
 
 ```bash
-python3 cli-engine-python/server.py
+npm run dev
 ```
 
-Then set:
+The root dev script starts this Python server and then runs Vite with:
 
 ```bash
 VITE_CLI_ENGINE_URL=http://127.0.0.1:9090
+```
+
+To run only the engine:
+
+```bash
+npm run dev:cli
 ```
 
 The web app sends:
@@ -26,4 +32,14 @@ to `POST /run` and expects:
 { "device": {}, "session": { "mode": "exec" }, "output": "..." }
 ```
 
-If FRRouting `vtysh` is installed, the bridge runs commands through `vtysh`. Without `vtysh`, it reports that the bridge is available but no real backend is installed. This keeps the web UI ready for a Python/C++/FRR/GNS3/CML-backed engine without hard-coding that logic into React.
+The default backend is the built-in Python IOS simulator. Optional FRRouting `vtysh` passthrough is still available with:
+
+```bash
+CLI_ENGINE_BACKEND=vtysh python3 cli-engine-python/server.py
+```
+
+## Test
+
+```bash
+npm run smoke:python-cli
+```
