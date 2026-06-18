@@ -220,6 +220,7 @@ export function createPort(template: PortTemplate, index: number, moduleMeta?: {
     mode: template.mode,
     vlan: template.vlan ?? 1,
     allowedVlans: [1],
+    nativeVlan: 1,
     ipAddress: "",
     subnetMask: "",
     gateway: "",

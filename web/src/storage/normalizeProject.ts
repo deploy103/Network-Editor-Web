@@ -168,6 +168,7 @@ function normalizePort(port: NetworkPort): NetworkPort {
     mode,
     vlan,
     allowedVlans,
+    nativeVlan: Number.isInteger(port.nativeVlan) ? port.nativeVlan : 1,
     ipAddress: port.ipAddress || legacy.interfaceConfig?.ipAddress || "",
     subnetMask: port.subnetMask || legacy.interfaceConfig?.subnetMask || "",
     gateway: port.gateway || legacy.interfaceConfig?.gateway || "",

@@ -76,6 +76,9 @@ run("exit");
 run("int fa0/1");
 run("span portfast");
 run("span bpduguard enable");
+run("switchport mode trunk");
+run("switchport trunk native vlan 99");
+run("switchport trunk allowed vlan 20,99");
 run("ip nat outside");
 run("exit");
 run("access-list 101 permit ip any any");
@@ -106,6 +109,7 @@ assert(route.includes("192.168.10.0/24"), "sh route must show SVI connected rout
 assert(run("sh ip route summary").includes("Total routes"), "show ip route summary must be supported");
 const stp = run("sh spanning-tree");
 assert(stp.includes("P2p Edge"), "spanning-tree portfast must show edge port");
+assert(run("sh int trunk").includes("99"), "show interfaces trunk must show native VLAN");
 assert(run("sh int desc").includes("Interface"), "show interfaces description must be supported");
 assert(run("sh controllers").includes("controller"), "show controllers must be supported");
 assert(run("sh mac address-table dynamic").includes("No entries"), "show mac address-table dynamic must be supported");
@@ -153,6 +157,7 @@ assert(config.includes("access-list 101 permit ip any any"), "ACL must survive r
 assert(config.includes("ip access-group 101 in"), "interface ACL binding must survive reload");
 assert(config.includes("ip nat inside"), "inside NAT interface role must survive reload");
 assert(config.includes("ip nat outside"), "outside NAT interface role must survive reload");
+assert(config.includes("switchport trunk native vlan 99"), "trunk native VLAN must survive reload");
 assert(config.includes("ip nat inside source static 192.168.10.2 203.0.113.2"), "static NAT must survive reload");
 assert(config.includes("ip access-list extended WEB-FILTER"), "named ACL header must survive reload");
 assert(config.includes("10 permit tcp any host 192.168.10.2 eq 80"), "named ACL sequence entry must survive reload");

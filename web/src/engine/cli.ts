@@ -181,7 +181,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
       : session.mode === "global"
         ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "username admin secret cisco", "no username ", "interface ", "int ", "interface range fa0/1 - 2", "default interface ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-name lab.local", "no ip domain-name", "ip ssh version 2", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "crypto key zeroize rsa", "ip dhcp excluded-address 192.168.1.1 192.168.1.20", "ip dhcp pool ", "no ip dhcp excluded-address ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service password-encryption", "no service password-encryption", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
-          ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "ip access-group 101 in", "ip access-group 101 out", "no ip access-group 101 in", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk allowed vlan ", "no switchport", "spanning-tree portfast", "no spanning-tree portfast", "spanning-tree bpduguard enable", "spanning-tree bpduguard disable", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
+          ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "ip access-group 101 in", "ip access-group 101 out", "no ip access-group 101 in", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk native vlan ", "switchport trunk allowed vlan ", "no switchport", "spanning-tree portfast", "no spanning-tree portfast", "spanning-tree bpduguard enable", "spanning-tree bpduguard disable", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
           : session.mode === "vlan"
             ? ["name ", "end", "exit", "help"]
             : session.mode === "dhcp"
@@ -350,6 +350,7 @@ function expandNoCommand(rest: string[]): string {
   const first = lowerRest[0] ?? "";
   if (isAbbrev(first, "shutdown", 2)) return "no shutdown";
   if (isAbbrev(first, "description", 4)) return "no description";
+  if (isAbbrev(first, "switchport", 2) && isAbbrev(lowerRest[1], "trunk", 2) && isAbbrev(lowerRest[2], "native", 3)) return "no switchport trunk native vlan";
   if (isAbbrev(first, "switchport", 2)) return "no switchport";
   if (isAbbrev(first, "spanning-tree", 2) && isAbbrev(lowerRest[1], "portfast", 4)) return "no spanning-tree portfast";
   if (isAbbrev(first, "enable", 2)) {
@@ -513,6 +514,10 @@ function expandSwitchportCommand(tokens: string[]): string {
     return `switchport access vlan ${vlanValues.join(" ")}`;
   }
   if (isAbbrev(lowerRest[0], "trunk")) {
+    if (isAbbrev(lowerRest[1], "native", 3)) {
+      const vlanValues = isAbbrev(lowerRest[2], "vlan") ? rest.slice(3) : rest.slice(2);
+      return `switchport trunk native vlan ${vlanValues.join(" ")}`;
+    }
     const vlanValues = rest.slice(1).filter((_, index) => {
       const token = lowerRest[index + 1];
       return !isAbbrev(token, "allowed") && !isAbbrev(token, "vlan");
@@ -769,6 +774,7 @@ function resetPortForBoot(device: NetworkDevice, port: NetworkPort): NetworkPort
     mode: defaultMode,
     vlan: vlanFromInterfaceName(port.name) ?? 1,
     allowedVlans: [1],
+    nativeVlan: 1,
     adminUp: true,
     accessGroupIn: "",
     accessGroupOut: "",
@@ -896,6 +902,10 @@ function applyStartupInterfaceLine(device: NetworkDevice, portId: string, comman
   if (lower.startsWith("switchport access vlan ")) {
     const vlan = numberAfter(command, "switchport access vlan");
     return validVlan(vlan) ? ensureVlan(updatePort(device, port.id, { mode: "access", vlan }), vlan) : device;
+  }
+  if (lower.startsWith("switchport trunk native vlan ")) {
+    const nativeVlan = numberAfter(command, "switchport trunk native vlan");
+    return validVlan(nativeVlan) ? ensureVlan(updatePort(device, port.id, { mode: "trunk", nativeVlan }), nativeVlan) : device;
   }
   if (lower.startsWith("switchport trunk allowed vlan ")) {
     const allowedVlans = parseVlans(command.slice("switchport trunk allowed vlan ".length));
@@ -1242,6 +1252,12 @@ function interfaceCommand(device: NetworkDevice, session: CliSession, command: s
     if (!validVlan(vlan)) return result(device, session, "% VLAN id must be 1-4094.");
     return result(ensureVlan(updateSelectedPorts(device, selectedPorts, { mode: "access", vlan }), vlan), session, "");
   }
+  if (lower.startsWith("switchport trunk native vlan ")) {
+    const nativeVlan = numberAfter(command, "switchport trunk native vlan");
+    if (!validVlan(nativeVlan)) return result(device, session, "% VLAN id must be 1-4094.");
+    return result(ensureVlan(updateSelectedPorts(device, selectedPorts, { mode: "trunk", nativeVlan }), nativeVlan), session, "");
+  }
+  if (lower === "no switchport trunk native vlan") return result(updateSelectedPorts(device, selectedPorts, { nativeVlan: 1 }), session, "");
   if (lower.startsWith("switchport trunk allowed vlan ")) {
     const allowedVlans = parseVlans(command.slice("switchport trunk allowed vlan ".length));
     if (allowedVlans.length === 0) return result(device, session, "% Provide at least one VLAN.");
@@ -1542,7 +1558,7 @@ function interfaceConfig(port: NetworkPort): string[] {
   if (port.description) lines.push(` description ${port.description}`);
   if (port.mode === "routed" && port.ipAddress) lines.push(` ip address ${port.ipAddress} ${port.subnetMask}`);
   if (port.mode === "access") lines.push(" switchport mode access", ` switchport access vlan ${port.vlan}`);
-  if (port.mode === "trunk") lines.push(" switchport mode trunk", ` switchport trunk allowed vlan ${port.allowedVlans.join(",")}`);
+  if (port.mode === "trunk") lines.push(" switchport mode trunk", ...(port.nativeVlan && port.nativeVlan !== 1 ? [` switchport trunk native vlan ${port.nativeVlan}`] : []), ` switchport trunk allowed vlan ${port.allowedVlans.join(",")}`);
   if (port.natRole) lines.push(` ip nat ${port.natRole}`);
   if (port.accessGroupIn) lines.push(` ip access-group ${port.accessGroupIn} in`);
   if (port.accessGroupOut) lines.push(` ip access-group ${port.accessGroupOut} out`);
@@ -1610,6 +1626,7 @@ function switchportStatus(device: NetworkDevice): string {
       `Operational Mode: ${port.mode}`,
       `Access Mode VLAN: ${port.vlan}`,
       `Trunking VLANs Enabled: ${port.mode === "trunk" ? port.allowedVlans.join(",") : "none"}`,
+      `Native VLAN: ${port.nativeVlan ?? 1}`,
       "Voice VLAN: none"
     ].join("\n"))
     .join("\n\n") || "% No switchport interfaces.";
@@ -1658,7 +1675,7 @@ function trunkStatus(device: NetworkDevice): string {
   if (trunks.length === 0) return "No trunking interfaces.";
   return [
     "Port                  Mode         Status        Native vlan",
-    ...trunks.map((port) => `${port.name.padEnd(22)}on           ${(device.powerOn && port.adminUp ? "trunking" : "disabled").padEnd(14)}1`),
+    ...trunks.map((port) => `${port.name.padEnd(22)}on           ${(device.powerOn && port.adminUp ? "trunking" : "disabled").padEnd(14)}${port.nativeVlan ?? 1}`),
     "",
     "Port                  Vlans allowed on trunk",
     ...trunks.map((port) => `${port.name.padEnd(22)}${port.allowedVlans.join(",") || "none"}`)
