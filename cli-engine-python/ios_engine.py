@@ -84,9 +84,9 @@ def command_candidates(device: NetworkDevice, session: IOSSession) -> list[str]:
     if mode == "exec":
         base = ["enable", "show version", "show clock", "show ip interface brief", "show ip route", "show protocols", "show cdp neighbors", "show arp", "power on", "help"]
     elif mode == "privileged":
-        base = ["disable", "configure terminal", "conf t", "show running-config", "show running-config | include ", "show running-config | section ", "show startup-config", "show version", "show inventory", "show flash", "show file systems", "show users", "show line", "show protocols", "show controllers", "show processes cpu", "show memory", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route summary", "show ip protocols", "show ip ospf", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show ip dhcp binding", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp server statistics", "show access-lists", "clear arp", "clear mac address-table", "clear ip dhcp binding", "clear ip dhcp conflict *", "clear ip nat translation *", "write memory", "copy running-config startup-config", "reload", "write erase", "power off", "power cycle", "help"]
+        base = ["disable", "configure terminal", "conf t", "show running-config", "show running-config | include ", "show running-config | section ", "show startup-config", "show version", "show inventory", "show flash", "show file systems", "show users", "show line", "show protocols", "show controllers", "show processes cpu", "show memory", "show spanning-tree", "show spanning-tree vlan ", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route summary", "show ip protocols", "show ip ospf", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show ip dhcp binding", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp server statistics", "show access-lists", "clear arp", "clear mac address-table", "clear ip dhcp binding", "clear ip dhcp conflict *", "clear ip nat translation *", "write memory", "copy running-config startup-config", "reload", "write erase", "power off", "power cycle", "help"]
     elif mode == "global":
-        base = ["hostname ", "enable secret ", "enable password ", "banner motd #", "no banner motd", "username admin privilege 15 secret cisco", "interface ", "interface range fa0/1 - 2", "default interface ", "vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "ip domain-name lab.local", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "ip dhcp excluded-address ", "ip dhcp pool ", "ip access-list standard ", "ip access-list extended ", "access-list 101 permit ip any any", "ip nat inside source static ", "service password-encryption", "no service password-encryption", "do show running-config", "end", "exit", "help"]
+        base = ["hostname ", "enable secret ", "enable password ", "banner motd #", "no banner motd", "username admin privilege 15 secret cisco", "interface ", "interface range fa0/1 - 2", "default interface ", "vlan ", "spanning-tree vlan 1 root primary", "no spanning-tree vlan 1 root primary", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "ip domain-name lab.local", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "ip dhcp excluded-address ", "ip dhcp pool ", "ip access-list standard ", "ip access-list extended ", "access-list 101 permit ip any any", "ip nat inside source static ", "service password-encryption", "no service password-encryption", "do show running-config", "end", "exit", "help"]
     elif mode == "interface":
         base = ["description ", "no description", "ip address ", "no ip address", "ip helper-address ", "no ip helper-address ", "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "ip access-group 101 in", "ip access-group 101 out", "shutdown", "no shutdown", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk native vlan ", "switchport trunk allowed vlan ", "switchport nonegotiate", "no switchport nonegotiate", "spanning-tree portfast", "spanning-tree bpduguard enable", "clock rate ", "do show running-config interface ", "end", "exit", "help"]
     elif mode == "dhcp":
@@ -268,6 +268,8 @@ def expand_show(rest: list[str]) -> str:
         return "show protocols"
     if abbr(first, "controllers", 4):
         return "show controllers " + " ".join(rest[1:])
+    if abbr(first, "spanning-tree", 2):
+        return "show spanning-tree " + " ".join(rest[1:])
     if abbr(first, "processes", 3) and abbr(second, "cpu"):
         return "show processes cpu"
     if abbr(first, "memory", 3):
@@ -365,6 +367,8 @@ def expand_no(rest: list[str]) -> str:
         if len(lower) > 2 and abbr(lower[1], "trunk") and abbr(lower[2], "native"):
             return "no switchport trunk native vlan"
         return "no switchport"
+    if abbr(first, "spanning-tree", 2):
+        return "no spanning-tree " + " ".join(rest[1:])
     if first == "ip":
         second = lower[1] if len(lower) > 1 else ""
         if abbr(second, "address"):
@@ -645,6 +649,20 @@ def run_global(device: NetworkDevice, session: IOSSession, command: str, lower: 
             return _result(device, session, "% VLAN id must be 1-4094.")
         ensure_vlan(device, vlan)
         return _result(device, {"mode": "vlan", "vlanId": vlan}, "")
+    if lower.startswith("spanning-tree vlan ") and lower.endswith(" root primary"):
+        vlans = parse_stp_vlans(command)
+        if not vlans:
+            return _result(device, session, "% Usage: spanning-tree vlan <id[,id]|range> root primary")
+        roots = cfg(device).setdefault("stpRootPrimaryVlans", [])
+        for vlan in vlans:
+            ensure_vlan(device, vlan)
+        cfg(device)["stpRootPrimaryVlans"] = unique(roots + vlans)
+        return _result(device, session, "")
+    if lower.startswith("no spanning-tree vlan ") and lower.endswith(" root primary"):
+        vlans = parse_stp_vlans(command)
+        roots = cfg(device).setdefault("stpRootPrimaryVlans", [])
+        cfg(device)["stpRootPrimaryVlans"] = [vlan for vlan in roots if vlan not in vlans]
+        return _result(device, session, "")
     if lower.startswith("no vlan "):
         vlan = number_after(command, "no vlan")
         config["vlans"] = [v for v in config.get("vlans", []) if v.get("id") != vlan]
@@ -1109,6 +1127,8 @@ def show_command(device: NetworkDevice, lower: str) -> str:
         return protocols_status(device)
     if lower.startswith("show controllers"):
         return controllers_status(device, lower[len("show controllers"):].strip())
+    if lower == "show spanning-tree" or lower.startswith("show spanning-tree "):
+        return spanning_tree_status(device, lower[len("show spanning-tree"):].strip())
     if lower == "show processes cpu":
         return "CPU utilization for five seconds: 1%/0%; one minute: 1%; five minutes: 1%"
     if lower == "show memory":
@@ -1229,6 +1249,8 @@ def running_config(device: NetworkDevice) -> str:
     lines.extend(user_config(user) for user in config.get("localUsers", []))
     for vlan in config.get("vlans", []):
         lines.extend([f"vlan {vlan.get('id')}", f" name {vlan.get('name')}"])
+    for vlan in config.get("stpRootPrimaryVlans", []):
+        lines.append(f"spanning-tree vlan {vlan} root primary")
     for port in device.get("ports", []):
         lines.extend(interface_config(port))
     lines.extend(f"ip route {r.get('network')} {r.get('mask')} {r.get('nextHop')}" for r in config.get("staticRoutes", []))
@@ -1313,6 +1335,7 @@ def apply_startup_config(device: NetworkDevice) -> NetworkDevice:
         "startupConfig": startup,
         "staticRoutes": [],
         "vlans": [{"id": 1, "name": "default"}],
+        "stpRootPrimaryVlans": [],
         "dhcpPools": [],
         "dhcpExcludedRanges": [],
         "dnsRecords": [],
@@ -1359,6 +1382,7 @@ def normalize_device(device: NetworkDevice) -> NetworkDevice:
     config.setdefault("routingProtocols", [])
     config.setdefault("staticRoutes", [])
     config.setdefault("vlans", [{"id": 1, "name": "default"}])
+    config.setdefault("stpRootPrimaryVlans", [])
     config.setdefault("dhcpPools", [])
     config.setdefault("dhcpExcludedRanges", [])
     config.setdefault("dnsRecords", [])
@@ -1564,6 +1588,11 @@ def parse_vlans(value: str) -> list[int]:
         elif part.strip().isdigit():
             out.append(int(part.strip()))
     return [v for v in unique(out) if valid_vlan(v)]
+
+
+def parse_stp_vlans(command: str) -> list[int]:
+    match = re.search(r"\bvlan\s+(.+?)\s+root\s+primary$", command, re.I)
+    return parse_vlans(match.group(1)) if match else []
 
 
 def find_pool(device: NetworkDevice, name: str) -> dict[str, Any] | None:
@@ -1859,6 +1888,36 @@ def controllers_status(device: NetworkDevice, filter_text: str = "") -> str:
     if not ports:
         return "% No controllers found."
     return "\n\n".join("\n".join([f"{port.get('name')} controller", f"  Hardware is {port.get('kind')}", f"  DCE/DTE status: {'DCE, clock rate set' if port.get('clockRate') else 'DTE or clock rate not set' if port.get('kind') == 'serial' else 'not applicable'}", f"  Clock rate: {port.get('clockRate') or 'not set'}", f"  Cable state: {'connected' if port.get('linkId') else 'not connected'}", "  Interface reset count: 0"]) for port in ports)
+
+
+def spanning_tree_status(device: NetworkDevice, filter_text: str = "") -> str:
+    vlan_filter = None
+    tokens = filter_text.split()
+    if tokens and tokens[0] == "vlan" and len(tokens) > 1 and tokens[1].isdigit():
+        vlan_filter = int(tokens[1])
+    roots = set(cfg(device).get("stpRootPrimaryVlans", []))
+    vlans = [v for v in cfg(device).get("vlans", []) if vlan_filter is None or v.get("id") == vlan_filter]
+    if not vlans:
+        return "% VLAN not found."
+    blocks = []
+    for vlan in vlans:
+        vlan_id = int(vlan.get("id", 1))
+        root_priority = 24576 + vlan_id if vlan_id in roots else 32768 + vlan_id
+        ports = [
+            port for port in device.get("ports", [])
+            if port.get("kind") != "console" and (port.get("mode") == "trunk" and vlan_id in (port.get("allowedVlans") or []) or port.get("mode") == "access" and port.get("vlan", 1) == vlan_id)
+        ]
+        blocks.append("\n".join([
+            f"VLAN{vlan_id:04d}",
+            "  Spanning tree enabled protocol ieee",
+            f"  Root ID    Priority    {root_priority}",
+            f"             Address     {device.get('ports', [{}])[0].get('macAddress', '02:00:00:00:00:00')}",
+            "             This bridge is the root" if vlan_id in roots else "             Root bridge priority is default",
+            "",
+            "  Interface              Role Sts Cost      Prio.Nbr Type",
+            *[f"{port.get('name','').ljust(23)}Desg {'FWD' if port.get('adminUp', True) and device.get('powerOn', True) else 'BLK'} {str(4 if 'gigabit' in port.get('kind','') else 19).ljust(9)}128.{str(index + 1).ljust(4)}{'P2p Edge' if port.get('stpPortfast') else 'P2p'}{' BPDU Guard' if port.get('bpduGuard') else ''}" for index, port in enumerate(ports)]
+        ]))
+    return "\n\n".join(blocks)
 
 
 def switchport_status(device: NetworkDevice) -> str:
