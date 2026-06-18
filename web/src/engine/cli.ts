@@ -4,7 +4,7 @@ import { isIpv4, maskToPrefix, networkAddress } from "./ip";
 import type { DhcpPool, DeviceConfig, NetworkDevice, NetworkPort, RuntimeState } from "../types/network";
 
 export type CliMode = "exec" | "privileged" | "global" | "interface" | "vlan" | "dhcp" | "line" | "router" | "acl";
-export type CliPendingAction = "reload" | "erase-startup";
+export type CliPendingAction = "reload" | "erase-startup" | "enable-password";
 
 export interface CliSession {
   mode: CliMode;
@@ -48,7 +48,7 @@ export function cliPrompt(device: NetworkDevice, session: CliSession): string {
 
 export function runCliCommand(device: NetworkDevice, session: CliSession, rawCommand: string): CliResult {
   const raw = cleanCommand(rawCommand);
-  if (session.pendingAction) return confirmPendingAction(device, session, raw.toLowerCase());
+  if (session.pendingAction) return confirmPendingAction(device, session, raw);
   if (isContextHelp(rawCommand)) return result(device, session, contextHelp(device, session, rawCommand));
   const command = expandCliCommand(raw, session);
   const lower = command.toLowerCase();
@@ -64,7 +64,12 @@ export function runCliCommand(device: NetworkDevice, session: CliSession, rawCom
 
   if (lower === "help" || lower === "?") return result(device, session, help(session.mode));
   if (lower.startsWith("help ")) return result(device, session, searchHelp(command.slice(5)));
-  if (lower === "enable") return result(device, { mode: "privileged" }, "");
+  if (lower === "enable") {
+    if (session.mode === "exec" && (device.config.enableSecret || device.config.enablePassword)) {
+      return result(device, { mode: "exec", pendingAction: "enable-password" }, "Password:");
+    }
+    return result(device, { mode: "privileged" }, "");
+  }
   if (lower === "disable") return result(device, { mode: "exec" }, "");
   if (lower === "end") return result(device, { mode: "privileged" }, "");
   if (lower === "exit") return result(device, exitSession(session), "");
@@ -165,6 +170,7 @@ function contextHelp(device: NetworkDevice, session: CliSession, rawCommand: str
 
 function commandCandidates(device: NetworkDevice, session: CliSession): string[] {
   if (!device.powerOn) return ["power on", "boot"];
+  if (session.pendingAction === "enable-password") return [];
   if (session.pendingAction) return ["", "yes", "no"];
   const base = session.mode === "exec"
     ? ["enable", "show version", "show clock", "show privilege", "show history", "show interfaces", "show ip interface brief", "show ip route", "show route", "show cdp neighbors", "show arp", "ping ", "traceroute ", "terminal length 0", "help"]
@@ -509,7 +515,13 @@ const privilegedShowCommands = [
   "show nat"
 ];
 
-function confirmPendingAction(device: NetworkDevice, session: CliSession, lower: string): CliResult {
+function confirmPendingAction(device: NetworkDevice, session: CliSession, raw: string): CliResult {
+  const lower = raw.toLowerCase();
+  if (session.pendingAction === "enable-password") {
+    const expected = device.config.enableSecret || device.config.enablePassword || "";
+    if (raw === expected) return result(device, { mode: "privileged" }, "");
+    return result(device, { mode: "exec" }, "% Access denied");
+  }
   if (lower === "n" || lower === "no") {
     return result(device, withoutPending(session), "Action cancelled.");
   }
