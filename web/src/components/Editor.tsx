@@ -1,7 +1,7 @@
-import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Cable, CircleDot, CircleHelp, Cpu, Download, Edit3, FileJson, Mail, Maximize2, Minimize2, Monitor, MousePointer2, Network, Power, Router, RotateCcw, Save, Server, Settings, Shield, Terminal, Trash2, Wifi, X, ZoomIn, ZoomOut } from "lucide-react";
+import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, Cable, CircleDot, CircleHelp, Copy, Cpu, Download, Edit3, FileJson, Info, Mail, Maximize2, Minimize2, Monitor, MousePointer2, Network, Plus, Power, Router, RotateCcw, Save, Server, Settings, Shield, Terminal, Trash2, Wifi, Wrench, X, ZoomIn, ZoomOut } from "lucide-react";
 import { cableCatalog, canPortUseCable, createDevice, deviceCatalog, displayKind, getDeviceModel, getModuleSpec, installModule, removeModule } from "../data/deviceCatalog";
-import { cliPrompt, initialCliSession, runCliCommand } from "../engine/cli";
+import { cliCompletions, cliPrompt, initialCliSession, runCliCommand } from "../engine/cli";
 import { diagnoseProject } from "../engine/diagnostics";
 import { isIpv4, maskToPrefix, networkAddress } from "../engine/ip";
 import { downloadProject } from "../exporters/packetTracerExport";
@@ -13,15 +13,21 @@ import type { AccessRule, CableType, DeviceKind, DeviceTab, ModuleSpec, NatRule,
 
 const CANVAS_WIDTH = 2400;
 const CANVAS_HEIGHT = 1600;
-const packetMenuLabels = ["File", "Edit", "Options", "View", "Tools", "Extensions", "Window", "Help"] as const;
+const packetMenuLabels = ["파일", "편집", "옵션", "보기", "도구", "확장", "창", "도움말"] as const;
+const quickWorkspaceModelIds = ["router-1941", "switch-2960", "pc-pt", "server-pt", "ap-pt"] as const;
 
 type PacketMenuName = typeof packetMenuLabels[number];
 type PacketMenuItem = { label: string; action: () => void; disabled?: boolean; danger?: boolean };
+type WorkspaceMenuState = { x: number; y: number; canvasX: number; canvasY: number };
+type CanvasViewport = { x: number; y: number; width: number; height: number };
 
 export function Editor({ project, user, saveError, onBack, onChange, onSave }: { project: NetworkProject; user: User; saveError: string; onBack: () => void; onChange: (project: NetworkProject) => void; onSave: (project: NetworkProject) => void }) {
+  const workspaceRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ id: string; offsetX: number; offsetY: number; startX: number; startY: number; moved: boolean } | null>(null);
+  const panRef = useRef<{ pointerId: number; startX: number; startY: number; scrollLeft: number; scrollTop: number; moved: boolean } | null>(null);
   const suppressClickRef = useRef(false);
+  const suppressWorkspaceClickRef = useRef(false);
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [selectedCable, setSelectedCable] = useState<CableType | "">("");
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
@@ -32,18 +38,22 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
   const [connectionDraft, setConnectionDraft] = useState<{ aDeviceId: string; bDeviceId: string; cable: CableType; message: string } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ deviceId: string; x: number; y: number } | null>(null);
   const [linkMenu, setLinkMenu] = useState<{ linkId: string; x: number; y: number } | null>(null);
-  const [workspaceMenu, setWorkspaceMenu] = useState<{ x: number; y: number } | null>(null);
+  const [workspaceMenu, setWorkspaceMenu] = useState<WorkspaceMenuState | null>(null);
   const [topMenu, setTopMenu] = useState<{ name: PacketMenuName; x: number; y: number } | null>(null);
   const [renameDraft, setRenameDraft] = useState<{ deviceId: string; value: string } | null>(null);
   const [message, setMessage] = useState("");
+  const [isPanning, setIsPanning] = useState(false);
+  const [viewport, setViewport] = useState<CanvasViewport>({ x: 0, y: 0, width: 0, height: 0 });
   const [zoom, setZoom] = useState(1);
   const [workspaceMode, setWorkspaceMode] = useState<"logical" | "physical">("logical");
   const [timeMode, setTimeMode] = useState<"realtime" | "simulation">("realtime");
+  const [trayCollapsed, setTrayCollapsed] = useState(false);
   const [pduMode, setPduMode] = useState(false);
   const [pduSourceId, setPduSourceId] = useState("");
-  const [engineName, setEngineName] = useState("loading-engine");
+  const [engineName, setEngineName] = useState("엔진 로딩 중");
   const [focusedEventId, setFocusedEventId] = useState("");
   const deviceWindow = project.devices.find((device) => device.id === deviceWindowId) ?? null;
+  const selectedDevice = project.devices.find((device) => device.id === selectedDeviceId) ?? null;
   const selectedLink = project.links.find((link) => link.id === selectedLinkId) ?? null;
   const pduSource = project.devices.find((device) => device.id === pduSourceId) ?? null;
   const selectedModelInfo = useMemo(() => selectedModel ? deviceCatalog.find((model) => model.id === selectedModel) ?? null : null, [selectedModel]);
@@ -69,6 +79,12 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
       setFocusedEventId("");
     }
   }, [focusedEventId, project.simulationEvents]);
+
+  useEffect(() => {
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    return () => window.removeEventListener("resize", updateViewport);
+  }, [zoom]);
 
   useEffect(() => {
     if (deviceWindowId && !project.devices.some((device) => device.id === deviceWindowId)) {
@@ -106,12 +122,12 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
         setLinkMenu(null);
         setWorkspaceMenu(null);
         setTopMenu(null);
-        setMessage("Selection cleared.");
+        setMessage("선택을 해제했습니다.");
       }
       if (event.key === "Delete" || event.key === "Backspace") {
         if (pduMode) {
           event.preventDefault();
-          setMessage("Cancel Simple PDU with Escape or Select before deleting.");
+          setMessage("삭제하기 전에 Escape 또는 선택 도구로 Simple PDU를 취소하세요.");
           return;
         }
         if (selectedDeviceId) {
@@ -122,7 +138,7 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
           onChange(removeLink(project, selectedLinkId));
           setSelectedLinkId("");
           setLinkMenu(null);
-          setMessage("Cable removed.");
+          setMessage("케이블을 삭제했습니다.");
         }
       }
     }
@@ -135,10 +151,14 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
     onChange({ ...project, devices: [...project.devices, next] });
     setSelectedDeviceId(next.id);
     setSelectedModel("");
-    setMessage(`${next.label} placed.`);
+    setMessage(`${next.label} 장비를 배치했습니다.`);
   }
 
   function clickWorkspace(event: React.MouseEvent<HTMLElement>) {
+    if (suppressWorkspaceClickRef.current) {
+      suppressWorkspaceClickRef.current = false;
+      return;
+    }
     setContextMenu(null);
     setLinkMenu(null);
     setWorkspaceMenu(null);
@@ -150,11 +170,11 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
     }
     if (pendingDeviceId) {
       setPendingDeviceId("");
-      setMessage("Connection cancelled.");
+      setMessage("연결을 취소했습니다.");
       return;
     }
     if (pduMode) {
-      setMessage(pduSourceId ? "Select a destination device for the Simple PDU." : "Select a source device for the Simple PDU.");
+      setMessage(pduSourceId ? "Simple PDU 목적지 장비를 선택하세요." : "Simple PDU 출발지 장비를 선택하세요.");
       return;
     }
     setSelectedDeviceId("");
@@ -179,11 +199,11 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
         setSelectedDeviceId(device.id);
         setDeviceWindowId("");
         setDeviceWindowTab(undefined);
-        setMessage(`Simple PDU source: ${device.label}. Select a destination device.`);
+        setMessage(`Simple PDU 출발지: ${device.label}. 목적지 장비를 선택하세요.`);
         return;
       }
       if (pduSourceId === device.id) {
-        setMessage("Simple PDU destination must be a different device.");
+        setMessage("Simple PDU 목적지는 다른 장비여야 합니다.");
         return;
       }
       await sendPdu(pduSourceId, device.id);
@@ -194,11 +214,11 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
     if (selectedCable) {
       if (!pendingDeviceId) {
         setPendingDeviceId(device.id);
-        setMessage(`First endpoint: ${device.label}`);
+        setMessage(`첫 번째 끝점: ${device.label}`);
         return;
       }
       if (pendingDeviceId === device.id) {
-        setMessage("A cable cannot connect a device to itself.");
+        setMessage("케이블은 같은 장비끼리 연결할 수 없습니다.");
         setPendingDeviceId("");
         return;
       }
@@ -207,8 +227,8 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
         setMessage(result.message);
         setConnectionDraft({ aDeviceId: pendingDeviceId, bDeviceId: device.id, cable: selectedCable, message: result.message });
       } else {
-        setMessage("Select the exact interfaces to connect.");
-        setConnectionDraft({ aDeviceId: pendingDeviceId, bDeviceId: device.id, cable: selectedCable, message: "Select the exact interfaces to connect." });
+        setMessage("연결할 인터페이스를 선택하세요.");
+        setConnectionDraft({ aDeviceId: pendingDeviceId, bDeviceId: device.id, cable: selectedCable, message: "연결할 인터페이스를 선택하세요." });
       }
       setPendingDeviceId("");
       return;
@@ -253,6 +273,55 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
     setRenameDraft({ deviceId, value: device.label });
   }
 
+  function duplicateDevice(deviceId: string) {
+    const device = project.devices.find((item) => item.id === deviceId);
+    if (!device) return;
+    const size = nodeSize(device.kind);
+    const position = {
+      x: Math.max(16, Math.min(CANVAS_WIDTH - size.width - 16, device.position.x + 44)),
+      y: Math.max(16, Math.min(CANVAS_HEIGHT - size.height - 16, device.position.y + 44))
+    };
+    const next = createDevice(device.modelId, position, project.devices);
+    onChange({ ...project, devices: [...project.devices, next] });
+    setSelectedDeviceId(next.id);
+    setSelectedLinkId("");
+    setDeviceWindowId("");
+    setDeviceWindowTab(undefined);
+    setMessage(`${device.label} 장비를 ${next.label}(으)로 복제했습니다.`);
+  }
+
+  function startPduFromDevice(deviceId: string) {
+    const device = project.devices.find((item) => item.id === deviceId);
+    if (!device) return;
+    setSelectedModel("");
+    setSelectedCable("");
+    setPendingDeviceId("");
+    setConnectionDraft(null);
+    setSelectedDeviceId(deviceId);
+    setSelectedLinkId("");
+    setDeviceWindowId("");
+    setDeviceWindowTab(undefined);
+    setPduMode(true);
+    setPduSourceId(deviceId);
+    setMessage(`Simple PDU 출발지: ${device.label}. 목적지 장비를 선택하세요.`);
+  }
+
+  function startCableFromDevice(deviceId: string) {
+    const device = project.devices.find((item) => item.id === deviceId);
+    if (!device) return;
+    setSelectedModel("");
+    setSelectedCable("auto");
+    setPendingDeviceId(deviceId);
+    setConnectionDraft(null);
+    setSelectedDeviceId(deviceId);
+    setSelectedLinkId("");
+    setDeviceWindowId("");
+    setDeviceWindowTab(undefined);
+    setPduMode(false);
+    setPduSourceId("");
+    setMessage(`${device.label}에서 자동 케이블 연결을 시작했습니다. 연결할 장비를 선택하세요.`);
+  }
+
   function commitRenameDevice() {
     if (!renameDraft) return;
     const device = project.devices.find((item) => item.id === renameDraft.deviceId);
@@ -262,7 +331,7 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
     }
     const label = cleanDeviceName(renameDraft.value) || device.label;
     updateDevice({ ...device, label, config: { ...device.config, hostname: label } });
-    setMessage(`${device.label} renamed to ${label}.`);
+    setMessage(`${device.label} 이름을 ${label}(으)로 변경했습니다.`);
     setRenameDraft(null);
   }
 
@@ -274,7 +343,7 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
       powerOn: !device.powerOn,
       runtime: !device.powerOn ? device.runtime : { arpTable: [], macTable: [], dhcpLeases: [], logs: [] }
     });
-    setMessage(`${device.label} powered ${device.powerOn ? "off" : "on"}.`);
+    setMessage(`${device.label} 전원을 ${device.powerOn ? "껐습니다" : "켰습니다"}.`);
   }
 
   function deleteDevice(deviceId: string) {
@@ -302,6 +371,12 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
     setTopMenu(null);
   }
 
+  function placeWorkspaceModel(modelId: string, menu: WorkspaceMenuState | null) {
+    if (!menu) return;
+    placeDevice(modelId, placementPosition(modelId, { x: menu.canvasX, y: menu.canvasY }));
+    setWorkspaceMenu(null);
+  }
+
   function renameProject(name: string) {
     onChange({ ...project, name: name.slice(0, 100) });
   }
@@ -312,16 +387,35 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
     setMessage(result.message);
   }
 
+  function updateViewport() {
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    const next = {
+      x: workspace.scrollLeft / zoom,
+      y: workspace.scrollTop / zoom,
+      width: workspace.clientWidth / zoom,
+      height: workspace.clientHeight / zoom
+    };
+    setViewport((current) => (
+      Math.abs(current.x - next.x) < 1 &&
+      Math.abs(current.y - next.y) < 1 &&
+      Math.abs(current.width - next.width) < 1 &&
+      Math.abs(current.height - next.height) < 1
+        ? current
+        : next
+    ));
+  }
+
   function toggleFullscreen() {
     if (typeof document === "undefined") return;
     if (document.fullscreenElement) {
       void document.exitFullscreen();
-      setMessage("Exited full screen.");
+      setMessage("전체 화면을 종료했습니다.");
       return;
     }
     if (document.documentElement.requestFullscreen) {
       void document.documentElement.requestFullscreen();
-      setMessage("Entered full screen.");
+      setMessage("전체 화면으로 전환했습니다.");
     }
   }
 
@@ -334,9 +428,47 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
     };
   }
 
+  function jumpToCanvasPoint(point: { x: number; y: number }) {
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    const targetLeft = point.x * zoom - workspace.clientWidth / 2;
+    const targetTop = point.y * zoom - workspace.clientHeight / 2;
+    workspace.scrollTo({
+      left: Math.max(0, Math.min(workspace.scrollWidth - workspace.clientWidth, targetLeft)),
+      top: Math.max(0, Math.min(workspace.scrollHeight - workspace.clientHeight, targetTop)),
+      behavior: "smooth"
+    });
+    setMessage("미니맵 위치로 이동했습니다.");
+  }
+
+  function fitTopologyToView() {
+    const workspace = workspaceRef.current;
+    const bounds = topologyBounds(project.devices);
+    if (!workspace || !bounds) {
+      setZoom(1);
+      setMessage("확대를 100%로 초기화했습니다.");
+      return;
+    }
+    const padding = 180;
+    const nextZoom = Math.max(0.45, Math.min(1.5, workspace.clientWidth / (bounds.width + padding), workspace.clientHeight / (bounds.height + padding)));
+    const centerX = bounds.x + bounds.width / 2;
+    const centerY = bounds.y + bounds.height / 2;
+    setZoom(nextZoom);
+    window.requestAnimationFrame(() => {
+      workspace.scrollTo({
+        left: Math.max(0, centerX * nextZoom - workspace.clientWidth / 2),
+        top: Math.max(0, centerY * nextZoom - workspace.clientHeight / 2),
+        behavior: "smooth"
+      });
+      updateViewport();
+    });
+    setMessage("토폴로지 전체가 보이도록 맞췄습니다.");
+  }
+
   function startDrag(event: React.PointerEvent<HTMLElement>, device: NetworkDevice) {
     if (selectedCable || selectedModel || pduMode || event.button !== 0) return;
     if ((event.target as HTMLElement).closest(".pdu-target")) return;
+    event.stopPropagation();
     event.preventDefault();
     const point = canvasPoint(event);
     dragRef.current = {
@@ -373,14 +505,99 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
   function endDrag() {
     if (dragRef.current?.moved) {
       suppressClickRef.current = true;
-      setMessage("Device moved.");
+      setMessage("장비를 이동했습니다.");
     }
     dragRef.current = null;
   }
 
-  function zoomWithWheel(event: React.WheelEvent<HTMLElement>) {
+  function canStartWorkspacePan(event: React.PointerEvent<HTMLElement>): boolean {
+    if (event.button !== 0 || selectedModel || selectedCable || pduMode) return false;
+    const target = event.target as HTMLElement | SVGElement | null;
+    if (!target || !(target instanceof Element)) return false;
+    return !target.closest([
+      "button",
+      "input",
+      "select",
+      "textarea",
+      ".device-node",
+      ".link-group",
+      ".selected-link-card",
+      ".workspace-tabs",
+      ".zoom-hud",
+      ".common-tools-bar",
+      ".cable-hud",
+      ".placement-hud",
+      ".pdu-hud",
+      ".selection-hud",
+      ".board-guide",
+      ".empty-canvas-starter",
+      ".workspace-minimap"
+    ].join(","));
+  }
+
+  function startWorkspacePan(event: React.PointerEvent<HTMLElement>) {
+    if (!canStartWorkspacePan(event)) return;
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    panRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      scrollLeft: workspace.scrollLeft,
+      scrollTop: workspace.scrollTop,
+      moved: false
+    };
+    workspace.setPointerCapture(event.pointerId);
+    closeFloatingMenus();
+    setIsPanning(true);
+  }
+
+  function moveWorkspacePan(event: React.PointerEvent<HTMLElement>) {
+    const pan = panRef.current;
+    const workspace = workspaceRef.current;
+    if (!pan || !workspace || pan.pointerId !== event.pointerId) return;
     event.preventDefault();
-    setZoom((value) => Math.max(0.45, Math.min(1.9, value + (event.deltaY < 0 ? 0.08 : -0.08))));
+    const dx = event.clientX - pan.startX;
+    const dy = event.clientY - pan.startY;
+    if (Math.hypot(dx, dy) > 3) pan.moved = true;
+    workspace.scrollLeft = pan.scrollLeft - dx;
+    workspace.scrollTop = pan.scrollTop - dy;
+  }
+
+  function endWorkspacePan(event: React.PointerEvent<HTMLElement>) {
+    const pan = panRef.current;
+    const workspace = workspaceRef.current;
+    if (!pan || pan.pointerId !== event.pointerId) return;
+    if (workspace?.hasPointerCapture(event.pointerId)) workspace.releasePointerCapture(event.pointerId);
+    if (pan.moved) {
+      suppressWorkspaceClickRef.current = true;
+      setMessage("작업 공간을 이동했습니다.");
+    }
+    panRef.current = null;
+    setIsPanning(false);
+  }
+
+  function zoomWithWheel(event: React.WheelEvent<HTMLElement>) {
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = workspace.getBoundingClientRect();
+    const offsetX = event.clientX - rect.left;
+    const offsetY = event.clientY - rect.top;
+    const delta = event.deltaY < 0 ? 0.08 : -0.08;
+    setZoom((value) => {
+      const next = Math.max(0.45, Math.min(1.9, value + delta));
+      if (next === value) return value;
+      const canvasX = (workspace.scrollLeft + offsetX) / value;
+      const canvasY = (workspace.scrollTop + offsetY) / value;
+      window.requestAnimationFrame(() => {
+        workspace.scrollLeft = Math.max(0, canvasX * next - offsetX);
+        workspace.scrollTop = Math.max(0, canvasY * next - offsetY);
+        updateViewport();
+      });
+      return next;
+    });
   }
 
   function selectMode() {
@@ -393,19 +610,19 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
     setSelectedDeviceId("");
     setSelectedLinkId("");
     closeFloatingMenus();
-    setMessage("Select mode.");
+    setMessage("선택 모드입니다.");
   }
 
   function deleteSelected() {
     if (selectedDeviceId) {
       deleteDevice(selectedDeviceId);
-      setMessage("Device deleted.");
+      setMessage("장비를 삭제했습니다.");
       return;
     }
     if (selectedLinkId) {
       onChange(removeLink(project, selectedLinkId));
       setSelectedLinkId("");
-      setMessage("Cable removed.");
+      setMessage("케이블을 삭제했습니다.");
     }
   }
 
@@ -419,118 +636,140 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
   }
 
   function packetMenuItems(name: PacketMenuName): PacketMenuItem[] {
-    if (name === "File") {
+    if (name === "파일") {
       return [
-        { label: "Save", action: () => { onSave(project); setMessage("Project save requested."); } },
-        { label: "Export JSON", action: () => downloadProject(project, "json") },
-        { label: "Export PTWEB", action: () => { downloadProject(project, "ptweb"); setMessage("Exported .ptweb project file. Cisco Packet Tracer .pkt binary export is not implemented."); } },
-        { label: "Back to Projects", action: onBack }
+        { label: "저장", action: () => { onSave(project); setMessage("프로젝트 저장을 요청했습니다."); } },
+        { label: "JSON 내보내기", action: () => downloadProject(project, "json") },
+        { label: "PTWEB 내보내기", action: () => { downloadProject(project, "ptweb"); setMessage(".ptweb 프로젝트 파일을 내보냈습니다. Cisco Packet Tracer .pkt 바이너리 내보내기는 지원하지 않습니다."); } },
+        { label: "프로젝트로 돌아가기", action: onBack }
       ];
     }
-    if (name === "Edit") {
+    if (name === "편집") {
       return [
-        { label: "Select Mode", action: selectMode },
-        { label: "Clear Selection", action: selectMode },
-        { label: "Delete Selected", action: deleteSelected, disabled: !selectedDeviceId && !selectedLinkId, danger: true }
+        { label: "선택 모드", action: selectMode },
+        { label: "선택 해제", action: selectMode },
+        { label: "선택 항목 삭제", action: deleteSelected, disabled: !selectedDeviceId && !selectedLinkId, danger: true }
       ];
     }
-    if (name === "Options") {
+    if (name === "옵션") {
       return [
-        { label: "Realtime Mode", action: () => setTimeMode("realtime"), disabled: timeMode === "realtime" },
-        { label: "Simulation Mode", action: () => setTimeMode("simulation"), disabled: timeMode === "simulation" }
+        { label: "실시간 모드", action: () => setTimeMode("realtime"), disabled: timeMode === "realtime" },
+        { label: "시뮬레이션 모드", action: () => setTimeMode("simulation"), disabled: timeMode === "simulation" }
       ];
     }
-    if (name === "View") {
+    if (name === "보기") {
       return [
-        { label: "Logical Workspace", action: () => setWorkspaceMode("logical"), disabled: workspaceMode === "logical" },
-        { label: "Physical Workspace", action: () => setWorkspaceMode("physical"), disabled: workspaceMode === "physical" },
-        { label: "Zoom 100%", action: () => { setZoom(1); setMessage("Zoom reset to 100%."); } },
-        { label: "Zoom In", action: () => setZoom((value) => Math.min(1.9, value + 0.1)) },
-        { label: "Zoom Out", action: () => setZoom((value) => Math.max(0.45, value - 0.1)) }
+        { label: "논리 작업공간", action: () => setWorkspaceMode("logical"), disabled: workspaceMode === "logical" },
+        { label: "물리 작업공간", action: () => setWorkspaceMode("physical"), disabled: workspaceMode === "physical" },
+        { label: "전체 보기", action: fitTopologyToView },
+        { label: trayCollapsed ? "하단 도크 펼치기" : "하단 도크 접기", action: () => { setTrayCollapsed((value) => !value); setMessage(trayCollapsed ? "하단 도크를 펼쳤습니다." : "하단 도크를 접었습니다."); } },
+        { label: "확대 100%", action: () => { setZoom(1); setMessage("확대를 100%로 초기화했습니다."); } },
+        { label: "확대", action: () => setZoom((value) => Math.min(1.9, value + 0.1)) },
+        { label: "축소", action: () => setZoom((value) => Math.max(0.45, value - 0.1)) }
       ];
     }
-    if (name === "Tools") {
+    if (name === "도구") {
       return [
-        { label: "Repair Project", action: repairCurrentProject },
-        { label: "Run Diagnostics", action: () => setMessage(`${diagnoseProject(project).length} project-level issues.`) }
+        { label: "프로젝트 복구", action: repairCurrentProject },
+        { label: "진단 실행", action: () => setMessage(`프로젝트 수준 이슈 ${diagnoseProject(project).length}개`) }
       ];
     }
-    if (name === "Extensions") {
+    if (name === "확장") {
       return [
-        { label: "WASM Engine Status", action: () => setMessage(engineName) },
-        { label: "PTWEB Compatibility", action: () => setMessage(".ptweb is this app's own format; Cisco .pkt binary export is not implemented.") }
+        { label: "WASM 엔진 상태", action: () => setMessage(engineName) },
+        { label: "PTWEB 호환성", action: () => setMessage(".ptweb은 이 앱의 자체 형식입니다. Cisco .pkt 바이너리 내보내기는 지원하지 않습니다.") }
       ];
     }
-    if (name === "Window") {
+    if (name === "창") {
       return [
-        { label: typeof document !== "undefined" && document.fullscreenElement ? "Exit Full Screen" : "Enter Full Screen", action: toggleFullscreen },
-        { label: "Open Selected Device", action: () => selectedDeviceId && openDeviceWindow(selectedDeviceId), disabled: !selectedDeviceId },
-        { label: "Open Selected CLI", action: () => selectedDeviceId && openDeviceWindow(selectedDeviceId, "cli"), disabled: !selectedDeviceId },
-        { label: deviceWindow ? `Activate ${deviceWindow.label}` : "No Device Window", action: () => deviceWindow && setMessage(`${deviceWindow.label} window active.`), disabled: !deviceWindow },
-        { label: "Close Device Window", action: () => { setDeviceWindowId(""); setDeviceWindowTab(undefined); setMessage("Device window closed."); }, disabled: !deviceWindow },
-        { label: "Simulation Panel", action: () => setTimeMode("simulation"), disabled: timeMode === "simulation" }
+        { label: typeof document !== "undefined" && document.fullscreenElement ? "전체 화면 종료" : "전체 화면", action: toggleFullscreen },
+        { label: "선택 장비 열기", action: () => selectedDeviceId && openDeviceWindow(selectedDeviceId), disabled: !selectedDeviceId },
+        { label: "선택 장비 CLI 열기", action: () => selectedDeviceId && openDeviceWindow(selectedDeviceId, "cli"), disabled: !selectedDeviceId },
+        { label: deviceWindow ? `${deviceWindow.label} 활성화` : "열린 장비 창 없음", action: () => deviceWindow && setMessage(`${deviceWindow.label} 창이 활성화되어 있습니다.`), disabled: !deviceWindow },
+        { label: "장비 창 닫기", action: () => { setDeviceWindowId(""); setDeviceWindowTab(undefined); setMessage("장비 창을 닫았습니다."); }, disabled: !deviceWindow },
+        { label: "시뮬레이션 패널", action: () => setTimeMode("simulation"), disabled: timeMode === "simulation" }
       ];
     }
     return [
-      { label: "About", action: () => setMessage("Network Editor Web Packet Tracer-style lab.") },
-      { label: "Format Note", action: () => setMessage("Use .ptweb or JSON here. Cisco Packet Tracer 6.1 .pkt is proprietary binary.") }
+      { label: "정보", action: () => setMessage("Network Editor Web 네트워크 랩입니다.") },
+      { label: "형식 안내", action: () => setMessage("여기서는 .ptweb 또는 JSON을 사용합니다. Cisco Packet Tracer .pkt는 독점 바이너리 형식입니다.") }
     ];
   }
 
   return (
-    <main className="editor-shell packet-shell" onClick={() => { setContextMenu(null); setLinkMenu(null); setWorkspaceMenu(null); setTopMenu(null); }}>
+    <main className={`editor-shell packet-shell ${trayCollapsed ? "tray-collapsed" : ""}`} onClick={() => { setContextMenu(null); setLinkMenu(null); setWorkspaceMenu(null); setTopMenu(null); }}>
       <header className="topbar packet-topbar">
         <div className="packet-menubar">
-          <button className="icon-button" onClick={onBack} title="Back" type="button"><ArrowLeft size={18} /></button>
-          <input className="project-title-input" value={project.name} onBlur={() => { if (!project.name.trim()) renameProject("Untitled Network"); }} onChange={(event) => renameProject(event.target.value)} aria-label="Project name" />
+          <button className="icon-button" onClick={onBack} title="프로젝트로 돌아가기" type="button"><ArrowLeft size={18} /></button>
+          <input className="project-title-input" value={project.name} onBlur={() => { if (!project.name.trim()) renameProject("제목 없는 네트워크"); }} onChange={(event) => renameProject(event.target.value)} aria-label="프로젝트 이름" />
           <span className="session-chip">{user.username}</span>
         </div>
-        <nav className="packet-menu-labels" aria-label="Packet Tracer menus">
+        <nav className="packet-menu-labels" aria-label="상단 메뉴">
           {packetMenuLabels.map((name) => (
             <button className={topMenu?.name === name ? "active" : ""} key={name} onClick={(event) => openTopMenu(event, name)} type="button">{name}</button>
           ))}
         </nav>
         <div className="packet-toolbar">
-          <button className="icon-button" onClick={() => { onSave(project); setMessage("Project save requested."); }} title="Save" type="button"><Save size={18} /></button>
-          <button className="icon-button" onClick={() => downloadProject(project, "json")} title="Export JSON" type="button"><FileJson size={18} /></button>
-          <button className="icon-button" onClick={() => { downloadProject(project, "ptweb"); setMessage("Exported .ptweb project file. Cisco Packet Tracer .pkt binary export is not implemented."); }} title="Export PTWEB project (not Cisco .pkt)" type="button"><Download size={18} /></button>
-          <button className="icon-button" onClick={() => setZoom((value) => Math.min(1.9, value + 0.1))} title="Zoom in" type="button"><ZoomIn size={18} /></button>
-          <button className="icon-button" onClick={() => { setZoom(1); setMessage("Zoom reset to 100%."); }} title="Zoom reset" type="button"><RotateCcw size={18} /></button>
-          <button className="icon-button" onClick={() => setZoom((value) => Math.max(0.45, value - 0.1))} title="Zoom out" type="button"><ZoomOut size={18} /></button>
+          <button className="icon-button" onClick={() => { onSave(project); setMessage("프로젝트 저장을 요청했습니다."); }} title="저장" type="button"><Save size={18} /></button>
+          <button className="icon-button" onClick={() => downloadProject(project, "json")} title="JSON 내보내기" type="button"><FileJson size={18} /></button>
+          <button className="icon-button" onClick={() => { downloadProject(project, "ptweb"); setMessage(".ptweb 프로젝트 파일을 내보냈습니다. Cisco Packet Tracer .pkt 바이너리 내보내기는 지원하지 않습니다."); }} title="PTWEB 프로젝트 내보내기 (Cisco .pkt 아님)" type="button"><Download size={18} /></button>
+          <button className="icon-button" onClick={() => setZoom((value) => Math.min(1.9, value + 0.1))} title="확대" type="button"><ZoomIn size={18} /></button>
+          <button className="icon-button" onClick={fitTopologyToView} title="전체 보기" type="button"><Maximize2 size={18} /></button>
+          <button
+            className={`icon-button ${trayCollapsed ? "active" : ""}`}
+            onClick={() => {
+              setTrayCollapsed((value) => !value);
+              setMessage(trayCollapsed ? "하단 도크를 펼쳤습니다." : "하단 도크를 접었습니다.");
+            }}
+            title={trayCollapsed ? "하단 도크 펼치기" : "하단 도크 접기"}
+            type="button"
+          >
+            {trayCollapsed ? <Maximize2 size={18} /> : <Minimize2 size={18} />}
+          </button>
+          <button className="icon-button" onClick={() => { setZoom(1); setMessage("확대를 100%로 초기화했습니다."); }} title="확대 초기화" type="button"><RotateCcw size={18} /></button>
+          <button className="icon-button" onClick={() => setZoom((value) => Math.max(0.45, value - 0.1))} title="축소" type="button"><ZoomOut size={18} /></button>
         </div>
       </header>
       <section
-        className={`workspace packet-workspace ${selectedModel ? "placing" : ""} ${selectedCable ? "cabling" : ""} ${workspaceMode}`}
+        className={`workspace packet-workspace ${selectedModel ? "placing" : ""} ${selectedCable ? "cabling" : ""} ${isPanning ? "panning" : ""} ${workspaceMode}`}
         onClick={clickWorkspace}
         onContextMenu={(event) => {
           event.preventDefault();
           closeFloatingMenus();
-          setWorkspaceMenu({ x: event.clientX, y: event.clientY });
-          setMessage("Workspace menu opened.");
+          const point = canvasPoint(event);
+          setWorkspaceMenu({ x: event.clientX, y: event.clientY, canvasX: point.x, canvasY: point.y });
+          setMessage("작업 공간 메뉴를 열었습니다.");
         }}
         onDragOver={(event) => event.preventDefault()}
         onDrop={dropDevice}
-        onWheel={zoomWithWheel}
+        onPointerCancel={endWorkspacePan}
+        onPointerDown={startWorkspacePan}
+        onPointerMove={moveWorkspacePan}
+        onPointerUp={endWorkspacePan}
+        onScroll={updateViewport}
+        onWheelCapture={zoomWithWheel}
+        ref={workspaceRef}
       >
         <div className="workspace-tabs" onClick={(event) => { event.stopPropagation(); closeFloatingMenus(); }}>
-          <button className={workspaceMode === "logical" ? "active" : ""} onClick={() => setWorkspaceMode("logical")} type="button">Logical</button>
-          <button className={workspaceMode === "physical" ? "active" : ""} onClick={() => setWorkspaceMode("physical")} type="button">Physical</button>
+          <button className={workspaceMode === "logical" ? "active" : ""} onClick={() => setWorkspaceMode("logical")} type="button">논리</button>
+          <button className={workspaceMode === "physical" ? "active" : ""} onClick={() => setWorkspaceMode("physical")} type="button">물리</button>
         </div>
         <div className="zoom-hud" onClick={(event) => { event.stopPropagation(); closeFloatingMenus(); }}>
-          <button className="icon-button" onClick={() => setZoom((value) => Math.max(0.45, value - 0.1))} title="Zoom out" type="button"><ZoomOut size={16} /></button>
+          <button className="icon-button" onClick={() => setZoom((value) => Math.max(0.45, value - 0.1))} title="축소" type="button"><ZoomOut size={16} /></button>
           <span>{Math.round(zoom * 100)}%</span>
-          <button className="icon-button" onClick={() => setZoom((value) => Math.min(1.9, value + 0.1))} title="Zoom in" type="button"><ZoomIn size={16} /></button>
+          <button className="icon-button" onClick={() => setZoom((value) => Math.min(1.9, value + 0.1))} title="확대" type="button"><ZoomIn size={16} /></button>
+          <button className="icon-button" onClick={fitTopologyToView} title="전체 보기" type="button"><Maximize2 size={16} /></button>
         </div>
         <div className="common-tools-bar" onClick={(event) => { event.stopPropagation(); closeFloatingMenus(); }}>
-          <button className={!selectedDeviceId && !selectedLinkId && !selectedCable && !selectedModel && !pduMode ? "active" : ""} onClick={selectMode} title="Select tool" type="button"><MousePointer2 size={16} /></button>
-          <button disabled={pduMode || !selectedDeviceId} onClick={() => selectedDeviceId && openDeviceWindow(selectedDeviceId)} title="Inspect selected device" type="button"><Settings size={16} /></button>
-          <button disabled={pduMode || (!selectedDeviceId && !selectedLinkId)} onClick={deleteSelected} title="Delete selected" type="button"><Trash2 size={16} /></button>
-          <button className={pduMode ? "active" : ""} disabled={Boolean(selectedCable) || Boolean(selectedModel)} onClick={() => { setPduMode(true); setPduSourceId(""); setSelectedDeviceId(""); setSelectedLinkId(""); setDeviceWindowId(""); setDeviceWindowTab(undefined); setMessage("Add Simple PDU: select a source device."); }} title="Add Simple PDU" type="button"><Mail size={16} /></button>
+          <button className={!selectedDeviceId && !selectedLinkId && !selectedCable && !selectedModel && !pduMode ? "active" : ""} onClick={selectMode} title="선택 도구" type="button"><MousePointer2 size={16} /></button>
+          <button disabled={pduMode || !selectedDeviceId} onClick={() => selectedDeviceId && openDeviceWindow(selectedDeviceId)} title="선택 장비 검사" type="button"><Settings size={16} /></button>
+          <button disabled={pduMode || (!selectedDeviceId && !selectedLinkId)} onClick={deleteSelected} title="선택 항목 삭제" type="button"><Trash2 size={16} /></button>
+          <button className={pduMode ? "active" : ""} disabled={Boolean(selectedCable) || Boolean(selectedModel)} onClick={() => { setPduMode(true); setPduSourceId(""); setSelectedDeviceId(""); setSelectedLinkId(""); setDeviceWindowId(""); setDeviceWindowTab(undefined); setMessage("Simple PDU 추가: 출발지 장비를 선택하세요."); }} title="Simple PDU 추가" type="button"><Mail size={16} /></button>
         </div>
         {(selectedCable || pendingDeviceId) && (
           <div className="cable-hud">
-            <strong>{selectedCable || "Cable"}</strong>
-            <span>{pendingDeviceId ? `From ${project.devices.find((device) => device.id === pendingDeviceId)?.label ?? "device"}` : "Select first device"}</span>
+            <strong>{selectedCable ? shortCableLabel(selectedCable) : "케이블"}</strong>
+            <span>{pendingDeviceId ? `${project.devices.find((device) => device.id === pendingDeviceId)?.label ?? "장비"}에서 시작` : "첫 번째 장비 선택"}</span>
           </div>
         )}
         {selectedModelInfo && (
@@ -544,7 +783,28 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
           <div className="pdu-hud">
             <Mail size={16} />
             <strong>{pduSource ? pduSource.label : "Simple PDU"}</strong>
-            <span>{pduSource ? "Select destination" : "Select source"}</span>
+            <span>{pduSource ? "목적지 선택" : "출발지 선택"}</span>
+          </div>
+        )}
+        {!selectedCable && !selectedModel && !pduMode && (
+          <div className="board-guide" onClick={(event) => { event.stopPropagation(); closeFloatingMenus(); }}>
+            <span><MousePointer2 size={14} />빈 보드 드래그 이동</span>
+            <span><ZoomIn size={14} />휠 확대/축소</span>
+            <span><Settings size={14} />우클릭 빠른 메뉴</span>
+          </div>
+        )}
+        {selectedDevice && !selectedCable && !selectedModel && !pduMode && (
+          <div className="selection-hud" onClick={(event) => { event.stopPropagation(); closeFloatingMenus(); }}>
+            <span className={`selection-led ${selectedDevice.powerOn ? "on" : "off"}`} />
+            <div>
+              <strong>{selectedDevice.label}</strong>
+              <span>{selectedDevice.model} | 연결 {selectedDevice.ports.filter((port) => port.linkId).length}개</span>
+            </div>
+            <button className="icon-button" onClick={() => openDeviceWindow(selectedDevice.id, "config")} title="선택 장비 설정" type="button"><Wrench size={16} /></button>
+            <button className="icon-button" onClick={() => startCableFromDevice(selectedDevice.id)} title="선택 장비에서 자동 케이블 연결 시작" type="button"><Cable size={16} /></button>
+            <button className="icon-button" onClick={() => renameDevice(selectedDevice.id)} title="선택 장비 이름 변경" type="button"><Edit3 size={16} /></button>
+            <button className="icon-button" onClick={() => duplicateDevice(selectedDevice.id)} title="선택 장비 복제" type="button"><Copy size={16} /></button>
+            <button className="icon-button danger" onClick={() => { deleteDevice(selectedDevice.id); setMessage("장비를 삭제했습니다."); }} title="선택 장비 삭제" type="button"><Trash2 size={16} /></button>
           </div>
         )}
         <div className="canvas-scroll-area" style={{ width: CANVAS_WIDTH * zoom, height: CANVAS_HEIGHT * zoom }}>
@@ -557,6 +817,25 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
             style={{ transform: `scale(${zoom})`, transformOrigin: "0 0" }}
           >
             {workspaceMode === "physical" && <PhysicalWorkspaceBackdrop devices={project.devices} />}
+            {project.devices.length === 0 && !selectedCable && !selectedModel && !pduMode && (
+              <div className="empty-canvas-starter" onClick={(event) => event.stopPropagation()}>
+                <Network size={22} />
+                <strong>빈 네트워크</strong>
+                <span>장비를 고르거나 빈 보드를 우클릭해서 토폴로지를 시작하세요.</span>
+                <div>
+                  {quickWorkspaceModelIds.slice(0, 4).map((modelId) => {
+                    const model = deviceCatalog.find((item) => item.id === modelId);
+                    if (!model) return null;
+                    return (
+                      <button key={model.id} onClick={() => placeDevice(model.id, placementPosition(model.id, { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 }))} type="button">
+                        <DeviceIcon kind={model.kind} size={15} />
+                        {displayKind(model.kind)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <svg className="link-layer">
               {project.links.map((link) => {
                 const a = project.devices.find((device) => device.id === link.endpointA.deviceId);
@@ -580,11 +859,11 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
                 return (
                   <g
                     key={link.id}
-                    className={selectedLinkId === link.id ? "selected-link" : ""}
+                    className={`link-group ${selectedLinkId === link.id ? "selected-link" : ""}`}
                     onClick={(event) => {
                       event.stopPropagation();
                       if (selectedCable || selectedModel) {
-                        setMessage("Finish or cancel the current placement mode before selecting cables.");
+                        setMessage("현재 배치 모드를 끝내거나 취소한 뒤 케이블을 선택하세요.");
                         return;
                       }
                       closeFloatingMenus();
@@ -596,7 +875,7 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
                       event.preventDefault();
                       event.stopPropagation();
                       if (selectedCable || selectedModel) {
-                        setMessage("Finish or cancel the current placement mode before opening a cable menu.");
+                        setMessage("현재 배치 모드를 끝내거나 취소한 뒤 케이블 메뉴를 여세요.");
                         return;
                       }
                       closeFloatingMenus();
@@ -605,7 +884,7 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
                       setLinkMenu({ linkId: link.id, x: event.clientX, y: event.clientY });
                     }}
                   >
-                    <title>{linkLabel(project, link)} [{link.status}]</title>
+                    <title>{linkLabel(project, link)} [{linkStatusLabel(link.status)}]</title>
                     {link.type === "wireless" ? <path className="cable-hitbox" d={wirelessPath} /> : <line className="cable-hitbox" x1={x1} x2={x2} y1={y1} y2={y2} />}
                     {link.type === "wireless" ? <path className={`cable-line ${link.type} ${link.status} ${activeFlow ? "active-flow" : ""}`} d={wirelessPath} /> : <line className={`cable-line ${link.type} ${link.status} ${activeFlow ? "active-flow" : ""}`} x1={x1} x2={x2} y1={y1} y2={y2} />}
                     <circle className={`link-light ${link.type} ${link.status} ${activeFlow ? "active-flow" : ""}`} cx={x1} cy={y1} r="5" />
@@ -627,7 +906,7 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
                     return;
                   }
                   if (selectedModel) {
-                    setMessage("Click an empty workspace area to place the selected model.");
+                    setMessage("선택한 모델은 빈 작업 공간을 클릭해서 배치하세요.");
                     return;
                   }
                   void clickDevice(device);
@@ -653,8 +932,8 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
                   <strong>{device.label}</strong>
                 </span>
                 <small>{device.model}</small>
-                <span className="port-strip">{device.ports.slice(0, 28).map((port) => <i className={portMarkerClass(project, device, port, selectedCable, pendingDeviceId)} key={port.id} title={portMarkerTitle(project, device, port, selectedCable, pendingDeviceId)} />)}</span>
-                {pduMode && pduSourceId && pduSourceId !== device.id && <span className="pdu-target" onClick={(event) => { event.stopPropagation(); closeFloatingMenus(); void sendPdu(pduSourceId, device.id).then(() => { setPduSourceId(""); setPduMode(false); }); }} title={`Send Simple PDU to ${device.label}`}><Mail size={14} /></span>}
+                <span className="node-meta">{displayKind(device.kind)} · 연결 {device.ports.filter((port) => port.linkId).length}</span>
+                {pduMode && pduSourceId && pduSourceId !== device.id && <span className="pdu-target" onClick={(event) => { event.stopPropagation(); closeFloatingMenus(); void sendPdu(pduSourceId, device.id).then(() => { setPduSourceId(""); setPduMode(false); }); }} title={`${device.label}에 Simple PDU 전송`}><Mail size={14} /></span>}
               </button>
             ))}
             {latestEvent && <PduMarker project={project} sourceId={latestEvent.lastDeviceId} status={latestEvent.status} targetId={latestEvent.atDeviceId} type={latestEvent.type} />}
@@ -671,27 +950,34 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
             )}
           </div>
         </div>
+        <WorkspaceMiniMap
+          project={project}
+          selectedDeviceId={selectedDeviceId}
+          selectedLinkId={selectedLinkId}
+          viewport={viewport}
+          onJump={jumpToCanvasPoint}
+        />
       </section>
       <section className="bottom-tray">
         <Palette
           selectedModel={selectedModel}
           selectedCable={selectedCable}
-          onSelect={() => { closeFloatingMenus(); setSelectedLinkId(""); setSelectedModel(""); setSelectedCable(""); setPendingDeviceId(""); setConnectionDraft(null); setPduMode(false); setPduSourceId(""); setMessage("Select mode."); }}
-          onModel={(id) => { closeFloatingMenus(); setSelectedLinkId(""); setSelectedModel(id); setSelectedCable(""); setConnectionDraft(null); setPduMode(false); setPduSourceId(""); setMessage("Click the workspace or drag into it to place the selected device."); }}
-          onCable={(type) => { closeFloatingMenus(); setSelectedLinkId(""); setSelectedCable(type); setSelectedModel(""); setPendingDeviceId(""); setConnectionDraft(null); setPduMode(false); setPduSourceId(""); setMessage("Select two devices to connect."); }}
+          onSelect={() => { closeFloatingMenus(); setSelectedLinkId(""); setSelectedModel(""); setSelectedCable(""); setPendingDeviceId(""); setConnectionDraft(null); setPduMode(false); setPduSourceId(""); setMessage("선택 모드입니다."); }}
+          onModel={(id) => { closeFloatingMenus(); setSelectedLinkId(""); setSelectedModel(id); setSelectedCable(""); setConnectionDraft(null); setPduMode(false); setPduSourceId(""); setMessage("작업 공간을 클릭하거나 끌어 놓아 장비를 배치하세요."); }}
+          onCable={(type) => { closeFloatingMenus(); setSelectedLinkId(""); setSelectedCable(type); setSelectedModel(""); setPendingDeviceId(""); setConnectionDraft(null); setPduMode(false); setPduSourceId(""); setMessage("연결할 두 장비를 선택하세요."); }}
         />
         <div className="simulation-dock">
           <div className="time-tabs">
-            <button className={timeMode === "realtime" ? "active" : ""} onClick={() => setTimeMode("realtime")} type="button">Realtime</button>
-            <button className={timeMode === "simulation" ? "active" : ""} onClick={() => setTimeMode("simulation")} type="button">Simulation</button>
+            <button className={timeMode === "realtime" ? "active" : ""} onClick={() => setTimeMode("realtime")} type="button">실시간</button>
+            <button className={timeMode === "simulation" ? "active" : ""} onClick={() => setTimeMode("simulation")} type="button">시뮬레이션</button>
           </div>
           <EventPanel focusedEventId={latestEvent?.id ?? ""} message={message} mode={timeMode} onClear={() => { setFocusedEventId(""); onChange({ ...project, simulationEvents: [] }); }} onFocusEvent={setFocusedEventId} onRemoveLink={(linkId) => { onChange(removeLink(project, linkId)); if (selectedLinkId === linkId) setSelectedLinkId(""); }} onRepair={repairCurrentProject} project={project} />
         </div>
       </section>
       {connectionDraft && (
         <DeviceWindow
-          title="Connection Assistant"
-          subtitle={connectionDraft.cable}
+          title="연결 도우미"
+          subtitle={shortCableLabel(connectionDraft.cable)}
           tone="warning"
           onClose={() => setConnectionDraft(null)}
         >
@@ -732,7 +1018,10 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
           y={contextMenu.y}
           onClose={() => setContextMenu(null)}
           onDelete={deleteDevice}
+          onDuplicate={duplicateDevice}
+          onConnect={startCableFromDevice}
           onOpen={openDeviceWindow}
+          onPdu={startPduFromDevice}
           onRename={renameDevice}
           onTogglePower={toggleDevicePower}
         />
@@ -744,6 +1033,7 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
           x={linkMenu.x}
           y={linkMenu.y}
           onClose={() => setLinkMenu(null)}
+          onOpenDevice={(deviceId) => openDeviceWindow(deviceId)}
           onRemove={(linkId) => {
             onChange(removeLink(project, linkId));
             if (selectedLinkId === linkId) setSelectedLinkId("");
@@ -755,8 +1045,10 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
         <WorkspaceContextMenu
           mode={workspaceMode}
           onClose={() => setWorkspaceMenu(null)}
+          onFit={() => { fitTopologyToView(); setWorkspaceMenu(null); }}
           onLogical={() => { setWorkspaceMode("logical"); setWorkspaceMenu(null); }}
           onPhysical={() => { setWorkspaceMode("physical"); setWorkspaceMenu(null); }}
+          onPlaceModel={(modelId) => placeWorkspaceModel(modelId, workspaceMenu)}
           onRepair={() => { repairCurrentProject(); setWorkspaceMenu(null); }}
           onSelect={() => {
             setSelectedModel("");
@@ -766,9 +1058,9 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
             setSelectedDeviceId("");
             setSelectedLinkId("");
             setWorkspaceMenu(null);
-            setMessage("Select mode.");
+            setMessage("선택 모드입니다.");
           }}
-          onZoomReset={() => { setZoom(1); setWorkspaceMenu(null); setMessage("Zoom reset to 100%."); }}
+          onZoomReset={() => { setZoom(1); setWorkspaceMenu(null); setMessage("확대를 100%로 초기화했습니다."); }}
           x={workspaceMenu.x}
           y={workspaceMenu.y}
         />
@@ -792,7 +1084,7 @@ export function Editor({ project, user, saveError, onBack, onChange, onSave }: {
       )}
       <footer className="statusbar">
         <MousePointer2 size={15} />
-        <span>{saveError || message || "Select a device, cable, or PDU target."}</span>
+        <span>{saveError || message || "장비, 케이블 또는 PDU 대상을 선택하세요. 휠은 확대/축소, 빈 보드 드래그는 화면 이동입니다."}</span>
         <small>{engineName}</small>
       </footer>
     </main>
@@ -807,11 +1099,11 @@ function PhysicalWorkspaceBackdrop({ devices }: { devices: NetworkDevice[] }) {
   return (
     <div className="physical-backdrop" aria-hidden="true">
       <div className="physical-location-strip">
-        <strong>Intercity / City / Corporate Office / Wiring Closet</strong>
-        <span>{devices.length} devices | {routers} routers/firewalls | {switches} switches/hubs | {hosts} hosts | {wireless} wireless</span>
+        <strong>도시 / 캠퍼스 / 사무실 / 배선실</strong>
+        <span>장비 {devices.length}개 | 라우터/방화벽 {routers}개 | 스위치/허브 {switches}개 | 호스트 {hosts}개 | 무선 {wireless}개</span>
       </div>
       <div className="physical-rack">
-        <span>Rack 1</span>
+        <span>랙 1</span>
         <i />
         <i />
         <i />
@@ -819,13 +1111,13 @@ function PhysicalWorkspaceBackdrop({ devices }: { devices: NetworkDevice[] }) {
         <i />
       </div>
       <div className="physical-bench">
-        <span>Desktop Table</span>
+        <span>데스크톱 테이블</span>
         <i />
         <i />
         <i />
       </div>
       <div className="physical-wireless-zone">
-        <span>Wireless Cell</span>
+        <span>무선 영역</span>
       </div>
     </div>
   );
@@ -882,8 +1174,8 @@ function DeviceWindow({
           <strong>{title}</strong>
           {subtitle && <small>{subtitle}</small>}
         </div>
-        <button className="icon-button" onClick={() => setMaximized((value) => !value)} title={maximized ? "Restore window" : "Maximize window"} type="button">{maximized ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
-        <button className="icon-button" onClick={onClose} title="Close window" type="button"><X size={17} /></button>
+        <button className="icon-button" onClick={() => setMaximized((value) => !value)} title={maximized ? "창 복원" : "창 최대화"} type="button">{maximized ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
+        <button className="icon-button" onClick={onClose} title="창 닫기" type="button"><X size={17} /></button>
       </header>
       <div className="device-window-body">{children}</div>
     </section>
@@ -906,6 +1198,9 @@ function DeviceContextMenu({
   y,
   onClose,
   onOpen,
+  onDuplicate,
+  onConnect,
+  onPdu,
   onRename,
   onTogglePower,
   onDelete
@@ -915,6 +1210,9 @@ function DeviceContextMenu({
   y: number;
   onClose: () => void;
   onOpen: (deviceId: string, tab?: DeviceTab) => void;
+  onDuplicate: (deviceId: string) => void;
+  onConnect: (deviceId: string) => void;
+  onPdu: (deviceId: string) => void;
   onRename: (deviceId: string) => void;
   onTogglePower: (deviceId: string) => void;
   onDelete: (deviceId: string) => void;
@@ -929,8 +1227,8 @@ function DeviceContextMenu({
 
   if (!device) return null;
   const tabs = safeDeviceTabs(device);
-  const left = typeof window === "undefined" ? x : Math.min(x, Math.max(8, window.innerWidth - 230));
-  const top = typeof window === "undefined" ? y : Math.min(y, Math.max(8, window.innerHeight - 300));
+  const left = typeof window === "undefined" ? x : Math.min(x, Math.max(8, window.innerWidth - 268));
+  const top = typeof window === "undefined" ? y : Math.min(y, Math.max(8, window.innerHeight - 420));
 
   function run(action: () => void) {
     action();
@@ -938,14 +1236,37 @@ function DeviceContextMenu({
   }
 
   return (
-    <div className="device-context-menu" style={{ left, top }} onClick={(event) => event.stopPropagation()} role="menu">
-      <strong>{device.label}</strong>
-      <button onClick={() => run(() => onOpen(device.id))} type="button"><Settings size={15} />Open</button>
-      {tabs.includes("cli") && <button onClick={() => run(() => onOpen(device.id, "cli"))} type="button"><Terminal size={15} />CLI</button>}
-      {tabs.includes("desktop") && <button onClick={() => run(() => onOpen(device.id, "desktop"))} type="button"><Monitor size={15} />Desktop</button>}
-      <button onClick={() => run(() => onRename(device.id))} type="button"><Edit3 size={15} />Rename</button>
-      <button onClick={() => run(() => onTogglePower(device.id))} type="button"><Power size={15} />{device.powerOn ? "Power Off" : "Power On"}</button>
-      <button className="danger" onClick={() => run(() => onDelete(device.id))} type="button"><Trash2 size={15} />Delete</button>
+    <div className="device-context-menu rich-context-menu" style={{ left, top }} onClick={(event) => event.stopPropagation()} role="menu">
+      <header>
+        <DeviceIcon kind={device.kind} size={18} />
+        <div>
+          <strong>{device.label}</strong>
+          <span>{device.model}</span>
+        </div>
+      </header>
+      <div className="context-menu-section">
+        <small>열기</small>
+        <button onClick={() => run(() => onOpen(device.id))} type="button"><Settings size={15} />검사 창</button>
+        {tabs.includes("physical") && <button onClick={() => run(() => onOpen(device.id, "physical"))} type="button"><Cpu size={15} />물리</button>}
+        {tabs.includes("config") && <button onClick={() => run(() => onOpen(device.id, "config"))} type="button"><Wrench size={15} />설정</button>}
+        {tabs.includes("cli") && <button onClick={() => run(() => onOpen(device.id, "cli"))} type="button"><Terminal size={15} />CLI</button>}
+        {tabs.includes("desktop") && <button onClick={() => run(() => onOpen(device.id, "desktop"))} type="button"><Monitor size={15} />데스크톱</button>}
+        {tabs.includes("services") && <button onClick={() => run(() => onOpen(device.id, "services"))} type="button"><Server size={15} />서비스</button>}
+      </div>
+      <div className="context-menu-section">
+        <small>수정</small>
+        <button onClick={() => run(() => onRename(device.id))} type="button"><Edit3 size={15} />이름 변경</button>
+        <button onClick={() => run(() => onDuplicate(device.id))} type="button"><Copy size={15} />복제</button>
+      </div>
+      <div className="context-menu-section">
+        <small>작업</small>
+        <button onClick={() => run(() => onConnect(device.id))} type="button"><Cable size={15} />자동 케이블 연결 시작</button>
+        <button onClick={() => run(() => onPdu(device.id))} type="button"><Mail size={15} />Simple PDU 보내기</button>
+        <button onClick={() => run(() => onTogglePower(device.id))} type="button"><Power size={15} />{device.powerOn ? "전원 끄기" : "전원 켜기"}</button>
+      </div>
+      <div className="context-menu-section danger-zone">
+        <button className="danger" onClick={() => run(() => onDelete(device.id))} type="button"><Trash2 size={15} />장비 삭제</button>
+      </div>
     </div>
   );
 }
@@ -957,8 +1278,10 @@ function WorkspaceContextMenu({
   onClose,
   onSelect,
   onZoomReset,
+  onFit,
   onLogical,
   onPhysical,
+  onPlaceModel,
   onRepair
 }: {
   x: number;
@@ -967,8 +1290,10 @@ function WorkspaceContextMenu({
   onClose: () => void;
   onSelect: () => void;
   onZoomReset: () => void;
+  onFit: () => void;
   onLogical: () => void;
   onPhysical: () => void;
+  onPlaceModel: (modelId: string) => void;
   onRepair: () => void;
 }) {
   useEffect(() => {
@@ -979,17 +1304,39 @@ function WorkspaceContextMenu({
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [onClose]);
 
-  const left = typeof window === "undefined" ? x : Math.min(x, Math.max(8, window.innerWidth - 230));
-  const top = typeof window === "undefined" ? y : Math.min(y, Math.max(8, window.innerHeight - 230));
+  const quickModels = quickWorkspaceModelIds
+    .map((modelId) => deviceCatalog.find((model) => model.id === modelId))
+    .filter((model): model is NonNullable<typeof model> => Boolean(model));
+  const left = typeof window === "undefined" ? x : Math.min(x, Math.max(8, window.innerWidth - 268));
+  const top = typeof window === "undefined" ? y : Math.min(y, Math.max(8, window.innerHeight - 430));
 
   return (
-    <div className="device-context-menu workspace-context-menu" style={{ left, top }} onClick={(event) => event.stopPropagation()} role="menu">
-      <strong>Workspace</strong>
-      <button onClick={onSelect} type="button"><MousePointer2 size={15} />Select Mode</button>
-      <button onClick={onZoomReset} type="button"><RotateCcw size={15} />Zoom 100%</button>
-      <button className={mode === "logical" ? "active" : ""} onClick={onLogical} type="button"><Network size={15} />Logical</button>
-      <button className={mode === "physical" ? "active" : ""} onClick={onPhysical} type="button"><Cpu size={15} />Physical</button>
-      <button onClick={onRepair} type="button"><Settings size={15} />Repair Project</button>
+    <div className="device-context-menu workspace-context-menu rich-context-menu" style={{ left, top }} onClick={(event) => event.stopPropagation()} role="menu">
+      <header>
+        <Network size={18} />
+        <div>
+          <strong>작업 공간</strong>
+          <span>{mode === "logical" ? "논리 토폴로지" : "물리 배치"}</span>
+        </div>
+      </header>
+      <div className="context-menu-section">
+        <small>여기에 배치</small>
+        {quickModels.map((model) => (
+          <button key={model.id} onClick={() => onPlaceModel(model.id)} type="button">
+            <DeviceIcon kind={model.kind} size={15} />
+            {model.model}
+          </button>
+        ))}
+      </div>
+      <div className="context-menu-section">
+        <small>작업 공간</small>
+        <button onClick={onSelect} type="button"><MousePointer2 size={15} />선택 모드</button>
+        <button onClick={onFit} type="button"><Maximize2 size={15} />전체 보기</button>
+        <button onClick={onZoomReset} type="button"><RotateCcw size={15} />확대 100%</button>
+        <button className={mode === "logical" ? "active" : ""} onClick={onLogical} type="button"><Network size={15} />논리</button>
+        <button className={mode === "physical" ? "active" : ""} onClick={onPhysical} type="button"><Cpu size={15} />물리</button>
+        <button onClick={onRepair} type="button"><Settings size={15} />프로젝트 복구</button>
+      </div>
     </div>
   );
 }
@@ -1043,6 +1390,7 @@ function LinkContextMenu({
   x,
   y,
   onClose,
+  onOpenDevice,
   onRemove
 }: {
   link: NetworkLink | null;
@@ -1050,6 +1398,7 @@ function LinkContextMenu({
   x: number;
   y: number;
   onClose: () => void;
+  onOpenDevice: (deviceId: string) => void;
   onRemove: (linkId: string) => void;
 }) {
   useEffect(() => {
@@ -1061,17 +1410,125 @@ function LinkContextMenu({
   }, [onClose]);
 
   if (!link) return null;
-  const left = typeof window === "undefined" ? x : Math.min(x, Math.max(8, window.innerWidth - 260));
-  const top = typeof window === "undefined" ? y : Math.min(y, Math.max(8, window.innerHeight - 220));
+  const endpoints = linkEndpointSummaries(project, link);
+  const left = typeof window === "undefined" ? x : Math.min(x, Math.max(8, window.innerWidth - 280));
+  const top = typeof window === "undefined" ? y : Math.min(y, Math.max(8, window.innerHeight - 330));
 
   return (
-    <div className="device-context-menu link-context-menu" style={{ left, top }} onClick={(event) => event.stopPropagation()} role="menu">
-      <strong>{shortCableLabel(link.type)}</strong>
-      <span>{linkLabel(project, link)}</span>
-      <span>{linkStatusDetail(project, link)}</span>
-      <em>{link.status}</em>
-      <button className="danger" onClick={() => onRemove(link.id)} type="button"><Trash2 size={15} />Remove Cable</button>
+    <div className="device-context-menu link-context-menu rich-context-menu" style={{ left, top }} onClick={(event) => event.stopPropagation()} role="menu">
+      <header>
+        <Cable size={18} />
+        <div>
+          <strong>{shortCableLabel(link.type)}</strong>
+          <span>{linkStatusLabel(link.status)}</span>
+        </div>
+      </header>
+      <div className="context-menu-section">
+        <small>링크</small>
+        <span>{linkLabel(project, link)}</span>
+        <span>{linkStatusDetail(project, link)}</span>
+      </div>
+      <div className="context-menu-section">
+        <small>끝점</small>
+        <button onClick={() => { onOpenDevice(link.endpointA.deviceId); onClose(); }} type="button"><Info size={15} />{endpoints[0]?.device ?? "끝점 A"}</button>
+        <button onClick={() => { onOpenDevice(link.endpointB.deviceId); onClose(); }} type="button"><Info size={15} />{endpoints[1]?.device ?? "끝점 B"}</button>
+      </div>
+      <div className="context-menu-section danger-zone">
+        <button className="danger" onClick={() => onRemove(link.id)} type="button"><Trash2 size={15} />케이블 삭제</button>
+      </div>
     </div>
+  );
+}
+
+function WorkspaceMiniMap({
+  project,
+  selectedDeviceId,
+  selectedLinkId,
+  viewport,
+  onJump
+}: {
+  project: NetworkProject;
+  selectedDeviceId: string;
+  selectedLinkId: string;
+  viewport: CanvasViewport;
+  onJump: (point: { x: number; y: number }) => void;
+}) {
+  const devicesById = useMemo(() => new Map(project.devices.map((device) => [device.id, device])), [project.devices]);
+  const viewportWidth = clampPercent(viewport.width / CANVAS_WIDTH);
+  const viewportHeight = clampPercent(viewport.height / CANVAS_HEIGHT);
+  const viewportStyle: CSSProperties = {
+    left: `${clampPercent(viewport.x / CANVAS_WIDTH, 0, Math.max(0, 100 - viewportWidth))}%`,
+    top: `${clampPercent(viewport.y / CANVAS_HEIGHT, 0, Math.max(0, 100 - viewportHeight))}%`,
+    width: `${viewportWidth}%`,
+    height: `${viewportHeight}%`
+  };
+
+  function jumpFromStage(event: React.MouseEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    onJump({
+      x: ((event.clientX - rect.left) / rect.width) * CANVAS_WIDTH,
+      y: ((event.clientY - rect.top) / rect.height) * CANVAS_HEIGHT
+    });
+  }
+
+  function jumpFromKeyboard(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    onJump({
+      x: viewport.x + viewport.width / 2 || CANVAS_WIDTH / 2,
+      y: viewport.y + viewport.height / 2 || CANVAS_HEIGHT / 2
+    });
+  }
+
+  return (
+    <aside className="workspace-minimap" onClick={(event) => event.stopPropagation()} onContextMenu={(event) => event.stopPropagation()} aria-label="작업 공간 미니맵">
+      <header className="minimap-head">
+        <div>
+          <strong>미니맵</strong>
+          <small>{project.devices.length} 장비 / {project.links.length} 링크</small>
+        </div>
+        <span>클릭 이동</span>
+      </header>
+      <div className="minimap-stage" onClick={jumpFromStage} onKeyDown={jumpFromKeyboard} role="button" tabIndex={0}>
+        <svg className="minimap-links" viewBox={`0 0 ${CANVAS_WIDTH} ${CANVAS_HEIGHT}`} preserveAspectRatio="none" aria-hidden="true">
+          {project.links.map((link) => {
+            const a = devicesById.get(link.endpointA.deviceId);
+            const b = devicesById.get(link.endpointB.deviceId);
+            if (!a || !b) return null;
+            const ac = nodeCenter(a);
+            const bc = nodeCenter(b);
+            return (
+              <line
+                className={`minimap-link ${link.status} ${selectedLinkId === link.id ? "selected" : ""}`}
+                key={link.id}
+                x1={ac.x}
+                x2={bc.x}
+                y1={ac.y}
+                y2={bc.y}
+              />
+            );
+          })}
+        </svg>
+        {project.devices.map((device) => {
+          const center = nodeCenter(device);
+          return (
+            <button
+              className={`minimap-device ${device.kind} ${device.powerOn ? "" : "off"} ${selectedDeviceId === device.id ? "selected" : ""}`}
+              key={device.id}
+              onClick={(event) => {
+                event.stopPropagation();
+                onJump(center);
+              }}
+              style={{ left: `${(center.x / CANVAS_WIDTH) * 100}%`, top: `${(center.y / CANVAS_HEIGHT) * 100}%` }}
+              title={`${device.label}로 이동`}
+              type="button"
+            />
+          );
+        })}
+        <span className="minimap-viewport" style={viewportStyle} />
+        {!project.devices.length && <span className="minimap-empty">장비 없음</span>}
+      </div>
+    </aside>
   );
 }
 
@@ -1088,7 +1545,7 @@ function SelectedLinkCard({ link, project, onRemove }: { link: NetworkLink; proj
     >
       <header>
         <strong>{shortCableLabel(link.type)}</strong>
-        <small>{link.status}</small>
+        <small>{linkStatusLabel(link.status)}</small>
       </header>
       <span>{linkLabel(project, link)}</span>
       <div className="selected-link-endpoints">
@@ -1102,7 +1559,7 @@ function SelectedLinkCard({ link, project, onRemove }: { link: NetworkLink; proj
         ))}
       </div>
       <em>{linkStatusDetail(project, link)}</em>
-      <button className="danger" onClick={() => onRemove(link.id)} type="button"><Trash2 size={14} />Remove Cable</button>
+      <button className="danger" onClick={() => onRemove(link.id)} type="button"><Trash2 size={14} />케이블 삭제</button>
     </div>
   );
 }
@@ -1127,16 +1584,16 @@ function DeviceRenameDialog({
   }, [onCancel]);
 
   return (
-    <div className="rename-dialog" onClick={(event) => { event.stopPropagation(); onCancel(); }} role="dialog" aria-modal="true" aria-label="Rename device">
+    <div className="rename-dialog" onClick={(event) => { event.stopPropagation(); onCancel(); }} role="dialog" aria-modal="true" aria-label="장비 이름 변경">
       <form onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); onSubmit(); }}>
         <header>
           <Edit3 size={16} />
-          <strong>Rename Device</strong>
+          <strong>장비 이름 변경</strong>
         </header>
         <input autoFocus maxLength={32} value={value} onChange={(event) => onChange(event.target.value)} />
         <div className="button-row">
-          <button className="primary-action" type="submit">Rename</button>
-          <button className="secondary-action" onClick={onCancel} type="button">Cancel</button>
+          <button className="primary-action" type="submit">변경</button>
+          <button className="secondary-action" onClick={onCancel} type="button">취소</button>
         </div>
       </form>
     </div>
@@ -1174,6 +1631,24 @@ function nodeCenter(device: NetworkDevice): { x: number; y: number } {
   return { x: device.position.x + size.width / 2, y: device.position.y + size.height / 2 };
 }
 
+function topologyBounds(devices: NetworkDevice[]): { x: number; y: number; width: number; height: number } | null {
+  if (!devices.length) return null;
+  const boxes = devices.map((device) => {
+    const size = nodeSize(device.kind);
+    return {
+      left: device.position.x,
+      top: device.position.y,
+      right: device.position.x + size.width,
+      bottom: device.position.y + size.height
+    };
+  });
+  const left = Math.max(0, Math.min(...boxes.map((box) => box.left)) - 80);
+  const top = Math.max(0, Math.min(...boxes.map((box) => box.top)) - 80);
+  const right = Math.min(CANVAS_WIDTH, Math.max(...boxes.map((box) => box.right)) + 80);
+  const bottom = Math.min(CANVAS_HEIGHT, Math.max(...boxes.map((box) => box.bottom)) + 80);
+  return { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
+}
+
 function linkEdge(from: NetworkDevice, to: NetworkDevice): { x: number; y: number } {
   const fromCenter = nodeCenter(from);
   const toCenter = nodeCenter(to);
@@ -1199,23 +1674,29 @@ function linkMidpoint(project: NetworkProject, link: NetworkLink): { x: number; 
   return { x, y: Math.max(116, Math.min(CANVAS_HEIGHT - 20, rawY)) };
 }
 
-function canvasLinkLabel(project: NetworkProject, link: NetworkLink): string {
-  const a = project.devices.find((device) => device.id === link.endpointA.deviceId);
-  const b = project.devices.find((device) => device.id === link.endpointB.deviceId);
-  const aPort = a?.ports.find((port) => port.id === link.endpointA.portId);
-  const bPort = b?.ports.find((port) => port.id === link.endpointB.portId);
-  if (!a || !b || !aPort || !bPort) return "missing endpoint";
-  return `${shortCableLabel(link.type)} ${shortPortName(aPort.name)}-${shortPortName(bPort.name)} ${link.status}`;
+function canvasLinkLabel(_project: NetworkProject, link: NetworkLink): string {
+  return `${shortCableLabel(link.type)} · ${linkStatusLabel(link.status)}`;
 }
 
 function shortCableLabel(type: CableType): string {
-  return type
-    .replace("copper-", "Cu ")
-    .replace("serial-", "Serial ")
-    .replace("straight", "Straight")
-    .replace("cross", "Cross")
-    .replace("dce", "DCE")
-    .replace("dte", "DTE");
+  return ({
+    auto: "자동",
+    console: "콘솔",
+    "copper-straight": "구리 직결",
+    "copper-cross": "구리 크로스",
+    fiber: "광케이블",
+    "serial-dce": "Serial DCE",
+    "serial-dte": "Serial DTE",
+    wireless: "무선"
+  })[type];
+}
+
+function linkStatusLabel(status: NetworkLink["status"]): string {
+  return ({ up: "정상", down: "다운", blocked: "차단" })[status];
+}
+
+function eventStatusLabel(status: SimulationEvent["status"]): string {
+  return ({ forwarded: "전송 중", delivered: "전달됨", dropped: "드롭됨" })[status];
 }
 
 function linkStatusDetail(project: NetworkProject, link: NetworkLink): string {
@@ -1223,23 +1704,23 @@ function linkStatusDetail(project: NetworkProject, link: NetworkLink): string {
   const bDevice = project.devices.find((device) => device.id === link.endpointB.deviceId);
   const aPort = aDevice?.ports.find((port) => port.id === link.endpointA.portId);
   const bPort = bDevice?.ports.find((port) => port.id === link.endpointB.portId);
-  if (!aDevice || !bDevice || !aPort || !bPort) return "Missing endpoint.";
-  if (!aDevice.powerOn || !bDevice.powerOn) return "One endpoint is powered off.";
-  if (!aPort.adminUp || !bPort.adminUp) return "One endpoint port is shutdown.";
-  if (link.type === "console") return "Console cable is available for terminal/CLI access.";
-  if (aPort.kind === "serial" && bPort.kind === "serial" && !aPort.clockRate && !bPort.clockRate) return "Serial link needs a DCE clock rate.";
+  if (!aDevice || !bDevice || !aPort || !bPort) return "끝점 장비 또는 포트를 찾을 수 없습니다.";
+  if (!aDevice.powerOn || !bDevice.powerOn) return "한쪽 끝점 장비의 전원이 꺼져 있습니다.";
+  if (!aPort.adminUp || !bPort.adminUp) return "한쪽 끝점 포트가 shutdown 상태입니다.";
+  if (link.type === "console") return "콘솔 케이블은 터미널/CLI 접속에 사용할 수 있습니다.";
+  if (aPort.kind === "serial" && bPort.kind === "serial" && !aPort.clockRate && !bPort.clockRate) return "Serial 링크에는 DCE clock rate가 필요합니다.";
   if (aPort.kind === "wireless" && bPort.kind === "wireless") {
     const distance = Math.hypot(aDevice.position.x - bDevice.position.x, aDevice.position.y - bDevice.position.y);
     const range = Math.min(aDevice.config.wireless.range || 180, bDevice.config.wireless.range || 180);
-    if (aDevice.config.wireless.ssid !== bDevice.config.wireless.ssid || aDevice.config.wireless.auth !== bDevice.config.wireless.auth) return "Wireless SSID/authentication mismatch.";
-    if (aDevice.config.wireless.auth === "wpa2-psk" && aDevice.config.wireless.key !== bDevice.config.wireless.key) return "Wireless key mismatch.";
-    if (distance > range) return `Wireless endpoints are out of range (${Math.round(distance)} > ${range}).`;
+    if (aDevice.config.wireless.ssid !== bDevice.config.wireless.ssid || aDevice.config.wireless.auth !== bDevice.config.wireless.auth) return "무선 SSID 또는 인증 방식이 서로 다릅니다.";
+    if (aDevice.config.wireless.auth === "wpa2-psk" && aDevice.config.wireless.key !== bDevice.config.wireless.key) return "무선 키가 서로 다릅니다.";
+    if (distance > range) return `무선 끝점이 범위를 벗어났습니다 (${Math.round(distance)} > ${range}).`;
   }
-  if (aPort.mode === "trunk" && bPort.mode === "trunk" && !aPort.allowedVlans.some((vlan) => bPort.allowedVlans.includes(vlan))) return "Trunk allowed VLAN lists do not overlap.";
-  if (aPort.mode === "access" && bPort.mode === "access" && aPort.vlan !== bPort.vlan) return `Access VLAN mismatch (${aPort.vlan} != ${bPort.vlan}).`;
-  if (aPort.mode === "trunk" && bPort.mode === "access" && !aPort.allowedVlans.includes(bPort.vlan)) return `Trunk does not allow access VLAN ${bPort.vlan}.`;
-  if (bPort.mode === "trunk" && aPort.mode === "access" && !bPort.allowedVlans.includes(aPort.vlan)) return `Trunk does not allow access VLAN ${aPort.vlan}.`;
-  return "Link is operational.";
+  if (aPort.mode === "trunk" && bPort.mode === "trunk" && !aPort.allowedVlans.some((vlan) => bPort.allowedVlans.includes(vlan))) return "Trunk 허용 VLAN 목록이 겹치지 않습니다.";
+  if (aPort.mode === "access" && bPort.mode === "access" && aPort.vlan !== bPort.vlan) return `Access VLAN이 일치하지 않습니다 (${aPort.vlan} != ${bPort.vlan}).`;
+  if (aPort.mode === "trunk" && bPort.mode === "access" && !aPort.allowedVlans.includes(bPort.vlan)) return `Trunk가 access VLAN ${bPort.vlan}을 허용하지 않습니다.`;
+  if (bPort.mode === "trunk" && aPort.mode === "access" && !bPort.allowedVlans.includes(aPort.vlan)) return `Trunk가 access VLAN ${aPort.vlan}을 허용하지 않습니다.`;
+  return "링크가 정상 동작 중입니다.";
 }
 
 function linkEndpointSummaries(project: NetworkProject, link: NetworkLink): Array<{ side: string; device: string; port: string; mode: string; state: string }> {
@@ -1252,13 +1733,13 @@ function linkEndpointSummaries(project: NetworkProject, link: NetworkLink): Arra
 function linkEndpointSummary(project: NetworkProject, ref: NetworkLink["endpointA"], side: string): { side: string; device: string; port: string; mode: string; state: string } {
   const device = project.devices.find((item) => item.id === ref.deviceId);
   const port = device?.ports.find((item) => item.id === ref.portId);
-  if (!device || !port) return { side, device: "Missing device", port: "missing port", mode: "unknown", state: "down" };
+  if (!device || !port) return { side, device: "누락된 장비", port: "누락된 포트", mode: "알 수 없음", state: "다운" };
   return {
     side,
     device: device.label,
     port: port.name,
     mode: portModeSummary(port),
-    state: `${device.powerOn ? "powered" : "off"} / ${port.adminUp ? "up" : "shutdown"}`
+    state: `${device.powerOn ? "전원 켜짐" : "전원 꺼짐"} / ${port.adminUp ? "up" : "shutdown"}`
   };
 }
 
@@ -1268,33 +1749,9 @@ function portModeSummary(port: NetworkPort): string {
   return port.ipAddress ? `routed ${port.ipAddress}` : "routed";
 }
 
-function portMarkerClass(project: NetworkProject, device: NetworkDevice, port: NetworkPort, selectedCable: CableType | "", pendingDeviceId: string): string {
-  const classes: string[] = [];
-  if (!port.adminUp) classes.push("shutdown");
-  if (port.linkId) classes.push("used");
-  if (!selectedCable) return classes.join(" ");
-  if (pendingDeviceId === device.id) classes.push("pending");
-  classes.push(portCanParticipate(project, device, port, selectedCable, pendingDeviceId) ? "candidate" : "blocked");
-  return classes.join(" ");
-}
-
-function portMarkerTitle(project: NetworkProject, device: NetworkDevice, port: NetworkPort, selectedCable: CableType | "", pendingDeviceId: string): string {
-  const mode = port.mode === "trunk" ? `trunk ${port.allowedVlans.join(",") || "1"}` : port.mode === "access" ? `access vlan ${port.vlan}` : "routed";
-  const connected = port.linkId ? `connected: ${portConnectionLabel(project, device, port)}` : "free";
-  const admin = port.adminUp ? "up" : "shutdown";
-  if (!selectedCable) return `${port.name} / ${port.kind} / ${mode} / ${admin} / ${connected}`;
-  if (pendingDeviceId === device.id) return `${port.name} / ${port.kind} / ${mode} / ${admin} / first endpoint device`;
-  return `${port.name} / ${port.kind} / ${mode} / ${admin} / ${portCanParticipate(project, device, port, selectedCable, pendingDeviceId) ? "candidate for selected cable" : connected === "free" ? "not compatible with selected cable" : connected}`;
-}
-
-function portCanParticipate(project: NetworkProject, device: NetworkDevice, port: NetworkPort, selectedCable: CableType, pendingDeviceId: string): boolean {
-  if (port.linkId) return false;
-  if (!pendingDeviceId || pendingDeviceId === device.id) {
-    return selectedCable === "auto" || canPortUseCable(port, selectedCable);
-  }
-  const peer = project.devices.find((item) => item.id === pendingDeviceId);
-  if (!peer) return false;
-  return peer.ports.some((peerPort) => !peerPort.linkId && portsCanConnect(peerPort, peer, port, device, selectedCable));
+function clampPercent(value: number, min = 0, max = 100): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(min, Math.min(max, value * 100));
 }
 
 function ConnectionAssistant({
@@ -1323,7 +1780,7 @@ function ConnectionAssistant({
   }, [aDevice?.id, bDevice?.id, draft.cable, draft.message]);
 
   if (!aDevice || !bDevice) {
-    return <EventPanel message="Connection endpoints are missing." onClear={onCancel} project={project} />;
+    return <EventPanel message="연결 끝점 장비가 누락되었습니다." onClear={onCancel} project={project} />;
   }
 
   function connect() {
@@ -1338,15 +1795,15 @@ function ConnectionAssistant({
   return (
     <section className="connection-assistant">
       <header>
-        <strong>Connection Assistant</strong>
+        <strong>연결 도우미</strong>
         <small>{draft.cable}</small>
       </header>
       <p>{error}</p>
-      <PortPicker cable={draft.cable} device={aDevice} label="First endpoint" onChange={setAPortId} peerDevice={bDevice} peerPort={bDevice.ports.find((port) => port.id === bPortId)} project={project} value={aPortId} />
-      <PortPicker cable={draft.cable} device={bDevice} label="Second endpoint" onChange={setBPortId} peerDevice={aDevice} peerPort={aDevice.ports.find((port) => port.id === aPortId)} project={project} value={bPortId} />
+      <PortPicker cable={draft.cable} device={aDevice} label="첫 번째 끝점" onChange={setAPortId} peerDevice={bDevice} peerPort={bDevice.ports.find((port) => port.id === bPortId)} project={project} value={aPortId} />
+      <PortPicker cable={draft.cable} device={bDevice} label="두 번째 끝점" onChange={setBPortId} peerDevice={aDevice} peerPort={aDevice.ports.find((port) => port.id === aPortId)} project={project} value={bPortId} />
       <div className="button-row">
-        <button className="primary-action" disabled={!aPortId || !bPortId} onClick={connect} type="button">Connect selected ports</button>
-        <button className="secondary-action" onClick={onCancel} type="button">Cancel</button>
+        <button className="primary-action" disabled={!aPortId || !bPortId} onClick={connect} type="button">선택 포트 연결</button>
+        <button className="secondary-action" onClick={onCancel} type="button">취소</button>
       </div>
     </section>
   );
@@ -1358,7 +1815,7 @@ function PortPicker({ project, device, peerDevice, peerPort, cable, label, value
       <span>{label}</span>
       <strong>{device.label}</strong>
       <select aria-label={`${device.label} ${label} port`} value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">Select port</option>
+        <option value="">포트 선택</option>
         {device.ports.map((port) => (
           <option disabled={!portSelectable(port, device, peerPort, peerDevice, cable)} key={port.id} value={port.id}>{portOptionLabel(project, port, device, peerPort, peerDevice, cable)}</option>
         ))}
@@ -1531,7 +1988,7 @@ function repairProject(project: NetworkProject): { project: NetworkProject; mess
     };
   });
   const next = recalc({ ...project, devices, links });
-  return { project: next, message: changes ? `Project repair applied (${changes} fixes).` : "No repairable project issues found." };
+  return { project: next, message: changes ? `프로젝트 복구를 적용했습니다 (${changes}개 수정).` : "복구할 프로젝트 문제가 없습니다." };
 }
 
 function cleanDeviceName(value: string): string {
@@ -1566,7 +2023,7 @@ function devicePrefix(device: NetworkDevice): string {
 }
 
 function deviceTabLabel(tab: DeviceTab): string {
-  return ({ physical: "Physical", config: "Config", cli: "CLI", desktop: "Desktop", services: "Services" })[tab];
+  return ({ physical: "물리", config: "설정", cli: "CLI", desktop: "데스크톱", services: "서비스" })[tab];
 }
 
 function Palette({ selectedModel, selectedCable, onSelect, onModel, onCable }: { selectedModel: string; selectedCable: CableType | ""; onSelect: () => void; onModel: (id: string) => void; onCable: (type: CableType) => void }) {
@@ -1575,8 +2032,8 @@ function Palette({ selectedModel, selectedCable, onSelect, onModel, onCable }: {
   return (
     <section className="palette packet-palette">
       <div className="palette-toolbar">
-        <button className={!selectedModel && !selectedCable ? "active" : ""} onClick={onSelect} title="Select" type="button"><MousePointer2 size={15} /></button>
-        <span>Device-Type Selection</span>
+        <button className={!selectedModel && !selectedCable ? "active" : ""} onClick={onSelect} title="선택" type="button"><MousePointer2 size={15} /></button>
+        <span>장비 선택</span>
       </div>
       <div className="tool-row">
         {(["router", "switch", "firewall", "pc", "server", "wireless", "hub"] as DeviceKind[]).map((item) => (
@@ -1605,7 +2062,7 @@ function Palette({ selectedModel, selectedCable, onSelect, onModel, onCable }: {
         ))}
       </div>
       <div className="connection-box">
-        <div className="palette-toolbar"><Cable size={15} /><span>Connections</span></div>
+        <div className="palette-toolbar"><Cable size={15} /><span>연결</span></div>
         <div className="cable-list">{cableCatalog.map((cable) => <button className={selectedCable === cable.type ? "active" : ""} key={cable.type} onClick={() => onCable(cable.type)} title={cable.label} type="button"><span className={`cable-swatch ${cable.type}`} />{cable.label}</button>)}</div>
       </div>
     </section>
@@ -1626,7 +2083,7 @@ function Inspector({ device, project, initialTab, onUpdate, onProjectChange, onD
     <>
       <header className="inspector-head">
         <div><h2>{device.label}</h2><p>{device.model}</p></div>
-        <button className="icon-button danger" onClick={() => onDelete(device.id)} title="Delete device" type="button"><Trash2 size={17} /></button>
+        <button className="icon-button danger" onClick={() => onDelete(device.id)} title="장비 삭제" type="button"><Trash2 size={17} /></button>
       </header>
       <div className="tab-row">{tabs.map((item) => <button className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)} type="button">{deviceTabLabel(item)}</button>)}</div>
       {tab === "physical" && <PhysicalTab device={device} onProjectChange={onProjectChange} onUpdate={onUpdate} project={project} />}
@@ -1649,11 +2106,11 @@ function PhysicalTab({ device, project, onUpdate, onProjectChange }: { device: N
   function selectCompatibleModule(moduleId: string) {
     const slot = model.modules.find((candidate) => candidate.accepts.includes(moduleId) && !device.modules.some((module) => module.slotId === candidate.id));
     if (!slot) {
-      setNotice("No empty compatible slot is available.");
+      setNotice("사용 가능한 호환 슬롯이 없습니다.");
       return;
     }
     setSlotSelections((current) => ({ ...current, [slot.id]: moduleId }));
-    setNotice(`${moduleId} selected for ${slot.label}. Power off the device, then install.`);
+    setNotice(`${slot.label}에 ${moduleId} 모듈을 선택했습니다. 장비 전원을 끈 뒤 설치하세요.`);
   }
 
   function install(slotId: string) {
@@ -1682,23 +2139,23 @@ function PhysicalTab({ device, project, onUpdate, onProjectChange }: { device: N
     <section className="panel-section physical-panel">
       <aside className="physical-module-list">
         <header>
-          <strong>Modules</strong>
-          <small>{compatibleModules.length ? "Select a module for an empty slot." : "No expansion modules."}</small>
+          <strong>모듈</strong>
+          <small>{compatibleModules.length ? "빈 슬롯에 장착할 모듈을 선택하세요." : "확장 모듈이 없습니다."}</small>
         </header>
         {compatibleModules.map((module) => (
           <button key={module.id} onClick={() => selectCompatibleModule(module.id)} type="button">
             <strong>{module.label}</strong>
             <span>{module.description}</span>
-            <small>{module.ports.length} port{module.ports.length === 1 ? "" : "s"}</small>
+            <small>포트 {module.ports.length}개</small>
           </button>
         ))}
       </aside>
       <div className="physical-chassis-pane">
-        <label className="toggle"><input checked={device.powerOn} onChange={(event) => setPower(event.target.checked)} type="checkbox" />Power</label>
+        <label className="toggle"><input checked={device.powerOn} onChange={(event) => setPower(event.target.checked)} type="checkbox" />전원</label>
         <div className={`physical-front-panel ${device.powerOn ? "powered" : "off"}`}>
           <div>
             <strong>{device.model}</strong>
-            <small>{device.modules.length} modules installed</small>
+            <small>장착 모듈 {device.modules.length}개</small>
           </div>
           <div className="physical-port-map">
             {device.ports.map((port) => (
@@ -1717,8 +2174,8 @@ function PhysicalTab({ device, project, onUpdate, onProjectChange }: { device: N
         {model.modules.length > 0 && (
           <div className="module-rack">
             <header>
-              <strong>Module Slots</strong>
-              <small>{device.powerOn ? "Power off before changing modules" : "Safe for module changes"}</small>
+              <strong>모듈 슬롯</strong>
+              <small>{device.powerOn ? "모듈 변경 전 전원을 끄세요" : "모듈 변경 가능"}</small>
             </header>
             {model.modules.map((slot) => {
               const installed = device.modules.find((module) => module.slotId === slot.id);
@@ -1727,10 +2184,10 @@ function PhysicalTab({ device, project, onUpdate, onProjectChange }: { device: N
                 <div className="module-slot" key={slot.id}>
                   <div>
                     <strong>{slot.label}</strong>
-                    <span>{installedSpec ? `${installedSpec.label}: ${installedSpec.description}` : "empty"}</span>
+                    <span>{installedSpec ? `${installedSpec.label}: ${installedSpec.description}` : "비어 있음"}</span>
                   </div>
                   {installed ? (
-                    <button className="secondary-action" disabled={device.powerOn} onClick={() => remove(slot.id)} type="button">Remove</button>
+                    <button className="secondary-action" disabled={device.powerOn} onClick={() => remove(slot.id)} type="button">제거</button>
                   ) : (
                     <>
                       <select disabled={device.powerOn} value={slotSelections[slot.id] ?? slot.accepts[0]} onChange={(event) => setSlotSelections({ ...slotSelections, [slot.id]: event.target.value })}>
@@ -1739,13 +2196,13 @@ function PhysicalTab({ device, project, onUpdate, onProjectChange }: { device: N
                           return <option key={moduleId} value={moduleId}>{spec?.label ?? moduleId}</option>;
                         })}
                       </select>
-                      <button className="secondary-action" disabled={device.powerOn} onClick={() => install(slot.id)} type="button">Install</button>
+                      <button className="secondary-action" disabled={device.powerOn} onClick={() => install(slot.id)} type="button">장착</button>
                     </>
                   )}
                 </div>
               );
             })}
-            {notice && <small className={notice.includes("Power off") || notice.includes("Disconnect") || notice.includes("not") ? "module-notice warning" : "module-notice"}>{notice}</small>}
+            {notice && <small className={notice.includes("없") || notice.includes("끄") || notice.includes("해제") || notice.includes("지원하지") ? "module-notice warning" : "module-notice"}>{notice}</small>}
           </div>
         )}
         <div className="port-table physical-port-table">{device.ports.map((port) => (
@@ -1755,7 +2212,7 @@ function PhysicalTab({ device, project, onUpdate, onProjectChange }: { device: N
             <span>{port.adminUp ? "up" : "shutdown"}</span>
             <span>{port.mode === "trunk" ? `trunk ${port.allowedVlans.join(",")}` : port.mode === "access" ? `vlan ${port.vlan}` : port.ipAddress || "routed"}</span>
             <span>{portConnectionLabel(project, device, port)}</span>
-            {port.linkId ? <button className="secondary-action" onClick={() => onProjectChange(removeLink(project, port.linkId!), `${device.label} ${port.name} disconnected.`)} type="button">Disconnect</button> : <small>free</small>}
+            {port.linkId ? <button className="secondary-action" onClick={() => onProjectChange(removeLink(project, port.linkId!), `${device.label} ${port.name} 연결을 해제했습니다.`)} type="button">연결 해제</button> : <small>비어 있음</small>}
           </div>
         ))}</div>
       </div>
@@ -1774,13 +2231,13 @@ function shortPortName(name: string): string {
 }
 
 function portConnectionLabel(project: NetworkProject, device: NetworkDevice, port: NetworkPort): string {
-  if (!port.linkId) return "free";
+  if (!port.linkId) return "비어 있음";
   const link = project.links.find((item) => item.id === port.linkId);
-  if (!link) return "broken link";
+  if (!link) return "끊어진 링크";
   const peerRef = link.endpointA.deviceId === device.id && link.endpointA.portId === port.id ? link.endpointB : link.endpointA;
   const peer = project.devices.find((item) => item.id === peerRef.deviceId);
   const peerPort = peer?.ports.find((item) => item.id === peerRef.portId);
-  return peer && peerPort ? `${peer.label} ${peerPort.name}` : "missing peer";
+  return peer && peerPort ? `${peer.label} ${peerPort.name}` : "누락된 상대";
 }
 
 function ConfigTab({ device, onUpdate, onDhcp }: { device: NetworkDevice; onUpdate: (device: NetworkDevice) => void; onDhcp: () => void }) {
@@ -1883,122 +2340,122 @@ function ConfigTab({ device, onUpdate, onDhcp }: { device: NetworkDevice; onUpda
   return (
     <section className="panel-section config-panel">
       <div className="config-shortcuts">
-        <button onClick={() => scrollConfig("interface")} type="button">Interface</button>
-        {(device.kind === "router" || device.kind === "switch" || device.kind === "firewall") && <button onClick={() => scrollConfig("routes")} type="button">Routes</button>}
+        <button onClick={() => scrollConfig("interface")} type="button">인터페이스</button>
+        {(device.kind === "router" || device.kind === "switch" || device.kind === "firewall") && <button onClick={() => scrollConfig("routes")} type="button">라우팅</button>}
         {(device.kind === "switch" || device.kind === "router" || device.kind === "firewall") && <button onClick={() => scrollConfig("vlans")} type="button">VLAN</button>}
-        {(device.kind === "wireless" || device.ports.some((item) => item.kind === "wireless")) && <button onClick={() => scrollConfig("wireless")} type="button">Wireless</button>}
-        {device.kind === "firewall" && <button onClick={() => scrollConfig("security")} type="button">Security</button>}
+        {(device.kind === "wireless" || device.ports.some((item) => item.kind === "wireless")) && <button onClick={() => scrollConfig("wireless")} type="button">무선</button>}
+        {device.kind === "firewall" && <button onClick={() => scrollConfig("security")} type="button">보안</button>}
       </div>
-      <label id={`${device.id}-config-interface`}>Hostname<input value={device.config.hostname} onChange={(event) => onUpdate({ ...device, label: event.target.value, config: { ...device.config, hostname: event.target.value } })} /></label>
+      <label id={`${device.id}-config-interface`}>호스트명<input value={device.config.hostname} onChange={(event) => onUpdate({ ...device, label: event.target.value, config: { ...device.config, hostname: event.target.value } })} /></label>
       {port && (
         <div className="config-group">
-          <header><strong>Interface</strong><select value={port.id} onChange={(event) => setSelectedPortId(event.target.value)}>{dataPorts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></header>
-          <label className="toggle"><input checked={port.adminUp} onChange={(event) => updatePort(port.id, { adminUp: event.target.checked })} type="checkbox" />Admin up</label>
-          <label>Description<input value={port.description} onChange={(event) => updatePort(port.id, { description: event.target.value.slice(0, 80) })} placeholder="Link to CoreSwitch Gi0/1" /></label>
+          <header><strong>인터페이스</strong><select value={port.id} onChange={(event) => setSelectedPortId(event.target.value)}>{dataPorts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></header>
+          <label className="toggle"><input checked={port.adminUp} onChange={(event) => updatePort(port.id, { adminUp: event.target.checked })} type="checkbox" />관리 상태 켜짐</label>
+          <label>설명<input value={port.description} onChange={(event) => updatePort(port.id, { description: event.target.value.slice(0, 80) })} placeholder="Link to CoreSwitch Gi0/1" /></label>
           {isIpCapable(device, port) ? (
             <>
               <label>IP<input value={port.ipAddress} onChange={(event) => updatePort(port.id, { ipAddress: event.target.value.trim() })} placeholder="192.168.1.1" /></label>
-              <label>Mask<input value={port.subnetMask} onChange={(event) => updatePort(port.id, { subnetMask: event.target.value.trim() })} placeholder="255.255.255.0" /></label>
-              <label>Gateway<input value={port.gateway} onChange={(event) => updatePort(port.id, { gateway: event.target.value.trim() })} placeholder="192.168.1.254" /></label>
+              <label>마스크<input value={port.subnetMask} onChange={(event) => updatePort(port.id, { subnetMask: event.target.value.trim() })} placeholder="255.255.255.0" /></label>
+              <label>게이트웨이<input value={port.gateway} onChange={(event) => updatePort(port.id, { gateway: event.target.value.trim() })} placeholder="192.168.1.254" /></label>
               <label>DNS<input value={port.dnsServer} onChange={(event) => updatePort(port.id, { dnsServer: event.target.value.trim() })} placeholder="8.8.8.8" /></label>
             </>
-          ) : <small>Layer 2 switch ports use VLAN settings instead of interface IP addressing.</small>}
-          <label>Mode<select value={port.mode} onChange={(event) => updatePort(port.id, modePatch(event.target.value as NetworkPort["mode"]))}>
+          ) : <small>Layer 2 스위치 포트는 인터페이스 IP 대신 VLAN 설정을 사용합니다.</small>}
+          <label>모드<select value={port.mode} onChange={(event) => updatePort(port.id, modePatch(event.target.value as NetworkPort["mode"]))}>
             <option value="access">access</option>
             <option value="trunk">trunk</option>
             <option value="routed">routed</option>
           </select></label>
           {port.mode === "access" && <label>Access VLAN<input value={port.vlan} onChange={(event) => updatePort(port.id, { vlan: boundedNumber(event.target.value, 1, 4094) })} type="number" /></label>}
-          {port.mode === "trunk" && <label>Allowed VLANs<input value={port.allowedVlans.join(",")} onChange={(event) => updatePort(port.id, { allowedVlans: parseVlanList(event.target.value) })} placeholder="1,10,20" /></label>}
-          {port.kind === "serial" && <label>Clock rate<input value={port.clockRate ?? ""} onChange={(event) => updatePort(port.id, { clockRate: event.target.value ? boundedNumber(event.target.value, 1200, 8000000) : undefined })} placeholder="64000" type="number" /></label>}
+          {port.mode === "trunk" && <label>허용 VLAN<input value={port.allowedVlans.join(",")} onChange={(event) => updatePort(port.id, { allowedVlans: parseVlanList(event.target.value) })} placeholder="1,10,20" /></label>}
+          {port.kind === "serial" && <label>클럭 레이트<input value={port.clockRate ?? ""} onChange={(event) => updatePort(port.id, { clockRate: event.target.value ? boundedNumber(event.target.value, 1200, 8000000) : undefined })} placeholder="64000" type="number" /></label>}
         </div>
       )}
-      {(device.kind === "pc" || device.kind === "server") && <button className="secondary-action" onClick={onDhcp} type="button">DHCP Renew</button>}
+      {(device.kind === "pc" || device.kind === "server") && <button className="secondary-action" onClick={onDhcp} type="button">DHCP 갱신</button>}
       {(device.kind === "router" || device.kind === "switch" || device.kind === "firewall") && (
         <div className="config-group" id={`${device.id}-config-routes`}>
-          <header><strong>Static Routes</strong><small>{device.config.staticRoutes.length}</small></header>
+          <header><strong>정적 라우트</strong><small>{device.config.staticRoutes.length}</small></header>
           <div className="inline-grid">
-            <input value={routeDraft.network} onChange={(event) => setRouteDraft({ ...routeDraft, network: event.target.value })} placeholder="Network" />
-            <input value={routeDraft.mask} onChange={(event) => setRouteDraft({ ...routeDraft, mask: event.target.value })} placeholder="Mask" />
-            <input value={routeDraft.nextHop} onChange={(event) => setRouteDraft({ ...routeDraft, nextHop: event.target.value })} placeholder="Next hop" />
-            <button className="secondary-action" onClick={addRoute} type="button">Add</button>
+            <input value={routeDraft.network} onChange={(event) => setRouteDraft({ ...routeDraft, network: event.target.value })} placeholder="네트워크" />
+            <input value={routeDraft.mask} onChange={(event) => setRouteDraft({ ...routeDraft, mask: event.target.value })} placeholder="마스크" />
+            <input value={routeDraft.nextHop} onChange={(event) => setRouteDraft({ ...routeDraft, nextHop: event.target.value })} placeholder="다음 홉" />
+            <button className="secondary-action" onClick={addRoute} type="button">추가</button>
           </div>
           {device.config.staticRoutes.map((route) => (
             <div className="editable-route-row" key={route.id}>
-              <label>Network<input value={route.network} onChange={(event) => updateRoute(route.id, { network: event.target.value.trim() })} /></label>
-              <label>Mask<input value={route.mask} onChange={(event) => updateRoute(route.id, { mask: event.target.value.trim() })} /></label>
-              <label>Next hop<input value={route.nextHop} onChange={(event) => updateRoute(route.id, { nextHop: event.target.value.trim() })} /></label>
-              <button className="secondary-action" onClick={() => onUpdate({ ...device, config: { ...device.config, staticRoutes: device.config.staticRoutes.filter((item) => item.id !== route.id) } })} type="button">Remove</button>
+              <label>네트워크<input value={route.network} onChange={(event) => updateRoute(route.id, { network: event.target.value.trim() })} /></label>
+              <label>마스크<input value={route.mask} onChange={(event) => updateRoute(route.id, { mask: event.target.value.trim() })} /></label>
+              <label>다음 홉<input value={route.nextHop} onChange={(event) => updateRoute(route.id, { nextHop: event.target.value.trim() })} /></label>
+              <button className="secondary-action" onClick={() => onUpdate({ ...device, config: { ...device.config, staticRoutes: device.config.staticRoutes.filter((item) => item.id !== route.id) } })} type="button">삭제</button>
             </div>
           ))}
         </div>
       )}
       {(device.kind === "switch" || device.kind === "router" || device.kind === "firewall") && (
         <div className="config-group" id={`${device.id}-config-vlans`}>
-          <header><strong>VLAN Database</strong><small>{device.config.vlans.length}</small></header>
+          <header><strong>VLAN 데이터베이스</strong><small>{device.config.vlans.length}</small></header>
           <div className="inline-grid narrow">
             <input value={vlanDraft.id} onChange={(event) => setVlanDraft({ ...vlanDraft, id: event.target.value })} placeholder="ID" type="number" />
-            <input value={vlanDraft.name} onChange={(event) => setVlanDraft({ ...vlanDraft, name: event.target.value })} placeholder="Name" />
-            <button className="secondary-action" onClick={addVlan} type="button">Add</button>
+            <input value={vlanDraft.name} onChange={(event) => setVlanDraft({ ...vlanDraft, name: event.target.value })} placeholder="이름" />
+            <button className="secondary-action" onClick={addVlan} type="button">추가</button>
           </div>
           {device.config.vlans.map((vlan) => (
             <div className="editable-vlan-row" key={vlan.id}>
               <strong>{vlan.id}</strong>
-              <label>Name<input value={vlan.name} onChange={(event) => updateVlanName(vlan.id, event.target.value)} /></label>
-              {vlan.id !== 1 && <button className="secondary-action" onClick={() => onUpdate({ ...device, config: { ...device.config, vlans: device.config.vlans.filter((item) => item.id !== vlan.id) }, ports: device.ports.map((item) => item.vlan === vlan.id ? { ...item, vlan: 1, allowedVlans: item.allowedVlans.filter((allowed) => allowed !== vlan.id) } : item) })} type="button">Remove</button>}
+              <label>이름<input value={vlan.name} onChange={(event) => updateVlanName(vlan.id, event.target.value)} /></label>
+              {vlan.id !== 1 && <button className="secondary-action" onClick={() => onUpdate({ ...device, config: { ...device.config, vlans: device.config.vlans.filter((item) => item.id !== vlan.id) }, ports: device.ports.map((item) => item.vlan === vlan.id ? { ...item, vlan: 1, allowedVlans: item.allowedVlans.filter((allowed) => allowed !== vlan.id) } : item) })} type="button">삭제</button>}
             </div>
           ))}
         </div>
       )}
       {(device.kind === "wireless" || device.ports.some((item) => item.kind === "wireless")) && (
         <div className="config-group" id={`${device.id}-config-wireless`}>
-          <header><strong>Wireless</strong><small>{device.config.wireless.ssid}</small></header>
+          <header><strong>무선</strong><small>{device.config.wireless.ssid}</small></header>
           <label>SSID<input value={device.config.wireless.ssid} onChange={(event) => onUpdate({ ...device, config: { ...device.config, wireless: { ...device.config.wireless, ssid: event.target.value } } })} /></label>
-          <label>Security<select value={device.config.wireless.auth} onChange={(event) => onUpdate({ ...device, config: { ...device.config, wireless: { ...device.config.wireless, auth: event.target.value as "open" | "wpa2-psk" } } })}><option value="open">open</option><option value="wpa2-psk">wpa2-psk</option></select></label>
-          <label>Key<input value={device.config.wireless.key} onChange={(event) => onUpdate({ ...device, config: { ...device.config, wireless: { ...device.config.wireless, key: event.target.value } } })} /></label>
-          <label>Channel<input value={device.config.wireless.channel} onChange={(event) => onUpdate({ ...device, config: { ...device.config, wireless: { ...device.config.wireless, channel: boundedNumber(event.target.value, 1, 11) } } })} type="number" /></label>
-          <label>Range<input value={device.config.wireless.range} onChange={(event) => onUpdate({ ...device, config: { ...device.config, wireless: { ...device.config.wireless, range: boundedNumber(event.target.value, 20, 1000) } } })} type="number" /></label>
+          <label>보안<select value={device.config.wireless.auth} onChange={(event) => onUpdate({ ...device, config: { ...device.config, wireless: { ...device.config.wireless, auth: event.target.value as "open" | "wpa2-psk" } } })}><option value="open">open</option><option value="wpa2-psk">wpa2-psk</option></select></label>
+          <label>키<input value={device.config.wireless.key} onChange={(event) => onUpdate({ ...device, config: { ...device.config, wireless: { ...device.config.wireless, key: event.target.value } } })} /></label>
+          <label>채널<input value={device.config.wireless.channel} onChange={(event) => onUpdate({ ...device, config: { ...device.config, wireless: { ...device.config.wireless, channel: boundedNumber(event.target.value, 1, 11) } } })} type="number" /></label>
+          <label>범위<input value={device.config.wireless.range} onChange={(event) => onUpdate({ ...device, config: { ...device.config, wireless: { ...device.config.wireless, range: boundedNumber(event.target.value, 20, 1000) } } })} type="number" /></label>
         </div>
       )}
       {device.kind === "firewall" && (
         <>
           <div className="config-group" id={`${device.id}-config-security`}>
-            <header><strong>Access Rules</strong><small>{device.config.accessRules.length}</small></header>
+            <header><strong>접근 규칙</strong><small>{device.config.accessRules.length}</small></header>
             <div className="inline-grid services">
               <select value={aclDraft.action} onChange={(event) => setAclDraft({ ...aclDraft, action: event.target.value as AccessRule["action"] })}><option value="permit">permit</option><option value="deny">deny</option></select>
               <select value={aclDraft.protocol} onChange={(event) => setAclDraft({ ...aclDraft, protocol: event.target.value as AccessRule["protocol"] })}><option value="ip">ip</option><option value="icmp">icmp</option><option value="tcp">tcp</option><option value="udp">udp</option><option value="http">http</option><option value="dns">dns</option><option value="dhcp">dhcp</option></select>
-              <input value={aclDraft.source} onChange={(event) => setAclDraft({ ...aclDraft, source: event.target.value })} placeholder="Source" />
-              <input value={aclDraft.destination} onChange={(event) => setAclDraft({ ...aclDraft, destination: event.target.value })} placeholder="Destination" />
-              <input value={aclDraft.interfaceName} onChange={(event) => setAclDraft({ ...aclDraft, interfaceName: event.target.value })} placeholder="Interface" />
-              <button className="secondary-action" onClick={addAccessRule} type="button">Add ACL</button>
+              <input value={aclDraft.source} onChange={(event) => setAclDraft({ ...aclDraft, source: event.target.value })} placeholder="출발지" />
+              <input value={aclDraft.destination} onChange={(event) => setAclDraft({ ...aclDraft, destination: event.target.value })} placeholder="목적지" />
+              <input value={aclDraft.interfaceName} onChange={(event) => setAclDraft({ ...aclDraft, interfaceName: event.target.value })} placeholder="인터페이스" />
+              <button className="secondary-action" onClick={addAccessRule} type="button">ACL 추가</button>
             </div>
             {device.config.accessRules.map((rule) => (
               <div className="editable-acl-row" key={rule.id}>
-                <label>Action<select value={rule.action} onChange={(event) => updateAccessRule(rule.id, { action: event.target.value as AccessRule["action"] })}><option value="permit">permit</option><option value="deny">deny</option></select></label>
-                <label>Protocol<select value={rule.protocol} onChange={(event) => updateAccessRule(rule.id, { protocol: event.target.value as AccessRule["protocol"] })}><option value="ip">ip</option><option value="icmp">icmp</option><option value="tcp">tcp</option><option value="udp">udp</option><option value="http">http</option><option value="dns">dns</option><option value="dhcp">dhcp</option></select></label>
-                <label>Source<input value={rule.source} onChange={(event) => updateAccessRule(rule.id, { source: event.target.value.trim() })} /></label>
-                <label>Destination<input value={rule.destination} onChange={(event) => updateAccessRule(rule.id, { destination: event.target.value.trim() })} /></label>
-                <label>Interface<input value={rule.interfaceName} onChange={(event) => updateAccessRule(rule.id, { interfaceName: event.target.value.trim() })} /></label>
-                <small>{rule.hits} hits</small>
-                <button className="secondary-action" onClick={() => onUpdate({ ...device, config: { ...device.config, accessRules: device.config.accessRules.filter((item) => item.id !== rule.id) } })} type="button">Remove</button>
+                <label>동작<select value={rule.action} onChange={(event) => updateAccessRule(rule.id, { action: event.target.value as AccessRule["action"] })}><option value="permit">permit</option><option value="deny">deny</option></select></label>
+                <label>프로토콜<select value={rule.protocol} onChange={(event) => updateAccessRule(rule.id, { protocol: event.target.value as AccessRule["protocol"] })}><option value="ip">ip</option><option value="icmp">icmp</option><option value="tcp">tcp</option><option value="udp">udp</option><option value="http">http</option><option value="dns">dns</option><option value="dhcp">dhcp</option></select></label>
+                <label>출발지<input value={rule.source} onChange={(event) => updateAccessRule(rule.id, { source: event.target.value.trim() })} /></label>
+                <label>목적지<input value={rule.destination} onChange={(event) => updateAccessRule(rule.id, { destination: event.target.value.trim() })} /></label>
+                <label>인터페이스<input value={rule.interfaceName} onChange={(event) => updateAccessRule(rule.id, { interfaceName: event.target.value.trim() })} /></label>
+                <small>{rule.hits}회 적중</small>
+                <button className="secondary-action" onClick={() => onUpdate({ ...device, config: { ...device.config, accessRules: device.config.accessRules.filter((item) => item.id !== rule.id) } })} type="button">삭제</button>
               </div>
             ))}
           </div>
           <div className="config-group">
-            <header><strong>NAT Rules</strong><small>{device.config.natRules.length}</small></header>
+            <header><strong>NAT 규칙</strong><small>{device.config.natRules.length}</small></header>
             <div className="inline-grid narrow">
-              <input value={natDraft.insideLocal} onChange={(event) => setNatDraft({ ...natDraft, insideLocal: event.target.value })} placeholder="Inside local" />
-              <input value={natDraft.insideGlobal} onChange={(event) => setNatDraft({ ...natDraft, insideGlobal: event.target.value })} placeholder="Inside global" />
-              <input value={natDraft.outsideInterface} onChange={(event) => setNatDraft({ ...natDraft, outsideInterface: event.target.value })} placeholder="Outside int" />
-              <button className="secondary-action" onClick={addNatRule} type="button">Add NAT</button>
+              <input value={natDraft.insideLocal} onChange={(event) => setNatDraft({ ...natDraft, insideLocal: event.target.value })} placeholder="내부 로컬" />
+              <input value={natDraft.insideGlobal} onChange={(event) => setNatDraft({ ...natDraft, insideGlobal: event.target.value })} placeholder="내부 글로벌" />
+              <input value={natDraft.outsideInterface} onChange={(event) => setNatDraft({ ...natDraft, outsideInterface: event.target.value })} placeholder="외부 인터페이스" />
+              <button className="secondary-action" onClick={addNatRule} type="button">NAT 추가</button>
             </div>
             {device.config.natRules.map((rule) => (
               <div className="editable-nat-row" key={rule.id}>
-                <label>Inside local<input value={rule.insideLocal} onChange={(event) => updateNatRule(rule.id, { insideLocal: event.target.value.trim() })} /></label>
-                <label>Inside global<input value={rule.insideGlobal} onChange={(event) => updateNatRule(rule.id, { insideGlobal: event.target.value.trim() })} /></label>
-                <label>Outside interface<input value={rule.outsideInterface} onChange={(event) => updateNatRule(rule.id, { outsideInterface: event.target.value.trim() })} /></label>
-                <small>{rule.hits} hits</small>
-                <button className="secondary-action" onClick={() => onUpdate({ ...device, config: { ...device.config, natRules: device.config.natRules.filter((item) => item.id !== rule.id) } })} type="button">Remove</button>
+                <label>내부 로컬<input value={rule.insideLocal} onChange={(event) => updateNatRule(rule.id, { insideLocal: event.target.value.trim() })} /></label>
+                <label>내부 글로벌<input value={rule.insideGlobal} onChange={(event) => updateNatRule(rule.id, { insideGlobal: event.target.value.trim() })} /></label>
+                <label>외부 인터페이스<input value={rule.outsideInterface} onChange={(event) => updateNatRule(rule.id, { outsideInterface: event.target.value.trim() })} /></label>
+                <small>{rule.hits}회 적중</small>
+                <button className="secondary-action" onClick={() => onUpdate({ ...device, config: { ...device.config, natRules: device.config.natRules.filter((item) => item.id !== rule.id) } })} type="button">삭제</button>
               </div>
             ))}
           </div>
@@ -2009,39 +2466,39 @@ function ConfigTab({ device, onUpdate, onDhcp }: { device: NetworkDevice; onUpda
 }
 
 const cliCommandHints = [
-  { command: "enable", detail: "privileged EXEC" },
-  { command: "configure terminal", detail: "global config" },
-  { command: "hostname ", detail: "rename device" },
-  { command: "interface ", detail: "enter interface" },
-  { command: "description ", detail: "interface description" },
-  { command: "ip address ", detail: "set IP and mask" },
-  { command: "no shutdown", detail: "enable interface" },
-  { command: "shutdown", detail: "disable interface" },
-  { command: "switchport mode access", detail: "access mode" },
-  { command: "switchport mode trunk", detail: "trunk mode" },
-  { command: "switchport access vlan ", detail: "set VLAN" },
-  { command: "switchport trunk allowed vlan ", detail: "allowed VLANs" },
-  { command: "ip route ", detail: "static route" },
-  { command: "ip dhcp pool ", detail: "DHCP pool" },
-  { command: "network ", detail: "DHCP network" },
-  { command: "default-router ", detail: "DHCP gateway" },
+  { command: "enable", detail: "관리자 EXEC 모드" },
+  { command: "configure terminal", detail: "전역 설정 모드" },
+  { command: "hostname ", detail: "장비 이름 변경" },
+  { command: "interface ", detail: "인터페이스 진입" },
+  { command: "description ", detail: "인터페이스 설명" },
+  { command: "ip address ", detail: "IP와 마스크 설정" },
+  { command: "no shutdown", detail: "인터페이스 활성화" },
+  { command: "shutdown", detail: "인터페이스 비활성화" },
+  { command: "switchport mode access", detail: "access 모드" },
+  { command: "switchport mode trunk", detail: "trunk 모드" },
+  { command: "switchport access vlan ", detail: "VLAN 지정" },
+  { command: "switchport trunk allowed vlan ", detail: "허용 VLAN 설정" },
+  { command: "ip route ", detail: "정적 라우트" },
+  { command: "ip dhcp pool ", detail: "DHCP 풀" },
+  { command: "network ", detail: "DHCP 네트워크" },
+  { command: "default-router ", detail: "DHCP 게이트웨이" },
   { command: "dns-server ", detail: "DHCP DNS" },
-  { command: "show running-config", detail: "current config" },
-  { command: "show startup-config", detail: "saved config" },
-  { command: "show ip interface brief", detail: "interface summary" },
-  { command: "show interfaces trunk", detail: "trunks" },
-  { command: "show vlan brief", detail: "VLAN table" },
-  { command: "show mac address-table", detail: "MAC table" },
-  { command: "show cdp neighbors", detail: "direct neighbors" },
-  { command: "show ip route", detail: "routing table" },
-  { command: "show arp", detail: "ARP table" },
-  { command: "ping ", detail: "ICMP test" },
-  { command: "traceroute ", detail: "path trace" },
-  { command: "write memory", detail: "save startup-config" },
-  { command: "copy running-config startup-config", detail: "save config" },
-  { command: "exit", detail: "leave mode" },
-  { command: "end", detail: "privileged mode" },
-  { command: "help", detail: "command list" }
+  { command: "show running-config", detail: "현재 설정" },
+  { command: "show startup-config", detail: "저장 설정" },
+  { command: "show ip interface brief", detail: "인터페이스 요약" },
+  { command: "show interfaces trunk", detail: "trunk 목록" },
+  { command: "show vlan brief", detail: "VLAN 테이블" },
+  { command: "show mac address-table", detail: "MAC 테이블" },
+  { command: "show cdp neighbors", detail: "직접 연결 이웃" },
+  { command: "show ip route", detail: "라우팅 테이블" },
+  { command: "show arp", detail: "ARP 테이블" },
+  { command: "ping ", detail: "ICMP 테스트" },
+  { command: "traceroute ", detail: "경로 추적" },
+  { command: "write memory", detail: "startup-config 저장" },
+  { command: "copy running-config startup-config", detail: "설정 저장" },
+  { command: "exit", detail: "현재 모드 나가기" },
+  { command: "end", detail: "관리자 모드로 이동" },
+  { command: "help", detail: "명령 목록" }
 ];
 
 function CliTab({ device, project, onUpdate, onProjectChange }: { device: NetworkDevice; project: NetworkProject; onUpdate: (device: NetworkDevice) => void; onProjectChange: (project: NetworkProject, message: string) => void }) {
@@ -2050,6 +2507,9 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
   const [session, setSession] = useState(initialCliSession);
   const [helpOpen, setHelpOpen] = useState(false);
   const [helpQuery, setHelpQuery] = useState("");
+  const [completionItems, setCompletionItems] = useState<string[]>([]);
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const outputRef = useRef<HTMLDivElement | null>(null);
   const visibleHints = cliCommandHints.filter((hint) => `${hint.command} ${hint.detail}`.toLowerCase().includes(helpQuery.trim().toLowerCase()));
 
@@ -2059,6 +2519,9 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
     setSession(initialCliSession());
     setHelpOpen(false);
     setHelpQuery("");
+    setCompletionItems([]);
+    setHistory([]);
+    setHistoryIndex(null);
   }, [device.id]);
 
   useEffect(() => {
@@ -2067,33 +2530,88 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
 
   async function run() {
     const prompt = cliPrompt(device, session);
-    if (input.trim().toLowerCase().startsWith("ping ") || input.trim().toLowerCase().startsWith("traceroute ") || input.trim().toLowerCase().startsWith("tracert ")) {
+    const normalizedInput = input.trim().toLowerCase().replace(/\s+/g, " ");
+    const submittedInput = input;
+    setHistoryIndex(null);
+    if (submittedInput.trim()) {
+      setHistory((items) => [...items, submittedInput].slice(-80));
+    }
+    setCompletionItems([]);
+    if (normalizedInput.startsWith("ping ") || normalizedInput.startsWith("traceroute ") || normalizedInput.startsWith("tracert ")) {
       const output = await runCliPacketCommand(project, device, input, onProjectChange);
-      setLines([...lines, `${prompt} ${input}`, output].filter(Boolean));
+      setLines((items) => [...items, `${prompt} ${submittedInput}`, output].filter(Boolean));
       setInput("");
       return;
     }
-    if (input.trim().toLowerCase() === "show cdp neighbors") {
-      setLines([...lines, `${prompt} ${input}`, showCdpNeighbors(project, device)].filter(Boolean));
+    if (device.powerOn && isCdpNeighborsCommand(normalizedInput)) {
+      setLines((items) => [...items, `${prompt} ${submittedInput}`, showCdpNeighbors(project, device)].filter(Boolean));
       setInput("");
       return;
     }
     const result = runCliCommand(device, session, input);
     setSession(result.session);
     onUpdate(result.device);
-    setLines([...lines, `${prompt} ${input}`, result.output].filter(Boolean));
+    setLines((items) => [...items, `${prompt} ${submittedInput}`, result.output].filter(Boolean));
     setInput("");
   }
+
+  function completeInput() {
+    const matches = cliCompletions(device, session, input);
+    if (matches.length === 1) {
+      const next = matches[0].endsWith(" ") ? matches[0] : `${matches[0]} `;
+      setInput(next);
+      setCompletionItems([]);
+      setHelpOpen(false);
+      return;
+    }
+    setCompletionItems(matches);
+    setHelpOpen(false);
+  }
+
+  function handleInputKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Tab") {
+      event.preventDefault();
+      completeInput();
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      if (history.length === 0) return;
+      event.preventDefault();
+      const nextIndex = historyIndex === null ? history.length - 1 : Math.max(0, historyIndex - 1);
+      setHistoryIndex(nextIndex);
+      setInput(history[nextIndex]);
+      setCompletionItems([]);
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      if (history.length === 0 || historyIndex === null) return;
+      event.preventDefault();
+      const nextIndex = historyIndex + 1;
+      if (nextIndex >= history.length) {
+        setHistoryIndex(null);
+        setInput("");
+      } else {
+        setHistoryIndex(nextIndex);
+        setInput(history[nextIndex]);
+      }
+      setCompletionItems([]);
+      return;
+    }
+    if (event.key === "Escape") {
+      setCompletionItems([]);
+    }
+  }
+
   return (
     <section className="terminal cli-terminal">
       <header className="terminal-header">
         <Terminal size={16} />
         <span>{device.config.hostname}</span>
-        <button className="terminal-help-button" onClick={() => setHelpOpen((value) => !value)} title="CLI command helper" type="button"><CircleHelp size={15} /></button>
+        <button className="terminal-help-button" onClick={() => setHelpOpen((value) => !value)} title="CLI 명령 도움말" type="button"><CircleHelp size={15} /></button>
       </header>
-      {helpOpen && (
+      {helpOpen ? (
         <div className="cli-help-panel">
-          <input value={helpQuery} onChange={(event) => setHelpQuery(event.target.value)} placeholder="Search commands" />
+          <input value={helpQuery} onChange={(event) => setHelpQuery(event.target.value)} placeholder="명령 검색" />
           <div className="cli-help-list">
             {visibleHints.map((hint) => (
               <button key={hint.command} onClick={() => { setInput(hint.command); setHelpOpen(false); }} type="button">
@@ -2103,13 +2621,28 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
             ))}
           </div>
         </div>
+      ) : completionItems.length > 0 && (
+        <div className="cli-completion-panel">
+          <strong>입력 가능한 명령</strong>
+          <div>
+            {completionItems.map((item) => (
+              <button key={item} onClick={() => { setInput(item.endsWith(" ") ? item : `${item} `); setCompletionItems([]); }} type="button">{item || "확인"}</button>
+            ))}
+          </div>
+        </div>
       )}
       <div ref={outputRef} className="terminal-output">{lines.map((line, index) => <pre key={index}>{line}</pre>)}</div>
       <form className="cli-input-row" onSubmit={(event) => { event.preventDefault(); void run(); }}>
         <span>{cliPrompt(device, session)}</span>
-        <input aria-label="CLI command" value={input} onChange={(event) => setInput(event.target.value)} placeholder="show ip interface brief" />
+        <input
+          aria-label="CLI 명령"
+          value={input}
+          onChange={(event) => { setInput(event.target.value); setCompletionItems([]); }}
+          onKeyDown={handleInputKeyDown}
+          placeholder="show ip interface brief"
+        />
       </form>
-      <small>{cliPrompt(device, session)} | help, ping, traceroute, tracert, conf t, interface, vlan, ip route, ip dhcp pool, show run, write memory</small>
+      <small>{cliPrompt(device, session)} | Tab 자동완성, ↑/↓ 기록, ?, help, sh route, conf t, interface, vlan, ip route, show run, write memory</small>
     </section>
   );
 }
@@ -2118,7 +2651,7 @@ async function runCliPacketCommand(project: NetworkProject, device: NetworkDevic
   const lower = command.trim().toLowerCase();
   const targetText = command.trim().split(/\s+/).slice(1).join(" ");
   const resolved = await resolveDesktopNetworkTarget(project, device, targetText, onProjectChange);
-  if (!resolved.target) return `% Unable to resolve ${targetText}: ${resolved.error}`;
+  if (!resolved.target) return `% ${targetText} 대상을 찾을 수 없습니다: ${resolved.error}`;
   const before = resolved.project.simulationEvents.length;
   const result = await simulatePing(resolved.project, device.id, resolved.target.id);
   onProjectChange(result.project, result.message);
@@ -2127,11 +2660,11 @@ async function runCliPacketCommand(project: NetworkProject, device: NetworkDevic
     const hops = newEvents
       .map((event) => result.project.devices.find((item) => item.id === event.atDeviceId)?.label ?? event.atDeviceId)
       .filter((label, index, list) => list.indexOf(label) === index);
-    return [`Tracing route to ${resolved.target.label}`, ...hops.map((hop, index) => `${index + 1}  ${hop}`), result.success ? "Trace complete." : result.message].join("\n");
+    return [`${resolved.target.label} 경로 추적`, ...hops.map((hop, index) => `${index + 1}  ${hop}`), result.success ? "추적 완료." : result.message].join("\n");
   }
   return result.success
-    ? `Type escape sequence to abort.\nSending 5, 100-byte ICMP Echos to ${resolved.target.label}.\n!!!!!\nSuccess rate is 100 percent\n${result.message}`
-    : `Type escape sequence to abort.\nSending 5, 100-byte ICMP Echos to ${resolved.target.label}.\n.....\nSuccess rate is 0 percent\n${result.message}`;
+    ? `중단하려면 escape sequence를 입력하세요.\n${resolved.target.label}에 100바이트 ICMP Echo 5개를 보냅니다.\n!!!!!\n성공률 100%\n${result.message}`
+    : `중단하려면 escape sequence를 입력하세요.\n${resolved.target.label}에 100바이트 ICMP Echo 5개를 보냅니다.\n.....\n성공률 0%\n${result.message}`;
 }
 
 function showCdpNeighbors(project: NetworkProject, device: NetworkDevice): string {
@@ -2145,7 +2678,12 @@ function showCdpNeighbors(project: NetworkProject, device: NetworkDevice): strin
       const peerPort = endpointLabel(project, peerRef.deviceId, peerRef.portId);
       return `${(peer?.label ?? peerRef.deviceId).padEnd(18)}${localPort.padEnd(22)}${(peer?.model ?? "").padEnd(22)}${peerPort}`;
     });
-  return rows.length ? ["Device ID         Local Interface       Platform              Port ID", ...rows].join("\n") : "No CDP neighbors found.";
+  return rows.length ? ["장비 ID           로컬 인터페이스        플랫폼                포트 ID", ...rows].join("\n") : "CDP 이웃이 없습니다.";
+}
+
+function isCdpNeighborsCommand(value: string): boolean {
+  const [verb, feature, target] = value.split(/\s+/);
+  return Boolean((verb === "show" || verb === "sho" || verb === "sh") && feature === "cdp" && target && "neighbors".startsWith(target));
 }
 
 function endpointLabel(project: NetworkProject, deviceId: string, portId: string): string {
@@ -2156,10 +2694,10 @@ function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: Ne
   const dataPorts = device.ports.filter((port) => port.kind !== "console");
   const [activeApp, setActiveApp] = useState<"ip" | "prompt" | "browser">("prompt");
   const [selectedPortId, setSelectedPortId] = useState(dataPorts[0]?.id ?? "");
-  const [output, setOutput] = useState("Command Prompt");
+  const [output, setOutput] = useState("명령 프롬프트");
   const [input, setInput] = useState("");
   const [browserTarget, setBrowserTarget] = useState("www.lab.local");
-  const [browserOutput, setBrowserOutput] = useState("Web Browser");
+  const [browserOutput, setBrowserOutput] = useState("웹 브라우저");
   const selectedPort = dataPorts.find((port) => port.id === selectedPortId) ?? dataPorts[0];
 
   useEffect(() => {
@@ -2188,27 +2726,27 @@ function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: Ne
   return (
     <section className="desktop-panel">
       <div className="desktop-app-bar">
-        <button className={activeApp === "ip" ? "active" : ""} onClick={() => setActiveApp("ip")} type="button"><Settings size={15} />IP Configuration</button>
-        <button className={activeApp === "prompt" ? "active" : ""} onClick={() => setActiveApp("prompt")} type="button"><Terminal size={15} />Command Prompt</button>
-        <button className={activeApp === "browser" ? "active" : ""} onClick={() => setActiveApp("browser")} type="button"><Monitor size={15} />Web Browser</button>
+        <button className={activeApp === "ip" ? "active" : ""} onClick={() => setActiveApp("ip")} type="button"><Settings size={15} />IP 설정</button>
+        <button className={activeApp === "prompt" ? "active" : ""} onClick={() => setActiveApp("prompt")} type="button"><Terminal size={15} />명령 프롬프트</button>
+        <button className={activeApp === "browser" ? "active" : ""} onClick={() => setActiveApp("browser")} type="button"><Monitor size={15} />웹 브라우저</button>
       </div>
       {activeApp === "ip" && (
         <div className="desktop-ip-config">
           <header>
-            <strong>IP Configuration</strong>
+            <strong>IP 설정</strong>
             <select value={selectedPort?.id ?? ""} onChange={(event) => setSelectedPortId(event.target.value)}>
               {dataPorts.map((port) => <option key={port.id} value={port.id}>{port.name}</option>)}
             </select>
           </header>
           {selectedPort ? (
             <>
-              <label>IPv4 Address<input value={selectedPort.ipAddress} onChange={(event) => updateDesktopPort(selectedPort.id, { ipAddress: event.target.value.trim() })} placeholder="192.168.1.10" /></label>
-              <label>Subnet Mask<input value={selectedPort.subnetMask} onChange={(event) => updateDesktopPort(selectedPort.id, { subnetMask: event.target.value.trim() })} placeholder="255.255.255.0" /></label>
-              <label>Default Gateway<input value={selectedPort.gateway} onChange={(event) => updateDesktopPort(selectedPort.id, { gateway: event.target.value.trim() })} placeholder="192.168.1.1" /></label>
-              <label>DNS Server<input value={selectedPort.dnsServer} onChange={(event) => updateDesktopPort(selectedPort.id, { dnsServer: event.target.value.trim() })} placeholder="192.168.1.10" /></label>
+              <label>IPv4 주소<input value={selectedPort.ipAddress} onChange={(event) => updateDesktopPort(selectedPort.id, { ipAddress: event.target.value.trim() })} placeholder="192.168.1.10" /></label>
+              <label>서브넷 마스크<input value={selectedPort.subnetMask} onChange={(event) => updateDesktopPort(selectedPort.id, { subnetMask: event.target.value.trim() })} placeholder="255.255.255.0" /></label>
+              <label>기본 게이트웨이<input value={selectedPort.gateway} onChange={(event) => updateDesktopPort(selectedPort.id, { gateway: event.target.value.trim() })} placeholder="192.168.1.1" /></label>
+              <label>DNS 서버<input value={selectedPort.dnsServer} onChange={(event) => updateDesktopPort(selectedPort.id, { dnsServer: event.target.value.trim() })} placeholder="192.168.1.10" /></label>
               <button className="secondary-action" onClick={() => { const result = requestDhcp(project, device.id); onProjectChange(result.project, result.message); }} type="button">DHCP</button>
             </>
-          ) : <p className="empty-state">No configurable network adapter.</p>}
+          ) : <p className="empty-state">설정 가능한 네트워크 어댑터가 없습니다.</p>}
         </div>
       )}
       {activeApp === "prompt" && (
@@ -2218,14 +2756,14 @@ function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: Ne
             <span>{device.config.hostname || device.label}&gt;</span>
             <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="ipconfig | ping 192.168.1.1 | nslookup www.lab.local | http www.lab.local" />
           </form>
-          <small>{project.devices.length} devices in project | ipconfig, arp -a, route print, ping, tracert, nslookup, http</small>
+          <small>프로젝트 장비 {project.devices.length}개 | ipconfig, arp -a, route print, ping, tracert, nslookup, http</small>
         </section>
       )}
       {activeApp === "browser" && (
         <section className="desktop-browser">
           <form onSubmit={(event) => { event.preventDefault(); void runBrowser(); }}>
-            <input value={browserTarget} onChange={(event) => setBrowserTarget(event.target.value)} placeholder="www.lab.local or 192.168.1.10" />
-            <button className="secondary-action" type="submit">Go</button>
+            <input value={browserTarget} onChange={(event) => setBrowserTarget(event.target.value)} placeholder="www.lab.local 또는 192.168.1.10" />
+            <button className="secondary-action" type="submit">이동</button>
           </form>
           <pre>{browserOutput}</pre>
         </section>
@@ -2241,10 +2779,10 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
       .filter((port) => port.kind !== "console")
       .map((port) => [
         `${port.name}:`,
-        `  IPv4 Address . . . . . . . . . : ${port.ipAddress || "0.0.0.0"}`,
-        `  Subnet Mask . . . . . . . . . . : ${port.subnetMask || "0.0.0.0"}`,
-        `  Default Gateway . . . . . . . . : ${port.gateway || "0.0.0.0"}`,
-        `  DNS Servers . . . . . . . . . . : ${port.dnsServer || "0.0.0.0"}`
+        `  IPv4 주소 . . . . . . . . . . . : ${port.ipAddress || "0.0.0.0"}`,
+        `  서브넷 마스크 . . . . . . . . . : ${port.subnetMask || "0.0.0.0"}`,
+        `  기본 게이트웨이 . . . . . . . . : ${port.gateway || "0.0.0.0"}`,
+        `  DNS 서버 . . . . . . . . . . . . : ${port.dnsServer || "0.0.0.0"}`
       ].join("\n"))
       .join("\n");
   }
@@ -2255,33 +2793,33 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
   }
   if (lower === "ipconfig /release") {
     const released = releaseDhcp(project, device.id);
-    onProjectChange(released, "DHCP lease released.");
-    return "DHCP lease released.";
+    onProjectChange(released, "DHCP 임대를 해제했습니다.");
+    return "DHCP 임대를 해제했습니다.";
   }
   if (lower === "arp -a") {
-    return device.runtime.arpTable.map((entry) => `${entry.ipAddress.padEnd(16)}${entry.macAddress.padEnd(20)}${entry.portName}`).join("\n") || "No ARP entries.";
+    return device.runtime.arpTable.map((entry) => `${entry.ipAddress.padEnd(16)}${entry.macAddress.padEnd(20)}${entry.portName}`).join("\n") || "ARP 항목이 없습니다.";
   }
   if (lower === "route print") {
     const routes = device.ports
       .filter((port) => port.ipAddress && port.subnetMask && isIpv4(port.ipAddress) && isIpv4(port.subnetMask))
       .flatMap((port) => [
-        `${networkAddress(port.ipAddress, port.subnetMask)}/${maskToPrefix(port.subnetMask)} on-link dev ${port.name}`,
-        `${port.ipAddress}/32 on-link dev ${port.name}`,
+        `${networkAddress(port.ipAddress, port.subnetMask)}/${maskToPrefix(port.subnetMask)} 직접 연결 ${port.name}`,
+        `${port.ipAddress}/32 직접 연결 ${port.name}`,
         ...(port.gateway ? [`0.0.0.0/0 via ${port.gateway} dev ${port.name}`] : [])
       ]);
-    return routes.join("\n") || "No routes installed.";
+    return routes.join("\n") || "설치된 라우트가 없습니다.";
   }
   if (lower.startsWith("ping ")) {
     const resolved = await resolveDesktopNetworkTarget(project, device, command.slice(5), onProjectChange);
-    if (!resolved.target) return `Ping request could not find host ${command.slice(5).trim()}: ${resolved.error}`;
+    if (!resolved.target) return `Ping 대상 ${command.slice(5).trim()}을(를) 찾을 수 없습니다: ${resolved.error}`;
     const result = await simulatePing(resolved.project, device.id, resolved.target.id);
     onProjectChange(result.project, result.message);
-    return result.success ? result.message : `Request timed out. ${result.message}`;
+    return result.success ? result.message : `요청 시간이 초과되었습니다. ${result.message}`;
   }
   if (lower.startsWith("tracert ") || lower.startsWith("traceroute ")) {
     const targetText = command.split(/\s+/).slice(1).join(" ");
     const resolved = await resolveDesktopNetworkTarget(project, device, targetText, onProjectChange);
-    if (!resolved.target) return `Unable to resolve target ${targetText}: ${resolved.error}`;
+    if (!resolved.target) return `대상 ${targetText}을(를) 찾을 수 없습니다: ${resolved.error}`;
     const before = resolved.project.simulationEvents.length;
     const result = await simulatePing(resolved.project, device.id, resolved.target.id);
     onProjectChange(result.project, result.message);
@@ -2290,50 +2828,50 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
       .map((event) => result.project.devices.find((item) => item.id === event.atDeviceId)?.label ?? event.atDeviceId)
       .filter((label, index, list) => list.indexOf(label) === index);
     return [
-      `Tracing route to ${resolved.target.label}`,
+      `${resolved.target.label} 경로 추적`,
       ...hops.map((hop, index) => `${String(index + 1).padStart(2)}    <1 ms    ${hop}`),
-      result.success ? "Trace complete." : `Trace failed: ${result.message}`
+      result.success ? "추적 완료." : `추적 실패: ${result.message}`
     ].join("\n");
   }
   if (lower.startsWith("nslookup ")) {
     const name = cleanHost(command.slice("nslookup ".length));
     const dnsServerIp = device.ports.find((port) => port.dnsServer)?.dnsServer ?? "";
-    if (!dnsServerIp) return "DNS request failed: no DNS server configured.";
+    if (!dnsServerIp) return "DNS 요청 실패: DNS 서버가 설정되지 않았습니다.";
     const server = project.devices.find((item) => item.config.services.dns && item.ports.some((port) => port.ipAddress === dnsServerIp));
-    if (!server) return `DNS request failed: server ${dnsServerIp} was not found.`;
+    if (!server) return `DNS 요청 실패: 서버 ${dnsServerIp}을(를) 찾을 수 없습니다.`;
     const reachability = await simulatePing(project, device.id, server.id);
     if (!reachability.success) {
-      const nextProject = appendDesktopEvent(reachability.project, device.id, server.id, "DNS", `DNS query for ${name} timed out: ${reachability.message}`, "dropped");
+      const nextProject = appendDesktopEvent(reachability.project, device.id, server.id, "DNS", `${name} DNS 질의 시간 초과: ${reachability.message}`, "dropped");
       onProjectChange(nextProject, reachability.message);
-      return `DNS request timed out for ${name}: ${reachability.message}`;
+      return `${name} DNS 요청 시간이 초과되었습니다: ${reachability.message}`;
     }
     const record = server.config.dnsRecords.find((item) => item.name.toLowerCase() === name.toLowerCase());
     if (!record) {
-      const nextProject = appendDesktopEvent(reachability.project, device.id, server.id, "DNS", `DNS query for ${name} returned NXDOMAIN.`, "dropped");
-      onProjectChange(nextProject, "DNS record not found.");
-      return `Server: ${server.label}\nName: ${name}\n*** No address record found.`;
+      const nextProject = appendDesktopEvent(reachability.project, device.id, server.id, "DNS", `${name} DNS 질의가 NXDOMAIN을 반환했습니다.`, "dropped");
+      onProjectChange(nextProject, "DNS 레코드를 찾을 수 없습니다.");
+      return `서버: ${server.label}\n이름: ${name}\n*** 주소 레코드가 없습니다.`;
     }
-    onProjectChange(appendDesktopEvent(reachability.project, device.id, server.id, "DNS", `Resolved ${record.name} to ${record.value}.`, "delivered"), `DNS resolved ${record.name}.`);
-    return `Server: ${server.label}\nName: ${record.name}\nAddress: ${record.value}`;
+    onProjectChange(appendDesktopEvent(reachability.project, device.id, server.id, "DNS", `${record.name}을(를) ${record.value}(으)로 확인했습니다.`, "delivered"), `DNS가 ${record.name}을(를) 확인했습니다.`);
+    return `서버: ${server.label}\n이름: ${record.name}\n주소: ${record.value}`;
   }
   if (lower.startsWith("http ")) {
     const resolved = await resolveDesktopNetworkTarget(project, device, command.slice(5), onProjectChange);
     if (!resolved.target) return resolved.error;
     const { target, project: resolvedProject } = resolved;
     if (!target.config.services.http) {
-      const nextProject = appendDesktopEvent(resolvedProject, device.id, target.id, "HTTP", `${target.label} refused HTTP connection.`, "dropped");
-      onProjectChange(nextProject, `${target.label} refused HTTP connection.`);
-      return `${target.label} refused HTTP connection.`;
+      const nextProject = appendDesktopEvent(resolvedProject, device.id, target.id, "HTTP", `${target.label}이(가) HTTP 연결을 거부했습니다.`, "dropped");
+      onProjectChange(nextProject, `${target.label}이(가) HTTP 연결을 거부했습니다.`);
+      return `${target.label}이(가) HTTP 연결을 거부했습니다.`;
     }
     const result = await simulatePing(resolvedProject, device.id, target.id);
     if (!result.success) {
-      onProjectChange(appendDesktopEvent(result.project, device.id, target.id, "HTTP", `HTTP request failed: ${result.message}`, "dropped"), result.message);
-      return `HTTP request failed: ${result.message}`;
+      onProjectChange(appendDesktopEvent(result.project, device.id, target.id, "HTTP", `HTTP 요청 실패: ${result.message}`, "dropped"), result.message);
+      return `HTTP 요청 실패: ${result.message}`;
     }
-    onProjectChange(appendDesktopEvent(result.project, device.id, target.id, "HTTP", `GET ${target.label} returned 200 OK.`, "delivered"), "HTTP 200 OK.");
-    return `HTTP/1.1 200 OK\nServer: ${target.label}\n\n${target.label} web service is running.`;
+    onProjectChange(appendDesktopEvent(result.project, device.id, target.id, "HTTP", `GET ${target.label} 요청이 200 OK를 반환했습니다.`, "delivered"), "HTTP 200 OK.");
+    return `HTTP/1.1 200 OK\n서버: ${target.label}\n\n${target.label} 웹 서비스가 실행 중입니다.`;
   }
-  return "Unknown desktop command. Try ipconfig, arp -a, route print, ping <ip|name>, tracert <ip|name>, nslookup <name>, or http <ip|name>.";
+  return "알 수 없는 데스크톱 명령입니다. ipconfig, arp -a, route print, ping <ip|이름>, tracert <ip|이름>, nslookup <이름>, http <ip|이름>을 사용하세요.";
 }
 
 function resolveDesktopTarget(project: NetworkProject, value: string): NetworkDevice | null {
@@ -2374,20 +2912,20 @@ function appendDesktopEvent(project: NetworkProject, sourceId: string, targetId:
 async function resolveDesktopNetworkTarget(project: NetworkProject, device: NetworkDevice, value: string, onProjectChange: (project: NetworkProject, message: string) => void): Promise<{ target: NetworkDevice | null; project: NetworkProject; error: string }> {
   const host = cleanHost(value);
   if (isIpv4(host)) {
-    return { target: resolveDesktopTarget(project, host), project, error: `Could not resolve ${host}.` };
+    return { target: resolveDesktopTarget(project, host), project, error: `${host}을(를) 확인할 수 없습니다.` };
   }
   const direct = project.devices.find((item) => item.label.toLowerCase() === host.toLowerCase() || item.config.hostname.toLowerCase() === host.toLowerCase());
   if (direct) return { target: direct, project, error: "" };
   const dnsServerIp = device.ports.find((port) => port.dnsServer)?.dnsServer ?? "";
-  if (!dnsServerIp) return { target: null, project, error: `Could not resolve ${host}: no DNS server configured.` };
+  if (!dnsServerIp) return { target: null, project, error: `${host}을(를) 확인할 수 없습니다: DNS 서버가 설정되지 않았습니다.` };
   const server = project.devices.find((item) => item.config.services.dns && item.ports.some((port) => port.ipAddress === dnsServerIp));
-  if (!server) return { target: null, project, error: `Could not resolve ${host}: DNS server ${dnsServerIp} was not found.` };
+  if (!server) return { target: null, project, error: `${host}을(를) 확인할 수 없습니다: DNS 서버 ${dnsServerIp}을(를) 찾을 수 없습니다.` };
   const dnsReachability = await simulatePing(project, device.id, server.id);
   onProjectChange(dnsReachability.project, dnsReachability.message);
-  if (!dnsReachability.success) return { target: null, project: dnsReachability.project, error: `Could not resolve ${host}: DNS server unreachable (${dnsReachability.message}).` };
+  if (!dnsReachability.success) return { target: null, project: dnsReachability.project, error: `${host}을(를) 확인할 수 없습니다: DNS 서버에 도달할 수 없습니다(${dnsReachability.message}).` };
   const record = server.config.dnsRecords.find((item) => item.name.toLowerCase() === host.toLowerCase());
-  if (!record) return { target: null, project: dnsReachability.project, error: `Could not resolve ${host}: no DNS record.` };
-  return { target: resolveDesktopTarget(dnsReachability.project, record.value), project: dnsReachability.project, error: `DNS record ${record.value} does not match a device.` };
+  if (!record) return { target: null, project: dnsReachability.project, error: `${host}을(를) 확인할 수 없습니다: DNS 레코드가 없습니다.` };
+  return { target: resolveDesktopTarget(dnsReachability.project, record.value), project: dnsReachability.project, error: `DNS 레코드 ${record.value}와 일치하는 장비가 없습니다.` };
 }
 
 function resolveDns(project: NetworkProject, host: string): string {
@@ -2479,35 +3017,35 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
           {serviceKeys.map((service) => (
             <button className={servicePane === service ? "active" : ""} key={service} onClick={() => setServicePane(service)} type="button">
               <span>{service.toUpperCase()}</span>
-              <small>{device.config.services[service] ? "On" : "Off"}</small>
+              <small>{device.config.services[service] ? "켜짐" : "꺼짐"}</small>
             </button>
           ))}
         </aside>
         <div className="services-detail">
           {servicePane === "dhcp" && (
             <div className="config-group">
-              <header><strong>DHCP</strong><label className="toggle"><input checked={device.config.services.dhcp} onChange={(event) => toggleService("dhcp", event.target.checked)} type="checkbox" />Service</label><button className="secondary-action" onClick={() => onUpdate({ ...device, runtime: { ...device.runtime, dhcpLeases: [] } })} type="button">Clear bindings</button></header>
+              <header><strong>DHCP</strong><label className="toggle"><input checked={device.config.services.dhcp} onChange={(event) => toggleService("dhcp", event.target.checked)} type="checkbox" />서비스</label><button className="secondary-action" onClick={() => onUpdate({ ...device, runtime: { ...device.runtime, dhcpLeases: [] } })} type="button">바인딩 비우기</button></header>
               <div className="service-draft-grid dhcp-draft">
-                <label>Pool Name<input value={poolDraft.name} onChange={(event) => setPoolDraft({ ...poolDraft, name: event.target.value })} placeholder="LAN" /></label>
-                <label>Network<input value={poolDraft.network} onChange={(event) => setPoolDraft({ ...poolDraft, network: event.target.value })} placeholder="192.168.1.0" /></label>
-                <label>Subnet Mask<input value={poolDraft.mask} onChange={(event) => setPoolDraft({ ...poolDraft, mask: event.target.value })} placeholder="255.255.255.0" /></label>
-                <label>Default Gateway<input value={poolDraft.defaultGateway} onChange={(event) => setPoolDraft({ ...poolDraft, defaultGateway: event.target.value })} placeholder="192.168.1.1" /></label>
-                <label>DNS Server<input value={poolDraft.dnsServer} onChange={(event) => setPoolDraft({ ...poolDraft, dnsServer: event.target.value })} placeholder="192.168.1.10" /></label>
-                <label>Start IP<input value={poolDraft.startIp} onChange={(event) => setPoolDraft({ ...poolDraft, startIp: event.target.value })} placeholder="192.168.1.100" /></label>
-                <label>Maximum Users<input value={poolDraft.maxLeases} onChange={(event) => setPoolDraft({ ...poolDraft, maxLeases: event.target.value })} placeholder="50" type="number" /></label>
-                <button className="secondary-action" onClick={addPool} type="button">Add pool</button>
+                <label>풀 이름<input value={poolDraft.name} onChange={(event) => setPoolDraft({ ...poolDraft, name: event.target.value })} placeholder="LAN" /></label>
+                <label>네트워크<input value={poolDraft.network} onChange={(event) => setPoolDraft({ ...poolDraft, network: event.target.value })} placeholder="192.168.1.0" /></label>
+                <label>서브넷 마스크<input value={poolDraft.mask} onChange={(event) => setPoolDraft({ ...poolDraft, mask: event.target.value })} placeholder="255.255.255.0" /></label>
+                <label>기본 게이트웨이<input value={poolDraft.defaultGateway} onChange={(event) => setPoolDraft({ ...poolDraft, defaultGateway: event.target.value })} placeholder="192.168.1.1" /></label>
+                <label>DNS 서버<input value={poolDraft.dnsServer} onChange={(event) => setPoolDraft({ ...poolDraft, dnsServer: event.target.value })} placeholder="192.168.1.10" /></label>
+                <label>시작 IP<input value={poolDraft.startIp} onChange={(event) => setPoolDraft({ ...poolDraft, startIp: event.target.value })} placeholder="192.168.1.100" /></label>
+                <label>최대 사용자<input value={poolDraft.maxLeases} onChange={(event) => setPoolDraft({ ...poolDraft, maxLeases: event.target.value })} placeholder="50" type="number" /></label>
+                <button className="secondary-action" onClick={addPool} type="button">풀 추가</button>
               </div>
               {device.config.dhcpPools.map((pool) => (
                 <div className="editable-service-row" key={pool.id}>
-                  <label className="toggle"><input checked={pool.enabled} onChange={(event) => updatePool(pool.id, { enabled: event.target.checked })} type="checkbox" />Enabled</label>
-                  <label>Name<input value={pool.name} onChange={(event) => updatePool(pool.id, { name: event.target.value.slice(0, 40) })} /></label>
-                  <label>Network<input value={pool.network} onChange={(event) => updatePool(pool.id, { network: event.target.value.trim() })} /></label>
-                  <label>Mask<input value={pool.mask} onChange={(event) => updatePool(pool.id, { mask: event.target.value.trim() })} /></label>
-                  <label>Gateway<input value={pool.defaultGateway} onChange={(event) => updatePool(pool.id, { defaultGateway: event.target.value.trim() })} /></label>
+                  <label className="toggle"><input checked={pool.enabled} onChange={(event) => updatePool(pool.id, { enabled: event.target.checked })} type="checkbox" />활성</label>
+                  <label>이름<input value={pool.name} onChange={(event) => updatePool(pool.id, { name: event.target.value.slice(0, 40) })} /></label>
+                  <label>네트워크<input value={pool.network} onChange={(event) => updatePool(pool.id, { network: event.target.value.trim() })} /></label>
+                  <label>마스크<input value={pool.mask} onChange={(event) => updatePool(pool.id, { mask: event.target.value.trim() })} /></label>
+                  <label>게이트웨이<input value={pool.defaultGateway} onChange={(event) => updatePool(pool.id, { defaultGateway: event.target.value.trim() })} /></label>
                   <label>DNS<input value={pool.dnsServer} onChange={(event) => updatePool(pool.id, { dnsServer: event.target.value.trim() })} /></label>
-                  <label>Start IP<input value={pool.startIp} onChange={(event) => updatePool(pool.id, { startIp: event.target.value.trim() })} /></label>
-                  <label>Leases<input value={pool.maxLeases} min={1} onChange={(event) => updatePool(pool.id, { maxLeases: boundedNumber(event.target.value, 1, 4096) })} type="number" /></label>
-                  <button className="secondary-action" onClick={() => onUpdate({ ...device, config: { ...device.config, dhcpPools: device.config.dhcpPools.filter((item) => item.id !== pool.id) } })} type="button">Remove</button>
+                  <label>시작 IP<input value={pool.startIp} onChange={(event) => updatePool(pool.id, { startIp: event.target.value.trim() })} /></label>
+                  <label>임대 수<input value={pool.maxLeases} min={1} onChange={(event) => updatePool(pool.id, { maxLeases: boundedNumber(event.target.value, 1, 4096) })} type="number" /></label>
+                  <button className="secondary-action" onClick={() => onUpdate({ ...device, config: { ...device.config, dhcpPools: device.config.dhcpPools.filter((item) => item.id !== pool.id) } })} type="button">삭제</button>
                 </div>
               ))}
               {device.runtime.dhcpLeases.map((lease) => (
@@ -2520,31 +3058,31 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
           )}
           {servicePane === "dns" && (
             <div className="config-group">
-              <header><strong>DNS</strong><label className="toggle"><input checked={device.config.services.dns} onChange={(event) => toggleService("dns", event.target.checked)} type="checkbox" />Service</label><small>{device.config.dnsRecords.length} records</small></header>
+              <header><strong>DNS</strong><label className="toggle"><input checked={device.config.services.dns} onChange={(event) => toggleService("dns", event.target.checked)} type="checkbox" />서비스</label><small>레코드 {device.config.dnsRecords.length}개</small></header>
               <div className="service-draft-grid dns-draft">
-                <label>Name<input value={recordDraft.name} onChange={(event) => setRecordDraft({ ...recordDraft, name: event.target.value })} placeholder="www.lab.local" /></label>
-                <label>Address<input value={recordDraft.value} onChange={(event) => setRecordDraft({ ...recordDraft, value: event.target.value })} placeholder="192.168.1.10" /></label>
-                <button className="secondary-action" onClick={addRecord} type="button">Add</button>
+                <label>이름<input value={recordDraft.name} onChange={(event) => setRecordDraft({ ...recordDraft, name: event.target.value })} placeholder="www.lab.local" /></label>
+                <label>주소<input value={recordDraft.value} onChange={(event) => setRecordDraft({ ...recordDraft, value: event.target.value })} placeholder="192.168.1.10" /></label>
+                <button className="secondary-action" onClick={addRecord} type="button">추가</button>
               </div>
               {device.config.dnsRecords.map((record) => (
                 <div className="editable-record-row" key={record.id}>
-                  <label>Name<input value={record.name} onChange={(event) => updateRecord(record.id, { name: event.target.value.trim() })} /></label>
+                  <label>이름<input value={record.name} onChange={(event) => updateRecord(record.id, { name: event.target.value.trim() })} /></label>
                   <label>IPv4<input value={record.value} onChange={(event) => updateRecord(record.id, { value: event.target.value.trim() })} /></label>
-                  <button className="secondary-action" onClick={() => onUpdate({ ...device, config: { ...device.config, dnsRecords: device.config.dnsRecords.filter((item) => item.id !== record.id) } })} type="button">Remove</button>
+                  <button className="secondary-action" onClick={() => onUpdate({ ...device, config: { ...device.config, dnsRecords: device.config.dnsRecords.filter((item) => item.id !== record.id) } })} type="button">삭제</button>
                 </div>
               ))}
             </div>
           )}
           {servicePane === "http" && (
             <div className="config-group">
-              <header><strong>HTTP</strong><label className="toggle"><input checked={device.config.services.http} onChange={(event) => toggleService("http", event.target.checked)} type="checkbox" />Service</label></header>
-              <div className="diagnostic-row info"><strong>{device.config.services.http ? "HTTP On" : "HTTP Off"}</strong><span>Web Browser and `http` desktop command use this service when the server is reachable.</span></div>
+              <header><strong>HTTP</strong><label className="toggle"><input checked={device.config.services.http} onChange={(event) => toggleService("http", event.target.checked)} type="checkbox" />서비스</label></header>
+              <div className="diagnostic-row info"><strong>{device.config.services.http ? "HTTP 켜짐" : "HTTP 꺼짐"}</strong><span>서버에 도달 가능할 때 웹 브라우저와 `http` 데스크톱 명령이 이 서비스를 사용합니다.</span></div>
             </div>
           )}
           {(servicePane === "tftp" || servicePane === "syslog") && (
             <div className="config-group">
-              <header><strong>{servicePane.toUpperCase()}</strong><label className="toggle"><input checked={device.config.services[servicePane]} onChange={(event) => toggleService(servicePane, event.target.checked)} type="checkbox" />Service</label></header>
-              <div className="diagnostic-row info"><strong>{device.config.services[servicePane] ? "Service On" : "Service Off"}</strong><span>Service state is stored in the project and available to CLI/service checks.</span></div>
+              <header><strong>{servicePane.toUpperCase()}</strong><label className="toggle"><input checked={device.config.services[servicePane]} onChange={(event) => toggleService(servicePane, event.target.checked)} type="checkbox" />서비스</label></header>
+              <div className="diagnostic-row info"><strong>{device.config.services[servicePane] ? "서비스 켜짐" : "서비스 꺼짐"}</strong><span>서비스 상태는 프로젝트에 저장되며 CLI/서비스 검사에서 사용할 수 있습니다.</span></div>
             </div>
           )}
         </div>
@@ -2611,19 +3149,19 @@ function EventPanel({
     <section className={`event-panel ${mode}`}>
       {mode === "simulation" ? (
         <>
-          <header><strong>Simulation Events</strong><select value={eventFilter} onChange={(event) => setEventFilter(event.target.value)}><option value="all">all</option><option value="icmp">ICMP</option><option value="arp">ARP</option><option value="switch">SWITCH</option><option value="hub">HUB</option><option value="dhcp">DHCP</option><option value="dns">DNS</option><option value="http">HTTP</option><option value="delivered">delivered</option><option value="forwarded">forwarded</option><option value="dropped">dropped</option></select><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusRelative(-1)} type="button">Back</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={captureForward} type="button">Capture/Forward</button><button disabled={!onFocusEvent || filteredEvents.length === 0} onClick={autoCapturePlay} type="button">Auto Capture/Play</button><button onClick={onClear} type="button">Clear</button></header>
+          <header><strong>시뮬레이션 이벤트</strong><select value={eventFilter} onChange={(event) => setEventFilter(event.target.value)}><option value="all">전체</option><option value="icmp">ICMP</option><option value="arp">ARP</option><option value="switch">SWITCH</option><option value="hub">HUB</option><option value="dhcp">DHCP</option><option value="dns">DNS</option><option value="http">HTTP</option><option value="delivered">전달됨</option><option value="forwarded">전송 중</option><option value="dropped">드롭됨</option></select><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusRelative(-1)} type="button">이전</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={captureForward} type="button">캡처/전송</button><button disabled={!onFocusEvent || filteredEvents.length === 0} onClick={autoCapturePlay} type="button">자동 재생</button><button onClick={onClear} type="button">비우기</button></header>
           <div className="sim-status-strip">
-            <span><strong>{eventStats.total}</strong> events</span>
-            <span className="forwarded"><strong>{eventStats.forwarded}</strong> forwarded</span>
-            <span className="delivered"><strong>{eventStats.delivered}</strong> delivered</span>
-            <span className="dropped"><strong>{eventStats.dropped}</strong> dropped</span>
-            <span><strong>{filteredEvents.length}</strong> shown</span>
+            <span><strong>{eventStats.total}</strong> 이벤트</span>
+            <span className="forwarded"><strong>{eventStats.forwarded}</strong> 전송 중</span>
+            <span className="delivered"><strong>{eventStats.delivered}</strong> 전달됨</span>
+            <span className="dropped"><strong>{eventStats.dropped}</strong> 드롭됨</span>
+            <span><strong>{filteredEvents.length}</strong> 표시</span>
           </div>
           <div className="simulation-layout">
             <div className="simulation-main">
               {message && <p>{message}</p>}
               <div className="event-table">
-                <div className="event-table-head"><span>Time</span><span>Last Device</span><span>At Device</span><span>Type</span><span>Info</span><span>Status</span></div>
+                <div className="event-table-head"><span>시간</span><span>이전 장비</span><span>현재 장비</span><span>종류</span><span>정보</span><span>상태</span></div>
                 {filteredEvents.slice(-12).reverse().map((event) => (
                   <div className={`event-row ${event.status} ${activeEventId === event.id ? "selected" : ""}`} key={event.id} onClick={() => onFocusEvent?.(event.id)} role="button" tabIndex={0}>
                     <span>{new Date(event.time).toLocaleTimeString()}</span>
@@ -2631,29 +3169,29 @@ function EventPanel({
                     <span>{eventDeviceLabel(project, event.atDeviceId)}</span>
                     <span>{event.type}</span>
                     <span>{event.info}</span>
-                    <small>{event.status}</small>
+                    <small>{eventStatusLabel(event.status)}</small>
                   </div>
                 ))}
-                {filteredEvents.length === 0 && <p className="event-empty-state">No simulation events.</p>}
+                {filteredEvents.length === 0 && <p className="event-empty-state">시뮬레이션 이벤트가 없습니다.</p>}
               </div>
             </div>
             <aside className="simulation-side">
               <div className="user-packet-window">
-                <header><strong>User Created Packets</strong><small>{userPackets.length} recent</small></header>
-                <div className="user-packet-head"><span>Protocol</span><span>Source</span><span>Destination</span><span>Status</span></div>
+                <header><strong>사용자 생성 패킷</strong><small>최근 {userPackets.length}개</small></header>
+                <div className="user-packet-head"><span>프로토콜</span><span>출발지</span><span>목적지</span><span>상태</span></div>
                 {userPackets.map((packet) => (
                   <button className={`${packet.status} ${activeEventId === packet.id ? "selected" : ""}`} key={packet.id} onClick={() => onFocusEvent?.(packet.id)} type="button">
                     <span>{packet.protocol}</span>
                     <span>{packet.source}</span>
                     <span>{packet.destination}</span>
-                    <small>{packet.status}</small>
+                    <small>{eventStatusLabel(packet.status)}</small>
                   </button>
                 ))}
-                {userPackets.length === 0 && <p className="event-empty-state">No user-created packets yet.</p>}
+                {userPackets.length === 0 && <p className="event-empty-state">아직 사용자 생성 패킷이 없습니다.</p>}
               </div>
               {selectedEvent && (
                 <div className={`pdu-info-panel ${selectedEvent.status}`}>
-                  <header><strong>PDU Information</strong><small>{selectedEvent.type} / {selectedEvent.status}</small></header>
+                  <header><strong>PDU 정보</strong><small>{selectedEvent.type} / {eventStatusLabel(selectedEvent.status)}</small></header>
                   <p>{selectedEvent.info}</p>
                   <div>{(selectedEvent.osiLayers?.length ? selectedEvent.osiLayers : ["Layer 2", "Layer 3"]).map((layer) => <span key={layer}>{layer}</span>)}</div>
                 </div>
@@ -2663,19 +3201,19 @@ function EventPanel({
         </>
       ) : (
         <>
-          <header><strong>Realtime Status</strong><small>{project.links.filter((link) => link.status === "up").length} up / {project.links.length} links</small></header>
+          <header><strong>실시간 상태</strong><small>활성 {project.links.filter((link) => link.status === "up").length}개 / 링크 {project.links.length}개</small></header>
           <div className="sim-status-strip">
-            <span><strong>{project.devices.length}</strong> devices</span>
-            <span><strong>{linkStats.total}</strong> cables</span>
-            <span className="delivered"><strong>{linkStats.up}</strong> up</span>
-            <span className="dropped"><strong>{linkStats.down}</strong> down</span>
-            <span className="forwarded"><strong>{linkStats.blocked}</strong> blocked</span>
+            <span><strong>{project.devices.length}</strong> 장비</span>
+            <span><strong>{linkStats.total}</strong> 케이블</span>
+            <span className="delivered"><strong>{linkStats.up}</strong> 활성</span>
+            <span className="dropped"><strong>{linkStats.down}</strong> 다운</span>
+            <span className="forwarded"><strong>{linkStats.blocked}</strong> 차단</span>
           </div>
           {message && <p>{message}</p>}
         </>
       )}
-      <header><strong>Network Diagnostics</strong><small>{issues.length} issues</small>{onRepair && issues.length > 0 && <button className="secondary-action" onClick={onRepair} type="button">Repair</button>}</header>
-      {issues.length === 0 ? <p className="empty-state">No project-level problems detected.</p> : issues.slice(0, 10).map((item) => (
+      <header><strong>네트워크 진단</strong><small>이슈 {issues.length}개</small>{onRepair && issues.length > 0 && <button className="secondary-action" onClick={onRepair} type="button">복구</button>}</header>
+      {issues.length === 0 ? <p className="empty-state">프로젝트 수준 문제가 감지되지 않았습니다.</p> : issues.slice(0, 10).map((item) => (
         <div className={`diagnostic-row ${item.severity}`} key={item.id}>
           <strong>{item.title}</strong>
           <span>{item.detail}</span>
@@ -2683,13 +3221,13 @@ function EventPanel({
       ))}
       {onRemoveLink && project.links.length > 0 && (
         <>
-          <header><strong>Cables</strong><small>{project.links.length} links</small></header>
+          <header><strong>케이블</strong><small>링크 {project.links.length}개</small></header>
           {project.links.map((link) => (
             <div className={`event-row cable-row ${link.status}`} key={link.id}>
               <span className="cable-row-kind"><i className={`cable-swatch ${link.type}`} />{shortCableLabel(link.type)}</span>
               <span>{linkLabel(project, link)}</span>
-              <small title={linkStatusDetail(project, link)}>{link.status}: {linkStatusDetail(project, link)}</small>
-              <button className="secondary-action" onClick={() => onRemoveLink(link.id)} type="button">Remove</button>
+              <small title={linkStatusDetail(project, link)}>{linkStatusLabel(link.status)}: {linkStatusDetail(project, link)}</small>
+              <button className="secondary-action" onClick={() => onRemoveLink(link.id)} type="button">삭제</button>
             </div>
           ))}
         </>

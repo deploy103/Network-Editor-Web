@@ -1,14 +1,19 @@
+import { defaultConfig } from "../data/deviceCatalog";
 import { createId } from "../utils/id";
 import { isIpv4, maskToPrefix, networkAddress } from "./ip";
-import type { DhcpPool, NetworkDevice, NetworkPort, RuntimeState } from "../types/network";
+import type { DhcpPool, DeviceConfig, NetworkDevice, NetworkPort, RuntimeState } from "../types/network";
 
-export type CliMode = "exec" | "privileged" | "global" | "interface" | "vlan" | "dhcp";
+export type CliMode = "exec" | "privileged" | "global" | "interface" | "vlan" | "dhcp" | "line" | "router";
+export type CliPendingAction = "reload" | "erase-startup";
 
 export interface CliSession {
   mode: CliMode;
   interfaceId?: string;
   vlanId?: number;
   dhcpPoolId?: string;
+  lineId?: string;
+  routingId?: string;
+  pendingAction?: CliPendingAction;
 }
 
 export interface CliResult {
@@ -17,8 +22,11 @@ export interface CliResult {
   output: string;
 }
 
+type LineConfig = NonNullable<DeviceConfig["lineConfigs"]>[number];
+type RoutingProtocol = NonNullable<DeviceConfig["routingProtocols"]>[number];
+
 export function initialCliSession(): CliSession {
-  return { mode: "privileged" };
+  return { mode: "exec" };
 }
 
 export function cliPrompt(device: NetworkDevice, session: CliSession): string {
@@ -28,42 +36,663 @@ export function cliPrompt(device: NetworkDevice, session: CliSession): string {
   if (session.mode === "interface") return `${hostname}(config-if)#`;
   if (session.mode === "vlan") return `${hostname}(config-vlan)#`;
   if (session.mode === "dhcp") return `${hostname}(dhcp-config)#`;
+  if (session.mode === "line") return `${hostname}(config-line)#`;
+  if (session.mode === "router") return `${hostname}(config-router)#`;
   return `${hostname}#`;
 }
 
 export function runCliCommand(device: NetworkDevice, session: CliSession, rawCommand: string): CliResult {
-  const command = rawCommand.trim();
+  const raw = cleanCommand(rawCommand);
+  if (session.pendingAction) return confirmPendingAction(device, session, raw.toLowerCase());
+  if (isContextHelp(rawCommand)) return result(device, session, contextHelp(device, session, rawCommand));
+  const command = expandCliCommand(raw, session);
+  const lower = command.toLowerCase();
   if (!command) return result(device, session, "");
 
-  const lower = command.toLowerCase();
+  if (!device.powerOn) {
+    if (lower === "power on" || lower === "boot") {
+      return result(bootDevice({ ...device, powerOn: true }), { mode: "exec" }, bootBanner(device));
+    }
+    if (lower === "help" || lower === "?") return result(device, session, "power on, boot");
+    return result(device, session, "% 장비 전원이 꺼져 있습니다. 'power on' 또는 Physical 탭에서 전원을 켜세요.");
+  }
+
   if (lower === "help" || lower === "?") return result(device, session, help(session.mode));
   if (lower.startsWith("help ")) return result(device, session, searchHelp(command.slice(5)));
   if (lower === "enable") return result(device, { mode: "privileged" }, "");
   if (lower === "disable") return result(device, { mode: "exec" }, "");
   if (lower === "end") return result(device, { mode: "privileged" }, "");
   if (lower === "exit") return result(device, exitSession(session), "");
-  if (lower === "configure terminal" || lower === "conf t") return result(device, { mode: "global" }, "");
+  if (lower === "power off" || lower === "shutdown system") {
+    return result({ ...device, powerOn: false, runtime: emptyRuntime() }, { mode: "exec" }, "System halted.\n전원이 꺼졌습니다.");
+  }
+  if (lower === "power cycle") {
+    return result(bootDevice({ ...device, powerOn: true }), { mode: "exec" }, `System halted.\n${bootBanner(device)}`);
+  }
+  if (lower === "power on" || lower === "boot") return result(device, session, "System is already powered on.");
+  if (lower === "configure terminal" || lower === "conf t") {
+    if (session.mode !== "privileged") return result(device, session, "% 먼저 enable 명령으로 privileged EXEC 모드에 들어가세요.");
+    return result(device, { mode: "global" }, "Enter configuration commands, one per line. End with CNTL/Z.");
+  }
+  if (lower.startsWith("terminal ")) return result(device, session, "");
   if (lower === "write memory" || lower === "wr" || lower === "copy running-config startup-config") {
+    if (session.mode !== "privileged") return result(device, session, "% Privileged EXEC 모드에서만 사용할 수 있습니다. enable을 입력하세요.");
     const startupConfig = runningConfig(device).split("\n");
     return result({ ...device, config: { ...device.config, startupConfig } }, session, "Building configuration...\n[OK]");
   }
-  if (lower === "reload") {
-    return result({ ...device, powerOn: true, runtime: emptyRuntime() }, { mode: "privileged" }, "Proceed with reload? [confirm]\nSystem Bootstrap, Version PTWEB\nReload complete.");
+  if (lower === "reload" || lower === "reboot") {
+    if (session.mode !== "privileged") return result(device, session, "% Privileged EXEC 모드에서만 사용할 수 있습니다. enable을 입력하세요.");
+    return result(device, { ...session, pendingAction: "reload" }, "Proceed with reload? [confirm]");
   }
   if (lower === "erase startup-config" || lower === "write erase") {
-    return result({ ...device, config: { ...device.config, startupConfig: [] } }, session, "Erasing the nvram filesystem will remove all configuration files! [confirm]\n[OK]");
+    if (session.mode !== "privileged") return result(device, session, "% Privileged EXEC 모드에서만 사용할 수 있습니다. enable을 입력하세요.");
+    return result(device, { ...session, pendingAction: "erase-startup" }, "Erasing the nvram filesystem will remove all configuration files! [confirm]");
   }
 
-  if (lower.startsWith("show ")) return result(device, session, applyPipe(showCommand(device, lower.split("|")[0].trim()), command));
-  if (lower.startsWith("clear ")) return clearCommand(device, session, lower);
-  if (lower.startsWith("do ")) return runCliCommand(device, { mode: "privileged" }, command.slice(3));
+  if (lower.startsWith("do ")) return runDoCommand(device, session, command.slice(3));
 
   if (session.mode === "global") return globalCommand(device, session, command, lower);
   if (session.mode === "interface") return interfaceCommand(device, session, command, lower);
   if (session.mode === "vlan") return vlanCommand(device, session, command, lower);
   if (session.mode === "dhcp") return dhcpCommand(device, session, command, lower);
+  if (session.mode === "line") return lineCommand(device, session, command, lower);
+  if (session.mode === "router") return routerCommand(device, session, command, lower);
+
+  if (lower.startsWith("show ")) {
+    const showTarget = lower.split("|")[0].trim();
+    if (session.mode === "exec" && privilegedShowCommands.some((item) => showTarget === item || showTarget.startsWith(`${item} `))) {
+      return result(device, session, "% Privileged EXEC 모드에서만 사용할 수 있습니다. enable을 입력하세요.");
+    }
+    return result(device, session, applyPipe(showCommand(device, showTarget), command));
+  }
+  if (lower.startsWith("clear ")) {
+    if (session.mode !== "privileged") return result(device, session, "% Privileged EXEC 모드에서만 사용할 수 있습니다. enable을 입력하세요.");
+    return clearCommand(device, session, lower);
+  }
 
   return result(device, session, "% Unsupported command. Type help or ?.");
+}
+
+export function cliCompletions(device: NetworkDevice, session: CliSession, input: string): string[] {
+  const query = input.trim().toLowerCase().replace(/\s+/g, " ");
+  return completionMatches(device, session, input).slice(0, query ? 24 : 16);
+}
+
+function completionMatches(device: NetworkDevice, session: CliSession, input: string): string[] {
+  const query = input.trim().toLowerCase().replace(/\s+/g, " ");
+  const candidates = commandCandidates(device, session);
+  if (!query) return candidates;
+  return candidates
+    .filter((candidate) => candidate.toLowerCase().startsWith(query) || abbreviatedCandidateMatch(query, candidate));
+}
+
+function cleanCommand(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function isContextHelp(value: string): boolean {
+  return value.trimEnd().endsWith("?");
+}
+
+function contextHelp(device: NetworkDevice, session: CliSession, rawCommand: string): string {
+  const query = rawCommand.trimEnd().replace(/\?$/, "").trimEnd();
+  const matches = completionMatches(device, session, query);
+  if (matches.length === 0) return "% No matching commands.";
+  return formatColumns(matches);
+}
+
+function commandCandidates(device: NetworkDevice, session: CliSession): string[] {
+  if (!device.powerOn) return ["power on", "boot"];
+  if (session.pendingAction) return ["", "yes", "no"];
+  const base = session.mode === "exec"
+    ? ["enable", "show version", "show clock", "show interfaces", "show ip interface brief", "show ip route", "show route", "show cdp neighbors", "show arp", "ping ", "traceroute ", "terminal length 0", "help"]
+    : session.mode === "privileged"
+      ? ["disable", "configure terminal", "conf t", "show running-config", "show startup-config", "show version", "show clock", "show inventory", "show logging", "show interfaces", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface brief", "show ip route", "show route", "show ip protocols", "show vlan brief", "show mac address-table", "show cdp neighbors", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
+      : session.mode === "global"
+        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "interface ", "int ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-lookup", "no ip domain-lookup", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "access-list ", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
+        : session.mode === "interface"
+          ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk allowed vlan ", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
+          : session.mode === "vlan"
+            ? ["name ", "end", "exit", "help"]
+            : session.mode === "dhcp"
+              ? ["network ", "default-router ", "dns-server ", "start-ip ", "max-leases ", "shutdown", "no shutdown", "end", "exit", "help"]
+              : session.mode === "line"
+                ? ["password ", "login", "no login", "transport input all", "transport input ssh", "transport input telnet", "transport input none", "exec-timeout 10 0", "logging synchronous", "no logging synchronous", "end", "exit", "help"]
+                : ["network ", "version 2", "auto-summary", "no auto-summary", "passive-interface ", "no passive-interface ", "redistribute static", "no redistribute static", "end", "exit", "help"];
+  return unique([...base, ...device.ports.flatMap((port) => [`interface ${port.name}`, `int ${shortPortAlias(port.name)}`, `show interface ${port.name}`])]);
+}
+
+function abbreviatedCandidateMatch(query: string, candidate: string): boolean {
+  const queryTokens = query.split(/\s+/).filter(Boolean);
+  const candidateTokens = candidate.toLowerCase().split(/\s+/).filter(Boolean);
+  if (queryTokens.length > candidateTokens.length) return false;
+  return queryTokens.every((token, index) => candidateTokens[index]?.startsWith(token));
+}
+
+function expandCliCommand(rawCommand: string, session: CliSession): string {
+  const command = rawCommand.trim().replace(/\s+/g, " ");
+  if (!command) return "";
+  const pipeIndex = command.indexOf("|");
+  const head = pipeIndex >= 0 ? command.slice(0, pipeIndex).trim() : command;
+  const pipe = pipeIndex >= 0 ? command.slice(pipeIndex).trim() : "";
+  const expandedHead = expandCliHead(head, session);
+  return pipe ? `${expandedHead} ${pipe}` : expandedHead;
+}
+
+function expandCliHead(command: string, session: CliSession): string {
+  const tokens = command.split(/\s+/);
+  const lowerTokens = tokens.map((token) => token.toLowerCase());
+  const first = lowerTokens[0] ?? "";
+  const rest = tokens.slice(1);
+  const lowerRest = lowerTokens.slice(1);
+
+  if (session.mode === "exec" && isAbbrev(first, "enable", 2)) return "enable";
+  if (session.mode === "global" && isAbbrev(first, "enable", 2)) return expandEnableCommand(rest);
+  if (isAbbrev(first, "disable", 3)) return "disable";
+  if (session.mode !== "exec" && isAbbrev(first, "end", 2)) return "end";
+  if (isAbbrev(first, "exit", 2)) return "exit";
+  if (isAbbrev(first, "configure", 3)) {
+    if (isAbbrev(lowerRest[0], "terminal")) return "configure terminal";
+  }
+  if (isAbbrev(first, "terminal", 4)) return expandTerminalCommand(rest);
+  if (first === "wr" || isAbbrev(first, "write", 2)) return expandWriteCommand(rest);
+  if (isAbbrev(first, "erase", 2)) return expandEraseCommand(rest);
+  if (isAbbrev(first, "copy", 2) && rest.length) return expandCopyCommand(rest);
+  if (isAbbrev(first, "show", 2) && rest.length) return expandShowCommand(rest);
+  if (isAbbrev(first, "interface", 3) || first === "int") return `interface ${rest.join(" ")}`;
+  if (isAbbrev(first, "hostname", 4)) return `hostname ${rest.join(" ")}`;
+  if (isAbbrev(first, "banner", 3)) return expandBannerCommand(rest);
+  if (isAbbrev(first, "line", 2)) return expandLineCommand(rest);
+  if (isAbbrev(first, "router", 3)) return expandRouterCommand(rest);
+  if (isAbbrev(first, "description", 4) || first === "desc") return `description ${rest.join(" ")}`;
+  if (isAbbrev(first, "shutdown", 2)) return "shutdown";
+  if (first === "no") return expandNoCommand(rest);
+  if (first === "ip") return expandIpCommand(rest, session);
+  if (isAbbrev(first, "switchport", 2)) return expandSwitchportCommand(tokens);
+  if (isAbbrev(first, "vlan", 1)) return `vlan ${rest.join(" ")}`;
+  if (isAbbrev(first, "access-list", 3)) return `access-list ${rest.join(" ")}`;
+  if (first === "nat") return `nat ${rest.join(" ")}`;
+  if (isAbbrev(first, "service", 3)) return `service ${rest.join(" ")}`;
+  if (isAbbrev(first, "clear", 2)) return expandClearCommand(rest);
+  if (isAbbrev(first, "reload", 3)) return "reload";
+  if (isAbbrev(first, "reboot", 3)) return "reboot";
+  if (first === "power") return expandPowerCommand(rest);
+  if (first === "do" && rest.length) return `do ${expandCliCommand(rest.join(" "), { mode: "privileged" })}`;
+
+  if (session.mode === "global" && first === "router") return command;
+  return command;
+}
+
+function expandTerminalCommand(rest: string[]): string {
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  if (isAbbrev(lowerRest[0], "length")) return `terminal length ${rest[1] ?? "24"}`;
+  if (isAbbrev(lowerRest[0], "no")) return "terminal no monitor";
+  if (isAbbrev(lowerRest[0], "monitor")) return "terminal monitor";
+  return `terminal ${rest.join(" ")}`;
+}
+
+function expandEnableCommand(rest: string[]): string {
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  if (isAbbrev(lowerRest[0], "secret")) return `enable secret ${rest.slice(1).join(" ")}`;
+  if (isAbbrev(lowerRest[0], "password")) return `enable password ${rest.slice(1).join(" ")}`;
+  return `enable ${rest.join(" ")}`;
+}
+
+function expandBannerCommand(rest: string[]): string {
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  if (isAbbrev(lowerRest[0], "motd")) return `banner motd ${rest.slice(1).join(" ")}`;
+  return `banner ${rest.join(" ")}`;
+}
+
+function expandLineCommand(rest: string[]): string {
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  if (isAbbrev(lowerRest[0], "console", 3)) return `line console ${rest.slice(1).join(" ") || "0"}`;
+  if (isAbbrev(lowerRest[0], "vty")) return `line vty ${rest.slice(1).join(" ") || "0 4"}`;
+  return `line ${rest.join(" ")}`;
+}
+
+function expandRouterCommand(rest: string[]): string {
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  if (isAbbrev(lowerRest[0], "rip")) return "router rip";
+  if (isAbbrev(lowerRest[0], "ospf")) return `router ospf ${rest[1] ?? "1"}`;
+  if (isAbbrev(lowerRest[0], "eigrp")) return `router eigrp ${rest[1] ?? "1"}`;
+  return `router ${rest.join(" ")}`;
+}
+
+function expandWriteCommand(rest: string[]): string {
+  const first = rest[0]?.toLowerCase();
+  if (!first || isAbbrev(first, "memory")) return "write memory";
+  if (isAbbrev(first, "erase")) return "write erase";
+  return `write ${rest.join(" ")}`;
+}
+
+function expandEraseCommand(rest: string[]): string {
+  const first = rest[0]?.toLowerCase();
+  if (isAbbrev(first, "startup-config") || isAbbrev(first, "startup")) return "erase startup-config";
+  return `erase ${rest.join(" ")}`;
+}
+
+function expandCopyCommand(rest: string[]): string {
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  if (isAbbrev(lowerRest[0], "running-config") && isAbbrev(lowerRest[1], "startup-config")) {
+    return "copy running-config startup-config";
+  }
+  if (isAbbrev(lowerRest[0], "run") && isAbbrev(lowerRest[1], "start")) {
+    return "copy running-config startup-config";
+  }
+  return `copy ${rest.join(" ")}`;
+}
+
+function expandNoCommand(rest: string[]): string {
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  const first = lowerRest[0] ?? "";
+  if (isAbbrev(first, "shutdown", 2)) return "no shutdown";
+  if (isAbbrev(first, "description", 4)) return "no description";
+  if (isAbbrev(first, "enable", 2)) {
+    if (isAbbrev(lowerRest[1], "secret")) return "no enable secret";
+    if (isAbbrev(lowerRest[1], "password")) return "no enable password";
+  }
+  if (isAbbrev(first, "banner", 3) && isAbbrev(lowerRest[1], "motd")) return "no banner motd";
+  if (first === "ip") {
+    if (isAbbrev(lowerRest[1], "address")) return "no ip address";
+    if (isAbbrev(lowerRest[1], "route")) return `no ip route ${rest.slice(2).join(" ")}`;
+    if (isAbbrev(lowerRest[1], "default-gateway", 3)) return "no ip default-gateway";
+    if (isAbbrev(lowerRest[1], "domain-lookup", 3)) return "no ip domain-lookup";
+    if (isAbbrev(lowerRest[1], "dhcp") && isAbbrev(lowerRest[2], "pool")) return `no ip dhcp pool ${rest.slice(3).join(" ")}`;
+    if (isAbbrev(lowerRest[1], "host")) return `no ip host ${rest.slice(2).join(" ")}`;
+  }
+  if (isAbbrev(first, "vlan")) return `no vlan ${rest.slice(1).join(" ")}`;
+  if (isAbbrev(first, "access-list", 3)) return `no access-list ${rest.slice(1).join(" ")}`;
+  if (first === "nat") return `no nat ${rest.slice(1).join(" ")}`;
+  if (isAbbrev(first, "service", 3)) return `no service ${rest.slice(1).join(" ")}`;
+  if (isAbbrev(first, "clock")) return "no clock rate";
+  return `no ${rest.join(" ")}`;
+}
+
+function expandIpCommand(rest: string[], session: CliSession): string {
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  const first = lowerRest[0] ?? "";
+  if (session.mode === "interface" && isAbbrev(first, "address")) return `ip address ${rest.slice(1).join(" ")}`;
+  if (isAbbrev(first, "route")) return `ip route ${rest.slice(1).join(" ")}`;
+  if (isAbbrev(first, "default-gateway", 3)) return `ip default-gateway ${rest.slice(1).join(" ")}`;
+  if (isAbbrev(first, "domain-lookup", 3)) return "ip domain-lookup";
+  if (isAbbrev(first, "host")) return `ip host ${rest.slice(1).join(" ")}`;
+  if (isAbbrev(first, "dhcp") && isAbbrev(lowerRest[1], "pool")) return `ip dhcp pool ${rest.slice(2).join(" ")}`;
+  return `ip ${rest.join(" ")}`;
+}
+
+function expandClearCommand(rest: string[]): string {
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  const first = lowerRest[0] ?? "";
+  if (isAbbrev(first, "arp") || (first === "ip" && isAbbrev(lowerRest[1], "arp"))) return "clear arp";
+  if (isAbbrev(first, "mac")) return "clear mac address-table";
+  if (first === "ip" && isAbbrev(lowerRest[1], "dhcp") && isAbbrev(lowerRest[2], "binding")) return "clear ip dhcp binding";
+  return `clear ${rest.join(" ")}`;
+}
+
+function expandPowerCommand(rest: string[]): string {
+  const first = rest[0]?.toLowerCase();
+  if (isAbbrev(first, "on")) return "power on";
+  if (isAbbrev(first, "off")) return "power off";
+  if (isAbbrev(first, "cycle")) return "power cycle";
+  return `power ${rest.join(" ")}`;
+}
+
+function expandShowCommand(rest: string[]): string {
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  const first = lowerRest[0] ?? "";
+  const second = lowerRest[1] ?? "";
+  if (first === "run" || isAbbrev(first, "running-config", 3)) {
+    if (isAbbrev(second, "interface", 3) || second === "int") return `show running-config interface ${rest.slice(2).join(" ")}`;
+    return ["show running-config", ...rest.slice(1)].join(" ");
+  }
+  if (isAbbrev(first, "startup-config", 3)) return "show startup-config";
+  if (isAbbrev(first, "version", 3)) return "show version";
+  if (isAbbrev(first, "clock", 2)) return "show clock";
+  if (isAbbrev(first, "inventory", 3)) return "show inventory";
+  if (isAbbrev(first, "logging", 3)) return "show logging";
+  if (first === "route" || first === "ro") return "show ip route";
+  if (first === "arp") return "show arp";
+  if (first === "host" || first === "hosts") return "show hosts";
+  if (first === "nat") return "show nat";
+  if (isAbbrev(first, "vlan")) return "show vlan brief";
+  if (isAbbrev(first, "mac")) return "show mac address-table";
+  if (isAbbrev(first, "access-list", 3) || first === "access-lists") return "show access-list";
+  if (first === "cdp" && isAbbrev(second, "neighbors", 3)) return "show cdp neighbors";
+  if (first === "ip") {
+    if (isAbbrev(second, "route", 2)) return "show ip route";
+    if (isAbbrev(second, "protocols", 3)) return "show ip protocols";
+    if (isAbbrev(second, "arp")) return "show ip arp";
+    if (isAbbrev(second, "interface", 3)) return "show ip interface brief";
+    if (isAbbrev(second, "dhcp") && isAbbrev(lowerRest[2], "binding")) return "show ip dhcp binding";
+    if (isAbbrev(second, "dhcp") && isAbbrev(lowerRest[2], "pool")) return "show ip dhcp pool";
+  }
+  if (isAbbrev(first, "interfaces", 3) || first === "int") {
+    if (isAbbrev(second, "status", 2)) return "show interfaces status";
+    if (isAbbrev(second, "trunk", 2)) return "show interfaces trunk";
+    if (isAbbrev(second, "switchport", 2)) return "show interfaces switchport";
+    if (rest.length > 1) return `show interface ${rest.slice(1).join(" ")}`;
+    return "show interfaces";
+  }
+  return `show ${rest.join(" ")}`;
+}
+
+function expandSwitchportCommand(tokens: string[]): string {
+  const rest = tokens.slice(1);
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  if (isAbbrev(lowerRest[0], "mode")) return `switchport mode ${isAbbrev(lowerRest[1], "trunk", 2) ? "trunk" : "access"}`;
+  if (isAbbrev(lowerRest[0], "access")) {
+    const vlanValues = isAbbrev(lowerRest[1], "vlan") ? rest.slice(2) : rest.slice(1);
+    return `switchport access vlan ${vlanValues.join(" ")}`;
+  }
+  if (isAbbrev(lowerRest[0], "trunk")) {
+    const vlanValues = rest.slice(1).filter((_, index) => {
+      const token = lowerRest[index + 1];
+      return !isAbbrev(token, "allowed") && !isAbbrev(token, "vlan");
+    });
+    return `switchport trunk allowed vlan ${vlanValues.join(" ")}`;
+  }
+  return `switchport ${rest.join(" ")}`;
+}
+
+const privilegedShowCommands = [
+  "show running-config",
+  "show run",
+  "show startup-config",
+  "show access-list",
+  "show access-lists",
+  "show nat"
+];
+
+function confirmPendingAction(device: NetworkDevice, session: CliSession, lower: string): CliResult {
+  if (lower === "n" || lower === "no") {
+    return result(device, withoutPending(session), "Action cancelled.");
+  }
+  if (lower && lower !== "y" && lower !== "yes") return result(device, session, "Press Enter to confirm, or type no to cancel.");
+  if (session.pendingAction === "reload") {
+    return result(bootDevice({ ...device, powerOn: true }), { mode: "exec" }, bootBanner(device));
+  }
+  if (session.pendingAction === "erase-startup") {
+    return result({ ...device, config: { ...device.config, startupConfig: [] } }, withoutPending(session), "[OK]\nStartup configuration erased.");
+  }
+  return result(device, withoutPending(session), "");
+}
+
+function runDoCommand(device: NetworkDevice, session: CliSession, command: string): CliResult {
+  const nested = runCliCommand(device, { mode: "privileged" }, command);
+  if (!nested.device.powerOn) return result(nested.device, { mode: "exec" }, nested.output);
+  if (nested.session.pendingAction) return result(nested.device, { ...session, pendingAction: nested.session.pendingAction }, nested.output);
+  if (nested.session.mode === "exec" && command.trim().toLowerCase().startsWith("reload")) return result(nested.device, nested.session, nested.output);
+  return result(nested.device, session, nested.output);
+}
+
+function withoutPending(session: CliSession): CliSession {
+  const { pendingAction: _pendingAction, ...next } = session;
+  return next;
+}
+
+export function bootBanner(device: NetworkDevice): string {
+  return [
+    "System Bootstrap, Version PTWEB",
+    "Copyright (c) Network Editor Web",
+    `${device.model} processor with ${device.ports.length} interfaces`,
+    "Loading startup-config...",
+    device.config.startupConfig.length ? "[OK]" : "No startup-config found.",
+    "Press RETURN to get started!"
+  ].join("\n");
+}
+
+function bootDevice(device: NetworkDevice): NetworkDevice {
+  const powered = { ...device, powerOn: true, runtime: emptyRuntime() };
+  return device.config.startupConfig.length ? applyStartupConfig(powered) : powered;
+}
+
+function applyStartupConfig(device: NetworkDevice): NetworkDevice {
+  const startupConfig = [...device.config.startupConfig];
+  let next: NetworkDevice = {
+    ...device,
+    config: { ...defaultConfig(device.label, device.kind), startupConfig },
+    ports: device.ports.map((port) => resetPortForBoot(device, port))
+  };
+  let context: { mode: "global" } | { mode: "interface"; portId: string } | { mode: "vlan"; vlanId: number } | { mode: "dhcp"; poolId: string } | { mode: "line"; lineId: string } | { mode: "router"; routingId: string } = { mode: "global" };
+
+  for (const line of startupConfig) {
+    const command = line.trim();
+    const lower = command.toLowerCase();
+    if (!command || command === "!") continue;
+
+    if (lower.startsWith("hostname ")) {
+      const hostname = command.slice("hostname ".length).trim().replace(/[^a-zA-Z0-9_.-]/g, "").slice(0, 32);
+      if (hostname) next = { ...next, label: hostname, config: { ...next.config, hostname } };
+      context = { mode: "global" };
+      continue;
+    }
+
+    if (lower.startsWith("vlan ")) {
+      const vlanId = numberAfter(command, "vlan");
+      if (validVlan(vlanId)) {
+        next = ensureVlan(next, vlanId);
+        context = { mode: "vlan", vlanId };
+      }
+      continue;
+    }
+
+    if (lower.startsWith("interface ")) {
+      const name = command.slice("interface ".length).trim();
+      const port = findPort(next, name);
+      context = port ? { mode: "interface", portId: port.id } : { mode: "global" };
+      continue;
+    }
+
+    if (lower.startsWith("ip dhcp pool ")) {
+      const name = command.slice("ip dhcp pool ".length).trim();
+      if (name) {
+        const existing = next.config.dhcpPools.find((pool) => pool.name.toLowerCase() === name.toLowerCase());
+        if (existing) {
+          context = { mode: "dhcp", poolId: existing.id };
+        } else {
+          const pool = defaultPool(name);
+          next = { ...next, config: { ...next.config, services: { ...next.config.services, dhcp: true }, dhcpPools: [...next.config.dhcpPools, pool] } };
+          context = { mode: "dhcp", poolId: pool.id };
+        }
+      }
+      continue;
+    }
+
+    if (lower.startsWith("line ")) {
+      const line = parseLineTarget(command);
+      if (line) {
+        const ensured = ensureLineConfig(next, line.kind, line.range);
+        next = ensured.device;
+        context = { mode: "line", lineId: ensured.line.id };
+      }
+      continue;
+    }
+
+    if (lower.startsWith("router ")) {
+      const routing = parseRoutingTarget(command);
+      if (routing) {
+        const ensured = ensureRoutingProtocol(next, routing.protocol, routing.processId);
+        next = ensured.device;
+        context = { mode: "router", routingId: ensured.protocol.id };
+      }
+      continue;
+    }
+
+    if (context.mode === "interface") {
+      next = applyStartupInterfaceLine(next, context.portId, command, lower);
+      continue;
+    }
+    if (context.mode === "vlan") {
+      if (lower.startsWith("name ")) {
+        const vlanId = context.vlanId;
+        const name = command.slice("name ".length).trim().slice(0, 32) || `VLAN${vlanId}`;
+        next = { ...next, config: { ...next.config, vlans: next.config.vlans.map((vlan) => vlan.id === vlanId ? { ...vlan, name } : vlan) } };
+      }
+      continue;
+    }
+    if (context.mode === "dhcp") {
+      next = applyStartupDhcpLine(next, context.poolId, command, lower);
+      continue;
+    }
+    if (context.mode === "line") {
+      next = applyStartupLineLine(next, context.lineId, command, lower);
+      continue;
+    }
+    if (context.mode === "router") {
+      next = applyStartupRouterLine(next, context.routingId, command, lower);
+      continue;
+    }
+    next = applyStartupGlobalLine(next, command, lower);
+  }
+
+  return next;
+}
+
+function resetPortForBoot(device: NetworkDevice, port: NetworkPort): NetworkPort {
+  const isVirtualInterface = port.name.toLowerCase().startsWith("vlan");
+  const defaultMode = port.kind === "console"
+    ? port.mode
+    : isVirtualInterface || device.kind === "router" || device.kind === "firewall" || port.kind === "serial"
+      ? "routed"
+      : "access";
+  return {
+    ...port,
+    description: "",
+    ipAddress: "",
+    subnetMask: "",
+    gateway: "",
+    dnsServer: "",
+    mode: defaultMode,
+    vlan: vlanFromInterfaceName(port.name) ?? 1,
+    allowedVlans: [1],
+    adminUp: true,
+    clockRate: undefined
+  };
+}
+
+function vlanFromInterfaceName(name: string): number | undefined {
+  const match = name.match(/^vlan(\d+)$/i);
+  if (!match) return undefined;
+  const vlan = Number(match[1]);
+  return validVlan(vlan) ? vlan : undefined;
+}
+
+function applyStartupGlobalLine(device: NetworkDevice, command: string, lower: string): NetworkDevice {
+  if (lower.startsWith("enable secret ")) return { ...device, config: { ...device.config, enableSecret: command.slice("enable secret ".length).trim() } };
+  if (lower.startsWith("enable password ")) return { ...device, config: { ...device.config, enablePassword: command.slice("enable password ".length).trim() } };
+  if (lower === "no enable secret") return { ...device, config: { ...device.config, enableSecret: undefined } };
+  if (lower === "no enable password") return { ...device, config: { ...device.config, enablePassword: undefined } };
+  if (lower.startsWith("banner motd ")) return { ...device, config: { ...device.config, motdBanner: parseBannerText(command.slice("banner motd ".length)) } };
+  if (lower === "no banner motd") return { ...device, config: { ...device.config, motdBanner: undefined } };
+  if (lower.startsWith("ip default-gateway ")) return { ...device, config: { ...device.config, defaultGateway: command.split(/\s+/)[2] ?? "" } };
+  if (lower === "no ip default-gateway") return { ...device, config: { ...device.config, defaultGateway: undefined } };
+  if (lower === "ip domain-lookup") return { ...device, config: { ...device.config, domainLookup: true } };
+  if (lower === "no ip domain-lookup") return { ...device, config: { ...device.config, domainLookup: false } };
+  if (lower.startsWith("ip route ")) {
+    const [, , network, mask, nextHop] = command.split(/\s+/);
+    return network && mask && nextHop
+      ? { ...device, config: { ...device.config, staticRoutes: [...device.config.staticRoutes, { id: createId("route"), network, mask, nextHop }] } }
+      : device;
+  }
+  if (lower.startsWith("ip host ")) {
+    const [, , name, value] = command.split(/\s+/);
+    return name && value
+      ? { ...device, config: { ...device.config, services: { ...device.config.services, dns: true }, dnsRecords: [...device.config.dnsRecords.filter((record) => record.name.toLowerCase() !== name.toLowerCase()), { id: createId("dns"), name, value }] } }
+      : device;
+  }
+  if (lower.startsWith("access-list ")) {
+    const [, interfaceName, action, protocol, source, destination] = command.split(/\s+/);
+    return interfaceName && isAction(action) && isProtocol(protocol) && source && destination
+      ? { ...device, config: { ...device.config, accessRules: [...device.config.accessRules, { id: createId("acl"), interfaceName, action, protocol, source, destination, hits: 0 }] } }
+      : device;
+  }
+  if (lower.startsWith("nat ")) {
+    const [, insideLocal, insideGlobal, outsideInterface] = command.split(/\s+/);
+    return insideLocal && insideGlobal && outsideInterface
+      ? { ...device, config: { ...device.config, natRules: [...device.config.natRules, { id: createId("nat"), insideLocal, insideGlobal, outsideInterface, hits: 0 }] } }
+      : device;
+  }
+  if (lower.startsWith("service ") || lower.startsWith("no service ")) {
+    const disable = lower.startsWith("no ");
+    const service = command.split(/\s+/).at(-1) as keyof NetworkDevice["config"]["services"] | undefined;
+    return service && service in device.config.services
+      ? { ...device, config: { ...device.config, services: { ...device.config.services, [service]: !disable } } }
+      : device;
+  }
+  return device;
+}
+
+function applyStartupInterfaceLine(device: NetworkDevice, portId: string, command: string, lower: string): NetworkDevice {
+  const port = device.ports.find((item) => item.id === portId);
+  if (!port) return device;
+  if (lower.startsWith("description ")) return updatePort(device, port.id, { description: command.slice("description ".length).trim().slice(0, 80) });
+  if (lower.startsWith("ip address ")) {
+    const [, , ipAddress, subnetMask] = command.split(/\s+/);
+    return ipAddress && subnetMask ? updatePort(device, port.id, { ipAddress, subnetMask, mode: "routed" }) : device;
+  }
+  if (lower === "switchport mode access") return updatePort(device, port.id, { mode: "access", ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" });
+  if (lower === "switchport mode trunk") return updatePort(device, port.id, { mode: "trunk", allowedVlans: port.allowedVlans.length ? port.allowedVlans : [1], ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" });
+  if (lower.startsWith("switchport access vlan ")) {
+    const vlan = numberAfter(command, "switchport access vlan");
+    return validVlan(vlan) ? ensureVlan(updatePort(device, port.id, { mode: "access", vlan }), vlan) : device;
+  }
+  if (lower.startsWith("switchport trunk allowed vlan ")) {
+    const allowedVlans = parseVlans(command.slice("switchport trunk allowed vlan ".length));
+    let next = allowedVlans.length ? updatePort(device, port.id, { mode: "trunk", allowedVlans }) : device;
+    for (const vlan of allowedVlans) next = ensureVlan(next, vlan);
+    return next;
+  }
+  if (lower.startsWith("clock rate ")) return updatePort(device, port.id, { clockRate: numberAfter(command, "clock rate") });
+  if (lower === "shutdown") return updatePort(device, port.id, { adminUp: false });
+  if (lower === "no shutdown") return updatePort(device, port.id, { adminUp: true });
+  return device;
+}
+
+function applyStartupDhcpLine(device: NetworkDevice, poolId: string, command: string, lower: string): NetworkDevice {
+  if (lower.startsWith("network ")) {
+    const [, network, mask] = command.split(/\s+/);
+    return updatePool(device, poolId, { network: network ?? "", mask: mask ?? "" });
+  }
+  if (lower.startsWith("default-router ")) return updatePool(device, poolId, { defaultGateway: command.split(/\s+/)[1] ?? "" });
+  if (lower.startsWith("dns-server ")) return updatePool(device, poolId, { dnsServer: command.split(/\s+/)[1] ?? "" });
+  if (lower.startsWith("start-ip ")) return updatePool(device, poolId, { startIp: command.split(/\s+/)[1] ?? "" });
+  if (lower.startsWith("max-leases ")) return updatePool(device, poolId, { maxLeases: Math.max(1, numberAfter(command, "max-leases")) });
+  if (lower === "shutdown") return updatePool(device, poolId, { enabled: false });
+  if (lower === "no shutdown") return updatePool(device, poolId, { enabled: true });
+  return device;
+}
+
+function applyStartupLineLine(device: NetworkDevice, lineId: string, command: string, lower: string): NetworkDevice {
+  if (lower.startsWith("password ")) return updateLineConfig(device, lineId, { password: command.slice("password ".length).trim() });
+  if (lower === "login") return updateLineConfig(device, lineId, { login: true });
+  if (lower === "no login") return updateLineConfig(device, lineId, { login: false });
+  if (lower.startsWith("transport input ")) return updateLineConfig(device, lineId, { transportInput: command.slice("transport input ".length).trim() || "all" });
+  if (lower.startsWith("exec-timeout ")) return updateLineConfig(device, lineId, { execTimeout: command.slice("exec-timeout ".length).trim() || "10 0" });
+  if (lower === "logging synchronous") return updateLineConfig(device, lineId, { loggingSynchronous: true });
+  if (lower === "no logging synchronous") return updateLineConfig(device, lineId, { loggingSynchronous: false });
+  return device;
+}
+
+function applyStartupRouterLine(device: NetworkDevice, routingId: string, command: string, lower: string): NetworkDevice {
+  if (lower.startsWith("network ")) {
+    const network = command.slice("network ".length).trim();
+    return network ? updateRoutingProtocol(device, routingId, (protocol) => ({ ...protocol, networks: unique([...protocol.networks, network]) })) : device;
+  }
+  if (lower.startsWith("version ")) return updateRoutingProtocol(device, routingId, (protocol) => ({ ...protocol, version: command.split(/\s+/)[1] ?? protocol.version }));
+  if (lower === "auto-summary") return updateRoutingProtocol(device, routingId, (protocol) => ({ ...protocol, autoSummary: true }));
+  if (lower === "no auto-summary") return updateRoutingProtocol(device, routingId, (protocol) => ({ ...protocol, autoSummary: false }));
+  if (lower.startsWith("passive-interface ")) {
+    const name = command.slice("passive-interface ".length).trim();
+    return name ? updateRoutingProtocol(device, routingId, (protocol) => ({ ...protocol, passiveInterfaces: unique([...protocol.passiveInterfaces, name]) })) : device;
+  }
+  if (lower.startsWith("no passive-interface ")) {
+    const name = command.slice("no passive-interface ".length).trim().toLowerCase();
+    return updateRoutingProtocol(device, routingId, (protocol) => ({ ...protocol, passiveInterfaces: protocol.passiveInterfaces.filter((item) => item.toLowerCase() !== name) }));
+  }
+  if (lower === "redistribute static") return updateRoutingProtocol(device, routingId, (protocol) => ({ ...protocol, redistributeStatic: true }));
+  if (lower === "no redistribute static") return updateRoutingProtocol(device, routingId, (protocol) => ({ ...protocol, redistributeStatic: false }));
+  return device;
 }
 
 function globalCommand(device: NetworkDevice, session: CliSession, command: string, lower: string): CliResult {
@@ -72,6 +701,13 @@ function globalCommand(device: NetworkDevice, session: CliSession, command: stri
     if (!hostname) return result(device, session, "% Invalid hostname.");
     return result({ ...device, label: hostname, config: { ...device.config, hostname } }, session, "");
   }
+
+  if (lower.startsWith("enable secret ")) return result({ ...device, config: { ...device.config, enableSecret: command.slice("enable secret ".length).trim() } }, session, "");
+  if (lower.startsWith("enable password ")) return result({ ...device, config: { ...device.config, enablePassword: command.slice("enable password ".length).trim() } }, session, "");
+  if (lower === "no enable secret") return result({ ...device, config: { ...device.config, enableSecret: undefined } }, session, "");
+  if (lower === "no enable password") return result({ ...device, config: { ...device.config, enablePassword: undefined } }, session, "");
+  if (lower.startsWith("banner motd ")) return result({ ...device, config: { ...device.config, motdBanner: parseBannerText(command.slice("banner motd ".length)) } }, session, "");
+  if (lower === "no banner motd") return result({ ...device, config: { ...device.config, motdBanner: undefined } }, session, "");
 
   if (lower.startsWith("interface ")) {
     const name = command.slice(command.indexOf(" ") + 1);
@@ -86,6 +722,20 @@ function globalCommand(device: NetworkDevice, session: CliSession, command: stri
     const exists = device.config.vlans.some((vlan) => vlan.id === id);
     const next = exists ? device : { ...device, config: { ...device.config, vlans: [...device.config.vlans, { id, name: `VLAN${id}` }].sort((a, b) => a.id - b.id) } };
     return result(next, { mode: "vlan", vlanId: id }, "");
+  }
+
+  if (lower.startsWith("line ")) {
+    const line = parseLineTarget(command);
+    if (!line) return result(device, session, "% Usage: line console 0 | line vty 0 4");
+    const ensured = ensureLineConfig(device, line.kind, line.range);
+    return result(ensured.device, { mode: "line", lineId: ensured.line.id }, "");
+  }
+
+  if (lower.startsWith("router ")) {
+    const routing = parseRoutingTarget(command);
+    if (!routing) return result(device, session, "% Usage: router rip | router ospf <process-id> | router eigrp <as-number>");
+    const ensured = ensureRoutingProtocol(device, routing.protocol, routing.processId);
+    return result(ensured.device, { mode: "router", routingId: ensured.protocol.id }, "");
   }
 
   if (lower.startsWith("no vlan ")) {
@@ -103,6 +753,11 @@ function globalCommand(device: NetworkDevice, session: CliSession, command: stri
     if (!network || !mask || !nextHop) return result(device, session, "% Usage: ip route <network> <mask> <next-hop>");
     return result({ ...device, config: { ...device.config, staticRoutes: [...device.config.staticRoutes, { id: createId("route"), network, mask, nextHop }] } }, session, "");
   }
+
+  if (lower.startsWith("ip default-gateway ")) return result({ ...device, config: { ...device.config, defaultGateway: command.split(/\s+/)[2] ?? "" } }, session, "");
+  if (lower === "no ip default-gateway") return result({ ...device, config: { ...device.config, defaultGateway: undefined } }, session, "");
+  if (lower === "ip domain-lookup") return result({ ...device, config: { ...device.config, domainLookup: true } }, session, "");
+  if (lower === "no ip domain-lookup") return result({ ...device, config: { ...device.config, domainLookup: false } }, session, "");
 
   if (lower.startsWith("no ip route ")) {
     const [, , , network, mask, nextHop] = command.split(/\s+/);
@@ -235,7 +890,7 @@ function vlanCommand(device: NetworkDevice, session: CliSession, command: string
 
 function dhcpCommand(device: NetworkDevice, session: CliSession, command: string, lower: string): CliResult {
   const pool = device.config.dhcpPools.find((item) => item.id === session.dhcpPoolId);
-  if (!pool) return result(device, { mode: "global" }, "% DHCP pool context is missing.");
+  if (!pool) return result(device, { mode: "global" }, "% DHCP 풀 컨텍스트가 없습니다.");
   if (lower.startsWith("network ")) {
     const [, network, mask] = command.split(/\s+/);
     return result(updatePool(device, pool.id, { network: network ?? "", mask: mask ?? "" }), session, "");
@@ -246,7 +901,45 @@ function dhcpCommand(device: NetworkDevice, session: CliSession, command: string
   if (lower.startsWith("max-leases ")) return result(updatePool(device, pool.id, { maxLeases: Math.max(1, numberAfter(command, "max-leases")) }), session, "");
   if (lower === "shutdown") return result(updatePool(device, pool.id, { enabled: false }), session, "");
   if (lower === "no shutdown") return result(updatePool(device, pool.id, { enabled: true }), session, "");
-  return result(device, session, "% Unsupported DHCP pool command.");
+  return result(device, session, "% 지원하지 않는 DHCP 풀 명령입니다.");
+}
+
+function lineCommand(device: NetworkDevice, session: CliSession, command: string, lower: string): CliResult {
+  const line = lineConfigs(device).find((item) => item.id === session.lineId);
+  if (!line) return result(device, { mode: "global" }, "% Line context is missing.");
+  if (lower.startsWith("password ")) return result(updateLineConfig(device, line.id, { password: command.slice("password ".length).trim() }), session, "");
+  if (lower === "login") return result(updateLineConfig(device, line.id, { login: true }), session, "");
+  if (lower === "no login") return result(updateLineConfig(device, line.id, { login: false }), session, "");
+  if (lower.startsWith("transport input ")) return result(updateLineConfig(device, line.id, { transportInput: command.slice("transport input ".length).trim() || "all" }), session, "");
+  if (lower.startsWith("exec-timeout ")) return result(updateLineConfig(device, line.id, { execTimeout: command.slice("exec-timeout ".length).trim() || "10 0" }), session, "");
+  if (lower === "logging synchronous") return result(updateLineConfig(device, line.id, { loggingSynchronous: true }), session, "");
+  if (lower === "no logging synchronous") return result(updateLineConfig(device, line.id, { loggingSynchronous: false }), session, "");
+  return result(device, session, "% Unsupported line configuration command.");
+}
+
+function routerCommand(device: NetworkDevice, session: CliSession, command: string, lower: string): CliResult {
+  const routing = routingProtocols(device).find((item) => item.id === session.routingId);
+  if (!routing) return result(device, { mode: "global" }, "% Router context is missing.");
+  if (lower.startsWith("network ")) {
+    const network = command.slice("network ".length).trim();
+    if (!network) return result(device, session, "% Usage: network <network> [wildcard-mask]");
+    return result(updateRoutingProtocol(device, routing.id, (protocol) => ({ ...protocol, networks: unique([...protocol.networks, network]) })), session, "");
+  }
+  if (lower.startsWith("version ")) return result(updateRoutingProtocol(device, routing.id, (protocol) => ({ ...protocol, version: command.split(/\s+/)[1] ?? protocol.version })), session, "");
+  if (lower === "auto-summary") return result(updateRoutingProtocol(device, routing.id, (protocol) => ({ ...protocol, autoSummary: true })), session, "");
+  if (lower === "no auto-summary") return result(updateRoutingProtocol(device, routing.id, (protocol) => ({ ...protocol, autoSummary: false })), session, "");
+  if (lower.startsWith("passive-interface ")) {
+    const name = command.slice("passive-interface ".length).trim();
+    if (!name) return result(device, session, "% Usage: passive-interface <interface>");
+    return result(updateRoutingProtocol(device, routing.id, (protocol) => ({ ...protocol, passiveInterfaces: unique([...protocol.passiveInterfaces, name]) })), session, "");
+  }
+  if (lower.startsWith("no passive-interface ")) {
+    const name = command.slice("no passive-interface ".length).trim().toLowerCase();
+    return result(updateRoutingProtocol(device, routing.id, (protocol) => ({ ...protocol, passiveInterfaces: protocol.passiveInterfaces.filter((item) => item.toLowerCase() !== name) })), session, "");
+  }
+  if (lower === "redistribute static") return result(updateRoutingProtocol(device, routing.id, (protocol) => ({ ...protocol, redistributeStatic: true })), session, "");
+  if (lower === "no redistribute static") return result(updateRoutingProtocol(device, routing.id, (protocol) => ({ ...protocol, redistributeStatic: false })), session, "");
+  return result(device, session, "% Unsupported router configuration command.");
 }
 
 function showCommand(device: NetworkDevice, lower: string): string {
@@ -257,6 +950,9 @@ function showCommand(device: NetworkDevice, lower: string): string {
   }
   if (lower === "show run" || lower === "show running-config") return runningConfig(device);
   if (lower === "show version") return [`${device.model} Software, Network Editor Web`, `Device uptime is simulated`, `System image file is "ptweb:${device.modelId}"`, `${device.ports.length} interfaces`, `${device.powerOn ? "System returned to ROM by power-on" : "System is powered off"}`].join("\n");
+  if (lower === "show clock") return new Date().toLocaleString("ko-KR", { hour12: false });
+  if (lower === "show inventory") return [`NAME: "${device.label}", DESCR: "${device.model}"`, `PID: ${device.modelId}, VID: PTWEB, SN: ${device.id}`, ...device.modules.map((module) => `NAME: "${module.slotId}", PID: ${module.moduleId}`)].join("\n");
+  if (lower === "show logging") return device.runtime.logs.length ? device.runtime.logs.map((log) => `${new Date(log.createdAt).toLocaleString("ko-KR", { hour12: false })} ${log.level.toUpperCase()}: ${log.message}`).join("\n") : "No logging messages.";
   if (lower === "show startup-config") return device.config.startupConfig.join("\n") || "% Startup config is not saved.";
   if (lower === "show ip interface brief") {
     return ["Interface              IP-Address      OK? Method Status", ...device.ports.map((port) => `${port.name.padEnd(22)}${(port.ipAddress || "unassigned").padEnd(16)}YES manual ${port.adminUp && device.powerOn ? "up" : "down"}`)].join("\n");
@@ -276,12 +972,12 @@ function showCommand(device: NetworkDevice, lower: string): string {
   if (lower === "show mac address-table") return device.runtime.macTable.length ? ["Vlan  Mac Address         Type      Ports", ...device.runtime.macTable.map((entry) => `${String(entry.vlan).padEnd(6)}${entry.macAddress.padEnd(20)}${entry.type.padEnd(10)}${entry.portName}`)].join("\n") : "No entries learned.";
   if (lower === "show arp" || lower === "show ip arp") return device.runtime.arpTable.length ? ["Protocol  Address         Hardware Addr       Interface", ...device.runtime.arpTable.map((entry) => `Internet  ${entry.ipAddress.padEnd(16)}${entry.macAddress.padEnd(20)}${entry.portName}`)].join("\n") : "No ARP entries.";
   if (lower === "show ip route") return routeTable(device);
-  if (lower === "show ip protocols") return device.config.staticRoutes.length ? [`Routing Protocol is "static"`, `  Static routes configured: ${device.config.staticRoutes.length}`, ...device.config.staticRoutes.map((route) => `  ${route.network} ${route.mask} via ${route.nextHop}`)].join("\n") : "No routing protocols configured.";
+  if (lower === "show ip protocols") return ipProtocols(device);
   if (lower === "show ip dhcp binding") return device.runtime.dhcpLeases.map((lease) => `${lease.ipAddress.padEnd(16)}${lease.macAddress.padEnd(20)}${lease.deviceId}`).join("\n") || "No DHCP bindings.";
-  if (lower === "show ip dhcp pool") return device.config.dhcpPools.map((pool) => [`Pool ${pool.name}`, `  Network ${pool.network} ${pool.mask}`, `  Default router ${pool.defaultGateway}`, `  DNS server ${pool.dnsServer}`, `  Range starts ${pool.startIp}, max leases ${pool.maxLeases}`, `  State ${pool.enabled ? "enabled" : "disabled"}`].join("\n")).join("\n\n") || "No DHCP pools.";
-  if (lower === "show hosts") return device.config.dnsRecords.map((record) => `${record.name.padEnd(32)}${record.value}`).join("\n") || "No host records.";
-  if (lower === "show access-list" || lower === "show access-lists") return device.config.accessRules.map((rule) => `${rule.action} ${rule.protocol} ${rule.source} ${rule.destination} interface ${rule.interfaceName} (${rule.hits} hits)`).join("\n") || "No access rules.";
-  if (lower === "show nat") return device.config.natRules.map((rule) => `${rule.insideLocal} -> ${rule.insideGlobal} outside ${rule.outsideInterface} (${rule.hits} hits)`).join("\n") || "No NAT rules.";
+  if (lower === "show ip dhcp pool") return device.config.dhcpPools.map((pool) => [`풀 ${pool.name}`, `  네트워크 ${pool.network} ${pool.mask}`, `  기본 라우터 ${pool.defaultGateway}`, `  DNS 서버 ${pool.dnsServer}`, `  시작 범위 ${pool.startIp}, 최대 임대 ${pool.maxLeases}`, `  상태 ${pool.enabled ? "활성" : "비활성"}`].join("\n")).join("\n\n") || "DHCP 풀이 없습니다.";
+  if (lower === "show hosts") return device.config.dnsRecords.map((record) => `${record.name.padEnd(32)}${record.value}`).join("\n") || "호스트 레코드가 없습니다.";
+  if (lower === "show access-list" || lower === "show access-lists") return device.config.accessRules.map((rule) => `${rule.action} ${rule.protocol} ${rule.source} ${rule.destination} interface ${rule.interfaceName} (${rule.hits}회 적중)`).join("\n") || "접근 규칙이 없습니다.";
+  if (lower === "show nat") return device.config.natRules.map((rule) => `${rule.insideLocal} -> ${rule.insideGlobal} outside ${rule.outsideInterface} (${rule.hits}회 적중)`).join("\n") || "NAT 규칙이 없습니다.";
   return "% Unsupported show command.";
 }
 
@@ -295,6 +991,11 @@ function clearCommand(device: NetworkDevice, session: CliSession, lower: string)
 function runningConfig(device: NetworkDevice): string {
   return [
     `hostname ${device.config.hostname}`,
+    ...(device.config.enableSecret ? [`enable secret ${device.config.enableSecret}`] : []),
+    ...(device.config.enablePassword ? [`enable password ${device.config.enablePassword}`] : []),
+    ...(device.config.domainLookup === false ? ["no ip domain-lookup"] : []),
+    ...(device.config.defaultGateway ? [`ip default-gateway ${device.config.defaultGateway}`] : []),
+    ...(device.config.motdBanner ? [`banner motd #${device.config.motdBanner}#`] : []),
     ...device.config.vlans.map((vlan) => [`vlan ${vlan.id}`, ` name ${vlan.name}`]).flat(),
     ...device.ports.flatMap((port) => interfaceConfig(port)),
     ...device.config.staticRoutes.map((route) => `ip route ${route.network} ${route.mask} ${route.nextHop}`),
@@ -310,8 +1011,32 @@ function runningConfig(device: NetworkDevice): string {
       ` start-ip ${pool.startIp}`,
       ` max-leases ${pool.maxLeases}`,
       pool.enabled ? " no shutdown" : " shutdown"
-    ])
+    ]),
+    ...lineConfigs(device).flatMap(lineConfig),
+    ...routingProtocols(device).flatMap(routingProtocolConfig)
   ].join("\n");
+}
+
+function lineConfig(line: LineConfig): string[] {
+  return [
+    `line ${line.kind} ${line.range}`,
+    ...(line.password ? [` password ${line.password}`] : []),
+    line.login ? " login" : " no login",
+    ...(line.transportInput ? [` transport input ${line.transportInput}`] : []),
+    ...(line.execTimeout ? [` exec-timeout ${line.execTimeout}`] : []),
+    line.loggingSynchronous ? " logging synchronous" : " no logging synchronous"
+  ];
+}
+
+function routingProtocolConfig(protocol: RoutingProtocol): string[] {
+  return [
+    `router ${protocol.protocol}${protocol.processId ? ` ${protocol.processId}` : ""}`,
+    ...(protocol.version ? [` version ${protocol.version}`] : []),
+    ...protocol.networks.map((network) => ` network ${network}`),
+    protocol.autoSummary ? " auto-summary" : " no auto-summary",
+    ...protocol.passiveInterfaces.map((name) => ` passive-interface ${name}`),
+    ...(protocol.redistributeStatic ? [" redistribute static"] : [])
+  ];
 }
 
 function interfaceConfig(port: NetworkPort): string[] {
@@ -326,8 +1051,9 @@ function interfaceConfig(port: NetworkPort): string[] {
 }
 
 function interfaceStatus(device: NetworkDevice, port: NetworkPort): string {
+  const operational = device.powerOn && port.adminUp && Boolean(port.linkId);
   return [
-    `${port.name} is ${device.powerOn && port.adminUp ? "up" : "down"}, line protocol is ${port.linkId ? "up" : "down"}`,
+    `${port.name} is ${device.powerOn && port.adminUp ? "up" : "down"}, line protocol is ${operational ? "up" : "down"}`,
     ...(port.description ? [`  Description: ${port.description}`] : []),
     `  Hardware is ${port.kind}, address is ${port.macAddress}`,
     `  Internet address is ${port.ipAddress ? `${port.ipAddress} ${port.subnetMask}` : "unassigned"}`,
@@ -380,14 +1106,35 @@ function routeTable(device: NetworkDevice): string {
     return `S    ${route.network}/${prefix} [1/0] via ${route.nextHop}`;
   });
   const defaultRoute = device.config.staticRoutes.find((route) => route.network === "0.0.0.0" && route.mask === "0.0.0.0");
-  const gatewayLine = defaultRoute ? `Gateway of last resort is ${defaultRoute.nextHop} to network 0.0.0.0` : "Gateway of last resort is not set";
+  const gatewayLine = defaultRoute ? `기본 경로 게이트웨이는 ${defaultRoute.nextHop} -> network 0.0.0.0 입니다` : "기본 경로 게이트웨이가 설정되지 않았습니다";
   const body = [...connected, ...staticRoutes].filter((line, index, list) => list.indexOf(line) === index);
   return [
-    "Codes: C - connected, S - static, L - local",
+    "코드: C - 연결됨, S - 정적, L - 로컬",
     gatewayLine,
     "",
-    ...(body.length ? body : ["No routes installed."])
+    ...(body.length ? body : ["설치된 라우트가 없습니다."])
   ].join("\n");
+}
+
+function ipProtocols(device: NetworkDevice): string {
+  const protocols = routingProtocols(device);
+  const lines: string[] = [];
+  if (device.config.staticRoutes.length) {
+    lines.push(`Routing Protocol is "static"`, `  Static routes configured: ${device.config.staticRoutes.length}`, ...device.config.staticRoutes.map((route) => `  ${route.network} ${route.mask} via ${route.nextHop}`));
+  }
+  for (const protocol of protocols) {
+    lines.push(
+      `Routing Protocol is "${protocol.protocol}${protocol.processId ? ` ${protocol.processId}` : ""}"`,
+      `  Outgoing update filter list for all interfaces is not set`,
+      `  Incoming update filter list for all interfaces is not set`,
+      `  Automatic network summarization is ${protocol.autoSummary ? "in effect" : "not in effect"}`,
+      ...(protocol.version ? [`  Sending updates version ${protocol.version}`] : []),
+      ...(protocol.networks.length ? ["  Routing for Networks:", ...protocol.networks.map((network) => `    ${network}`)] : ["  No networks configured."]),
+      ...(protocol.passiveInterfaces.length ? ["  Passive Interface(s):", ...protocol.passiveInterfaces.map((name) => `    ${name}`)] : []),
+      ...(protocol.redistributeStatic ? ["  Redistributing: static"] : [])
+    );
+  }
+  return lines.length ? lines.join("\n") : "No routing protocols configured.";
 }
 
 function help(mode: CliMode): string {
@@ -395,6 +1142,8 @@ function help(mode: CliMode): string {
   if (mode === "interface") return "description <text>, ip address <ip> <mask>, switchport mode access|trunk, switchport access vlan <id>, switchport trunk allowed vlan <list>, clock rate <value>, shutdown, no shutdown, exit";
   if (mode === "vlan") return "name <vlan-name>, exit, end";
   if (mode === "dhcp") return "network <network> <mask>, default-router <ip>, dns-server <ip>, start-ip <ip>, max-leases <n>, shutdown, no shutdown, exit";
+  if (mode === "line") return "password <value>, login, no login, transport input <all|ssh|telnet|none>, exec-timeout <min> <sec>, logging synchronous, exit";
+  if (mode === "router") return "network <network> [wildcard-mask], version <n>, auto-summary, no auto-summary, passive-interface <name>, redistribute static, exit";
   return "enable, configure terminal, show run, show version, show interfaces, show interfaces switchport, show interfaces trunk, show ip interface brief, show interfaces status, show vlan brief, show ip route, show ip dhcp pool, show hosts, show access-list, show nat, show cdp neighbors, show arp, show ip dhcp binding, clear ..., write memory, reload, write erase";
 }
 
@@ -439,9 +1188,10 @@ function searchHelp(term: string): string {
 }
 
 function applyPipe(output: string, rawCommand: string): string {
-  const match = rawCommand.match(/\|\s*(include|exclude|begin)\s+(.+)$/i);
+  const match = rawCommand.match(/\|\s*(i|inc|include|e|exc|exclude|b|beg|begin)\s+(.+)$/i);
   if (!match) return output;
-  const mode = match[1].toLowerCase();
+  const token = match[1].toLowerCase();
+  const mode = token.startsWith("i") ? "include" : token.startsWith("e") ? "exclude" : "begin";
   const term = match[2].trim().toLowerCase();
   const lines = output.split("\n");
   if (mode === "include") return lines.filter((line) => line.toLowerCase().includes(term)).join("\n") || "% No matching lines.";
@@ -456,6 +1206,87 @@ function updatePort(device: NetworkDevice, portId: string, patch: Partial<Networ
 
 function updatePool(device: NetworkDevice, poolId: string, patch: Partial<DhcpPool>): NetworkDevice {
   return { ...device, config: { ...device.config, dhcpPools: device.config.dhcpPools.map((pool) => pool.id === poolId ? { ...pool, ...patch } : pool) } };
+}
+
+function lineConfigs(device: NetworkDevice): LineConfig[] {
+  return device.config.lineConfigs ?? [];
+}
+
+function routingProtocols(device: NetworkDevice): RoutingProtocol[] {
+  return device.config.routingProtocols ?? [];
+}
+
+function parseLineTarget(command: string): { kind: "console" | "vty"; range: string } | null {
+  const [, rawKind, ...rangeParts] = command.split(/\s+/);
+  const kind = rawKind?.toLowerCase();
+  if (kind !== "console" && kind !== "vty") return null;
+  const range = rangeParts.join(" ") || (kind === "console" ? "0" : "0 4");
+  return { kind, range };
+}
+
+function parseRoutingTarget(command: string): { protocol: RoutingProtocol["protocol"]; processId?: string } | null {
+  const [, rawProtocol, processId] = command.split(/\s+/);
+  const protocol = rawProtocol?.toLowerCase();
+  if (protocol !== "rip" && protocol !== "ospf" && protocol !== "eigrp") return null;
+  return { protocol, processId: protocol === "rip" ? undefined : processId ?? "1" };
+}
+
+function defaultLineConfig(kind: "console" | "vty", range: string): LineConfig {
+  return { id: createId("line"), kind, range, password: "", login: false, transportInput: kind === "vty" ? "all" : "", execTimeout: "10 0", loggingSynchronous: false };
+}
+
+function defaultRoutingProtocol(protocol: RoutingProtocol["protocol"], processId?: string): RoutingProtocol {
+  return { id: createId("routing"), protocol, processId, networks: [], version: protocol === "rip" ? "2" : undefined, autoSummary: false, passiveInterfaces: [], redistributeStatic: false };
+}
+
+function ensureLineConfig(device: NetworkDevice, kind: "console" | "vty", range: string): { device: NetworkDevice; line: LineConfig } {
+  const existing = lineConfigs(device).find((line) => line.kind === kind && line.range === range);
+  if (existing) return { device, line: existing };
+  const line = defaultLineConfig(kind, range);
+  return { device: { ...device, config: { ...device.config, lineConfigs: [...lineConfigs(device), line] } }, line };
+}
+
+function ensureRoutingProtocol(device: NetworkDevice, protocol: RoutingProtocol["protocol"], processId?: string): { device: NetworkDevice; protocol: RoutingProtocol } {
+  const existing = routingProtocols(device).find((item) => item.protocol === protocol && (item.processId ?? "") === (processId ?? ""));
+  if (existing) return { device, protocol: existing };
+  const next = defaultRoutingProtocol(protocol, processId);
+  return { device: { ...device, config: { ...device.config, routingProtocols: [...routingProtocols(device), next] } }, protocol: next };
+}
+
+function updateLineConfig(device: NetworkDevice, lineId: string, patch: Partial<LineConfig>): NetworkDevice {
+  return { ...device, config: { ...device.config, lineConfigs: lineConfigs(device).map((line) => line.id === lineId ? { ...line, ...patch } : line) } };
+}
+
+function updateRoutingProtocol(device: NetworkDevice, routingId: string, updater: (protocol: RoutingProtocol) => RoutingProtocol): NetworkDevice {
+  return { ...device, config: { ...device.config, routingProtocols: routingProtocols(device).map((protocol) => protocol.id === routingId ? updater(protocol) : protocol) } };
+}
+
+function parseBannerText(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length >= 2 && trimmed[0] === trimmed.at(-1) && !/[a-zA-Z0-9\s]/.test(trimmed[0])) return trimmed.slice(1, -1);
+  return trimmed;
+}
+
+function isAbbrev(token: string | undefined, full: string, min = 1): boolean {
+  return Boolean(token && token.length >= min && full.startsWith(token));
+}
+
+function formatColumns(values: string[]): string {
+  const longest = Math.max(...values.map((value) => value.length), 1);
+  const width = Math.min(Math.max(longest + 3, 18), 36);
+  return values
+    .reduce<string[]>((rows, value, index) => {
+      const cell = value.padEnd(width);
+      const rowIndex = Math.floor(index / 2);
+      rows[rowIndex] = `${rows[rowIndex] ?? ""}${cell}`;
+      return rows;
+    }, [])
+    .map((row) => row.trimEnd())
+    .join("\n");
+}
+
+function unique(values: string[]): string[] {
+  return values.filter((value, index, list) => value && list.indexOf(value) === index);
 }
 
 function ensureVlan(device: NetworkDevice, id: number): NetworkDevice {
@@ -485,6 +1316,14 @@ function normalizePortName(name: string): string {
 
 function compactAlias(name: string): string {
   return normalizePortName(name).replace("fastethernet", "f").replace("gigabitethernet", "g").replace("serial", "s");
+}
+
+function shortPortAlias(name: string): string {
+  return name
+    .replace(/^FastEthernet/i, "fa")
+    .replace(/^GigabitEthernet/i, "gi")
+    .replace(/^Serial/i, "se")
+    .replace(/^Ethernet/i, "e");
 }
 
 function parseVlans(value: string): number[] {
@@ -527,7 +1366,7 @@ function isProtocol(value: string | undefined): value is "ip" | "icmp" | "tcp" |
 
 function exitSession(session: CliSession): CliSession {
   if (session.mode === "global") return { mode: "privileged" };
-  if (session.mode === "interface" || session.mode === "vlan" || session.mode === "dhcp") return { mode: "global" };
+  if (session.mode === "interface" || session.mode === "vlan" || session.mode === "dhcp" || session.mode === "line" || session.mode === "router") return { mode: "global" };
   return { mode: "exec" };
 }
 

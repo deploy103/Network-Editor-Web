@@ -9,10 +9,10 @@ export function endpoint(project: NetworkProject, ref: { deviceId: string; portI
 }
 
 export function validateConnection(project: NetworkProject, aDeviceId: string, bDeviceId: string, cable: CableType, aPortId?: string, bPortId?: string): { ok: boolean; message: string; link?: NetworkLink } {
-  if (aDeviceId === bDeviceId) return { ok: false, message: "A cable cannot connect a device to itself." };
+  if (aDeviceId === bDeviceId) return { ok: false, message: "케이블은 같은 장비끼리 연결할 수 없습니다." };
   const a = project.devices.find((device) => device.id === aDeviceId);
   const b = project.devices.find((device) => device.id === bDeviceId);
-  if (!a || !b) return { ok: false, message: "Select two valid devices." };
+  if (!a || !b) return { ok: false, message: "유효한 장비 두 개를 선택하세요." };
   const pair = aPortId && bPortId ? chooseSelectedPorts(a, b, cable, aPortId, bPortId) : choosePorts(a, b, cable);
   if (!pair) return { ok: false, message: connectionFailure(a, b, cable, aPortId, bPortId) };
   const type = cable === "auto" ? inferCable(pair.a, pair.b, a, b) : cable;
@@ -69,7 +69,7 @@ export function recalc(project: NetworkProject): NetworkProject {
 export function linkLabel(project: NetworkProject, link: NetworkLink): string {
   const a = endpoint(project, link.endpointA);
   const b = endpoint(project, link.endpointB);
-  if (!a || !b) return "missing endpoint";
+  if (!a || !b) return "끝점 누락";
   const aRole = link.dceEndpoint ? (link.dceEndpoint === "A" ? " DCE" : " DTE") : "";
   const bRole = link.dceEndpoint ? (link.dceEndpoint === "B" ? " DCE" : " DTE") : "";
   return `${a.device.label} ${a.port.name}${aRole} <-> ${b.device.label} ${b.port.name}${bRole}`;
@@ -99,19 +99,32 @@ function connectionFailure(a: NetworkDevice, b: NetworkDevice, cable: CableType,
   if (aPortId || bPortId) {
     const aPort = a.ports.find((port) => port.id === aPortId);
     const bPort = b.ports.find((port) => port.id === bPortId);
-    if (!aPort || !bPort) return "Selected port no longer exists.";
-    if (aPort.linkId) return `${a.label} ${aPort.name} is already connected.`;
-    if (bPort.linkId) return `${b.label} ${bPort.name} is already connected.`;
+    if (!aPort || !bPort) return "선택한 포트가 더 이상 존재하지 않습니다.";
+    if (aPort.linkId) return `${a.label} ${aPort.name} 포트는 이미 연결되어 있습니다.`;
+    if (bPort.linkId) return `${b.label} ${bPort.name} 포트는 이미 연결되어 있습니다.`;
     const type = cable === "auto" ? inferCable(aPort, bPort, a, b) : cable;
-    if (!canPortUseCable(aPort, type)) return `${a.label} ${aPort.name} cannot use ${type}.`;
-    if (!canPortUseCable(bPort, type)) return `${b.label} ${bPort.name} cannot use ${type}.`;
-    return `${a.label} ${aPort.name} and ${b.label} ${bPort.name} are not a valid pair.`;
+    if (!canPortUseCable(aPort, type)) return `${a.label} ${aPort.name} 포트는 ${cableLabel(type)} 케이블을 사용할 수 없습니다.`;
+    if (!canPortUseCable(bPort, type)) return `${b.label} ${bPort.name} 포트는 ${cableLabel(type)} 케이블을 사용할 수 없습니다.`;
+    return `${a.label} ${aPort.name}와 ${b.label} ${bPort.name}는 유효한 포트 조합이 아닙니다.`;
   }
   const aFree = a.ports.filter((port) => !port.linkId && (cable === "auto" || canPortUseCable(port, cable)));
   const bFree = b.ports.filter((port) => !port.linkId && (cable === "auto" || canPortUseCable(port, cable)));
-  if (aFree.length === 0) return `${a.label} has no free ${cable} port. Power off and add a module, or free a port.`;
-  if (bFree.length === 0) return `${b.label} has no free ${cable} port. Power off and add a module, or free a port.`;
-  return "No compatible free port pair. Choose another cable or use Connection Assistant to pick ports.";
+  if (aFree.length === 0) return `${a.label}에 비어 있는 ${cableLabel(cable)} 포트가 없습니다. 전원을 끄고 모듈을 추가하거나 포트를 비우세요.`;
+  if (bFree.length === 0) return `${b.label}에 비어 있는 ${cableLabel(cable)} 포트가 없습니다. 전원을 끄고 모듈을 추가하거나 포트를 비우세요.`;
+  return "호환되는 빈 포트 조합이 없습니다. 다른 케이블을 선택하거나 연결 도우미에서 포트를 직접 고르세요.";
+}
+
+function cableLabel(type: CableType): string {
+  return ({
+    auto: "자동",
+    console: "콘솔",
+    "copper-straight": "구리 직결",
+    "copper-cross": "구리 크로스",
+    fiber: "광케이블",
+    "serial-dce": "Serial DCE",
+    "serial-dte": "Serial DTE",
+    wireless: "무선"
+  })[type];
 }
 
 function inferCable(aPort: NetworkPort, bPort: NetworkPort, aDevice: NetworkDevice, bDevice: NetworkDevice): CableType {

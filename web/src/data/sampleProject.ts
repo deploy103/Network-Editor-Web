@@ -28,7 +28,7 @@ export function createRoutedSampleProject(ownerId: string): NetworkProject {
   let project: NetworkProject = {
     id: createId("project"),
     ownerId,
-    name: "Routed HTTP Sample",
+    name: "라우팅 HTTP 샘플",
     devices: [configuredPc, switchDevice, configuredRouter, configuredServer],
     links: [],
     simulationEvents: [],

@@ -6,10 +6,10 @@ export function fallbackPing(project: NetworkProject, sourceId: string, targetId
   const source = project.devices.find((device) => device.id === sourceId && device.powerOn);
   const target = project.devices.find((device) => device.id === targetId && device.powerOn);
   const now = Date.now();
-  if (!source || !target) return append(project, false, "Source or target is missing/powered off.", sourceId, targetId, now);
+  if (!source || !target) return append(project, false, "출발지 또는 목적지 장비가 없거나 전원이 꺼져 있습니다.", sourceId, targetId, now);
   const sourcePort = source.ports.find((port) => port.adminUp && port.ipAddress && port.subnetMask);
   const targetPort = target.ports.find((port) => port.adminUp && port.ipAddress && port.subnetMask);
-  if (!sourcePort || !targetPort) return append(project, false, "Both devices need active IPv4 interfaces.", source.id, target.id, now);
+  if (!sourcePort || !targetPort) return append(project, false, "두 장비 모두 활성 IPv4 인터페이스가 필요합니다.", source.id, target.id, now);
 
   let route = resolveRoute(project, source, sourcePort, target, targetPort);
   let evaluatedProject = project;
@@ -25,7 +25,7 @@ export function fallbackPing(project: NetworkProject, sourceId: string, targetId
   return {
     project: withEvents,
     success: route.reachable,
-    message: route.reachable ? `Reply from ${targetPort.ipAddress}: bytes=32 time<1ms TTL=${route.routed ? 64 : 128}` : route.message
+    message: route.reachable ? `${targetPort.ipAddress} 응답: bytes=32 time<1ms TTL=${route.routed ? 64 : 128}` : route.message
   };
 }
 
@@ -39,9 +39,9 @@ export function requestDhcp(project: NetworkProject, clientId: string): { projec
     hasLayer2Path(project, client.id, device.id, portVlan(clientPort)).reachable
   ) : undefined;
   const pool = server?.config.dhcpPools.find((item) => item.enabled);
-  if (!client || !clientPort || !server || !pool) return { project, message: "No reachable DHCP server or active pool." };
-  if (!isIpv4(pool.network) || !isIpv4(pool.mask) || !isIpv4(pool.startIp)) return { project, message: "DHCP pool has invalid network, mask, or start IP." };
-  if (pool.defaultGateway && !ipInSubnet(pool.defaultGateway, pool.network, pool.mask)) return { project, message: "DHCP pool default gateway is outside the pool network." };
+  if (!client || !clientPort || !server || !pool) return { project, message: "도달 가능한 DHCP 서버 또는 활성 풀이 없습니다." };
+  if (!isIpv4(pool.network) || !isIpv4(pool.mask) || !isIpv4(pool.startIp)) return { project, message: "DHCP 풀의 네트워크, 마스크 또는 시작 IP가 올바르지 않습니다." };
+  if (pool.defaultGateway && !ipInSubnet(pool.defaultGateway, pool.network, pool.mask)) return { project, message: "DHCP 풀 기본 게이트웨이가 풀 네트워크 밖에 있습니다." };
   const now = Date.now();
   const existingLease = server.runtime.dhcpLeases.find((lease) => lease.deviceId === client.id && lease.expiresAt > now);
   const active = new Set(server.runtime.dhcpLeases.filter((lease) => lease.deviceId !== client.id && lease.expiresAt > now).map((lease) => lease.ipAddress));
@@ -54,7 +54,7 @@ export function requestDhcp(project: NetworkProject, clientId: string): { projec
       break;
     }
   }
-  if (!leasedIp) return { project, message: "DHCP pool is exhausted." };
+  if (!leasedIp) return { project, message: "DHCP 풀에서 할당할 수 있는 주소가 없습니다." };
   const expiresAt = now + 86_400_000;
   const packetId = `dhcp_${now}_${client.id}_${server.id}`;
   const nextProject = {
@@ -70,13 +70,13 @@ export function requestDhcp(project: NetworkProject, clientId: string): { projec
     }),
     simulationEvents: [
       ...project.simulationEvents,
-      event(client.id, server.id, "DHCP", "DHCPDISCOVER broadcast sent by client.", "forwarded", now, ["Layer 7", "Layer 3", "Layer 2"], { sourceId: client.id, targetId: server.id, packetId }),
-      event(server.id, client.id, "DHCP", `DHCPOFFER ${leasedIp} prepared from pool ${pool.name}.`, "forwarded", now + 1, ["Layer 7", "Layer 3", "Layer 2"], { sourceId: client.id, targetId: server.id, packetId }),
-      event(client.id, server.id, "DHCP", `DHCPREQUEST ${leasedIp} sent to ${server.label}.`, "forwarded", now + 2, ["Layer 7", "Layer 3", "Layer 2"], { sourceId: client.id, targetId: server.id, packetId }),
-      event(server.id, client.id, "DHCP", `DHCPACK assigned ${leasedIp}.`, "delivered", now + 3, ["Layer 7", "Layer 3", "Layer 2"], { sourceId: client.id, targetId: server.id, packetId })
+      event(client.id, server.id, "DHCP", "클라이언트가 DHCPDISCOVER 브로드캐스트를 보냈습니다.", "forwarded", now, ["Layer 7", "Layer 3", "Layer 2"], { sourceId: client.id, targetId: server.id, packetId }),
+      event(server.id, client.id, "DHCP", `${pool.name} 풀에서 DHCPOFFER ${leasedIp}을(를) 준비했습니다.`, "forwarded", now + 1, ["Layer 7", "Layer 3", "Layer 2"], { sourceId: client.id, targetId: server.id, packetId }),
+      event(client.id, server.id, "DHCP", `${server.label}에 DHCPREQUEST ${leasedIp}을(를) 보냈습니다.`, "forwarded", now + 2, ["Layer 7", "Layer 3", "Layer 2"], { sourceId: client.id, targetId: server.id, packetId }),
+      event(server.id, client.id, "DHCP", `DHCPACK으로 ${leasedIp}을(를) 할당했습니다.`, "delivered", now + 3, ["Layer 7", "Layer 3", "Layer 2"], { sourceId: client.id, targetId: server.id, packetId })
     ]
   };
-  return { project: nextProject, message: `DHCP assigned ${leasedIp}.` };
+  return { project: nextProject, message: `DHCP가 ${leasedIp}을(를) 할당했습니다.` };
 }
 
 interface RouteResult {
@@ -90,8 +90,8 @@ function resolveRoute(project: NetworkProject, source: NetworkDevice, sourcePort
   if (ipInSubnet(sourcePort.ipAddress, targetPort.ipAddress, sourcePort.subnetMask)) {
     const l2 = hasLayer2Path(project, source.id, target.id, portVlan(sourcePort));
     return l2.reachable
-      ? { reachable: true, message: "Direct subnet path resolved.", hops: l2.hops, routed: false }
-      : { reachable: false, message: `No layer-2 path on VLAN ${portVlan(sourcePort)}.`, hops: l2.hops, routed: false };
+      ? { reachable: true, message: "같은 서브넷 경로를 확인했습니다.", hops: l2.hops, routed: false }
+      : { reachable: false, message: `VLAN ${portVlan(sourcePort)}에서 Layer 2 경로가 없습니다.`, hops: l2.hops, routed: false };
   }
 
   if (isRoutingDevice(source)) {
@@ -99,17 +99,17 @@ function resolveRoute(project: NetworkProject, source: NetworkDevice, sourcePort
   }
 
   if (!sourcePort.gateway) {
-    return { reachable: false, message: "Source has no default gateway.", hops: [source.id], routed: false };
+    return { reachable: false, message: "출발지에 기본 게이트웨이가 없습니다.", hops: [source.id], routed: false };
   }
 
   const gateway = findInterfaceByIp(project, sourcePort.gateway);
   if (!gateway) {
-    return { reachable: false, message: `Default gateway ${sourcePort.gateway} was not found.`, hops: [source.id], routed: false };
+    return { reachable: false, message: `기본 게이트웨이 ${sourcePort.gateway}을(를) 찾을 수 없습니다.`, hops: [source.id], routed: false };
   }
 
   const gatewayPath = hasLayer2Path(project, source.id, gateway.device.id, portVlan(sourcePort));
   if (!gatewayPath.reachable) {
-    return { reachable: false, message: `Cannot reach default gateway ${sourcePort.gateway}.`, hops: gatewayPath.hops, routed: false };
+    return { reachable: false, message: `기본 게이트웨이 ${sourcePort.gateway}에 도달할 수 없습니다.`, hops: gatewayPath.hops, routed: false };
   }
 
   const routed = routeFromDevice(project, gateway.device, target, targetPort, new Set([gateway.device.id]), gatewayPath.hops);
@@ -120,7 +120,7 @@ function routeFromDevice(project: NetworkProject, router: NetworkDevice, target:
   for (const port of router.ports.filter((item) => item.adminUp && item.ipAddress && item.subnetMask)) {
     if (ipInSubnet(targetPort.ipAddress, port.ipAddress, port.subnetMask)) {
       const path = hasLayer2Path(project, router.id, target.id, portVlan(port));
-      if (path.reachable) return { reachable: true, message: "Route delivered through connected network.", hops: mergeHops(hops, path.hops), routed: true };
+      if (path.reachable) return { reachable: true, message: "연결된 네트워크를 통해 라우팅되었습니다.", hops: mergeHops(hops, path.hops), routed: true };
     }
   }
 
@@ -136,7 +136,7 @@ function routeFromDevice(project: NetworkProject, router: NetworkDevice, target:
     return routeFromDevice(project, nextHop.device, target, targetPort, seenRouters, mergeHops(hops, nextHopPath.hops));
   }
 
-  return { reachable: false, message: `No route from ${router.label} to ${targetPort.ipAddress}.`, hops, routed: true };
+  return { reachable: false, message: `${router.label}에서 ${targetPort.ipAddress}(으)로 가는 라우트가 없습니다.`, hops, routed: true };
 }
 
 function hasLayer2Path(project: NetworkProject, sourceId: string, targetId: string, vlan: number): { reachable: boolean; hops: string[] } {
@@ -207,19 +207,19 @@ function appendRouteEvents(project: NetworkProject, route: RouteResult, source: 
     };
   }
   const events: SimulationEvent[] = [
-    event(source.id, target.id, "ARP", `Resolved ${targetPort.ipAddress} to ${targetPort.macAddress}.`, "delivered", now, ["Layer 2", "Layer 3"], { sourceId: source.id, targetId: target.id, packetId })
+    event(source.id, target.id, "ARP", `${targetPort.ipAddress}을(를) ${targetPort.macAddress}(으)로 확인했습니다.`, "delivered", now, ["Layer 2", "Layer 3"], { sourceId: source.id, targetId: target.id, packetId })
   ];
   for (let index = 1; index < route.hops.length - 1; index += 1) {
     const hop = project.devices.find((device) => device.id === route.hops[index]);
     if (hop?.kind === "hub") {
-      events.push(event(route.hops[index - 1], route.hops[index], "HUB", `${hop.label} flooded the frame out active ports.`, "forwarded", now + index, ["Layer 1", "Layer 2"], { sourceId: source.id, targetId: target.id, packetId }));
+      events.push(event(route.hops[index - 1], route.hops[index], "HUB", `${hop.label}이(가) 활성 포트로 프레임을 플러딩했습니다.`, "forwarded", now + index, ["Layer 1", "Layer 2"], { sourceId: source.id, targetId: target.id, packetId }));
     } else if (hop?.kind === "switch" || hop?.kind === "wireless") {
-      events.push(event(route.hops[index - 1], route.hops[index], "SWITCH", `${hop.label} forwarded the frame using VLAN/MAC state.`, "forwarded", now + index, ["Layer 2"], { sourceId: source.id, targetId: target.id, packetId }));
+      events.push(event(route.hops[index - 1], route.hops[index], "SWITCH", `${hop.label}이(가) VLAN/MAC 상태로 프레임을 전달했습니다.`, "forwarded", now + index, ["Layer 2"], { sourceId: source.id, targetId: target.id, packetId }));
     } else {
-      events.push(event(route.hops[index - 1], route.hops[index], "ICMP", `Forwarded echo request through ${deviceLabel(project, route.hops[index])}.`, "forwarded", now + index, ["Layer 2", "Layer 3"], { sourceId: source.id, targetId: target.id, packetId }));
+      events.push(event(route.hops[index - 1], route.hops[index], "ICMP", `${deviceLabel(project, route.hops[index])}을(를) 통해 echo 요청을 전달했습니다.`, "forwarded", now + index, ["Layer 2", "Layer 3"], { sourceId: source.id, targetId: target.id, packetId }));
     }
   }
-  events.push(event(route.hops.at(-2) ?? source.id, target.id, "ICMP", `Echo reply received from ${target.label}.`, "delivered", now + route.hops.length, ["Layer 2", "Layer 3"], { sourceId: source.id, targetId: target.id, packetId }));
+  events.push(event(route.hops.at(-2) ?? source.id, target.id, "ICMP", `${target.label}에서 echo 응답을 받았습니다.`, "delivered", now + route.hops.length, ["Layer 2", "Layer 3"], { sourceId: source.id, targetId: target.id, packetId }));
   return { ...project, simulationEvents: [...project.simulationEvents, ...events] };
 }
 
@@ -249,7 +249,7 @@ function applyFirewallRules(project: NetworkProject, hops: string[], sourceIp: s
     if (!rule) continue;
     matchedDeviceId = firewall.id;
     matchedRuleId = rule.id;
-    if (rule.action === "deny") blocked = `${firewall.label} denied ICMP from ${sourceIp} to ${targetIp}.`;
+    if (rule.action === "deny") blocked = `${firewall.label}이(가) ${sourceIp}에서 ${targetIp}(으)로 가는 ICMP를 차단했습니다.`;
     break;
   }
   if (!matchedRuleId && natHits.size === 0) return { project, allowed: true, message: "" };

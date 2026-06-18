@@ -114,12 +114,19 @@ export interface NatRule {
 export interface DeviceConfig {
   hostname: string;
   startupConfig: string[];
+  enableSecret?: string;
+  enablePassword?: string;
+  motdBanner?: string;
+  domainLookup?: boolean;
+  defaultGateway?: string;
   staticRoutes: StaticRoute[];
   vlans: Array<{ id: number; name: string }>;
   dhcpPools: DhcpPool[];
   dnsRecords: DnsRecord[];
   accessRules: AccessRule[];
   natRules: NatRule[];
+  lineConfigs?: Array<{ id: string; kind: "console" | "vty"; range: string; password: string; login: boolean; transportInput: string; execTimeout: string; loggingSynchronous: boolean }>;
+  routingProtocols?: Array<{ id: string; protocol: "rip" | "ospf" | "eigrp"; processId?: string; networks: string[]; version?: string; autoSummary: boolean; passiveInterfaces: string[]; redistributeStatic: boolean }>;
   services: {
     http: boolean;
     dhcp: boolean;

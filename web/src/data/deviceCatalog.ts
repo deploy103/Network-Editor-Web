@@ -8,7 +8,7 @@ export const moduleCatalog: ModuleSpec[] = [
   {
     id: "HWIC-2T",
     label: "HWIC-2T",
-    description: "Two serial WAN interfaces.",
+    description: "Serial WAN 인터페이스 2개.",
     ports: [
       { name: "Serial0/0/0", kind: "serial", mode: "routed", ipCapable: true },
       { name: "Serial0/0/1", kind: "serial", mode: "routed", ipCapable: true }
@@ -17,19 +17,19 @@ export const moduleCatalog: ModuleSpec[] = [
   {
     id: "HWIC-4ESW",
     label: "HWIC-4ESW",
-    description: "Four switched FastEthernet access ports.",
+    description: "FastEthernet access 포트 4개.",
     ports: Array.from({ length: 4 }, (_, index) => ({ name: `FastEthernet0/${index + 2}`, kind: "fast-ethernet" as const, mode: "access" as const, vlan: 1 }))
   },
   {
     id: "HWIC-1SFP",
     label: "HWIC-1SFP",
-    description: "One fiber SFP routed uplink.",
+    description: "Fiber SFP routed 업링크 1개.",
     ports: [{ name: "GigabitEthernet0/2", kind: "fiber", mode: "routed", ipCapable: true }]
   },
   {
     id: "PT-HOST-NM-1W",
     label: "PT-HOST-NM-1W",
-    description: "Wireless host adapter.",
+    description: "무선 호스트 어댑터.",
     ports: [{ name: "Wireless0", kind: "wireless", mode: "access", vlan: 1, ipCapable: true }]
   }
 ];
@@ -47,17 +47,17 @@ function fiber(count: number): PortTemplate[] {
 }
 
 export const deviceCatalog: DeviceModel[] = [
-  router("router-1841", "Router 1841", "ISR router with FastEthernet and HWIC slots.", "fast"),
-  router("router-1941", "Router 1941", "Gigabit ISR router with WAN expansion.", "gigabit"),
-  router("router-2811", "Router 2811", "Modular router for serial, switching, and WAN labs.", "fast", 3),
-  router("router-2901", "Router 2901", "Gigabit modular router with four slots.", "gigabit", 4),
-  router("router-2911", "Router 2911", "Larger ISR router for multi-WAN topologies.", "gigabit", 4),
+  router("router-1841", "Router 1841", "FastEthernet와 HWIC 슬롯을 갖춘 ISR 라우터.", "fast"),
+  router("router-1941", "Router 1941", "WAN 확장을 지원하는 Gigabit ISR 라우터.", "gigabit"),
+  router("router-2811", "Router 2811", "Serial, switching, WAN 랩용 모듈형 라우터.", "fast", 3),
+  router("router-2901", "Router 2901", "슬롯 4개를 갖춘 Gigabit 모듈형 라우터.", "gigabit", 4),
+  router("router-2911", "Router 2911", "multi-WAN 토폴로지용 대형 ISR 라우터.", "gigabit", 4),
   {
     id: "switch-2960",
     kind: "switch",
     model: "Switch 2960-24TT",
     labelPrefix: "Switch",
-    description: "Layer 2 access switch.",
+    description: "Layer 2 access 스위치.",
     tabs: [...routedTabs],
     ports: [...fastEthernet(24), ...gigabit(2), ...fiber(2), { name: "Console0", kind: "console", mode: "access" }],
     modules: []
@@ -67,7 +67,7 @@ export const deviceCatalog: DeviceModel[] = [
     kind: "switch",
     model: "Multilayer Switch 3560",
     labelPrefix: "Switch",
-    description: "Multilayer switch with SVI routing.",
+    description: "SVI 라우팅을 지원하는 멀티레이어 스위치.",
     tabs: [...routedTabs],
     ports: [...fastEthernet(24), ...gigabit(2), ...fiber(2), { name: "Vlan1", kind: "ethernet", mode: "routed", ipCapable: true }, { name: "Console0", kind: "console", mode: "access" }],
     modules: []
@@ -77,7 +77,7 @@ export const deviceCatalog: DeviceModel[] = [
     kind: "firewall",
     model: "ASA 5505",
     labelPrefix: "Firewall",
-    description: "Firewall with ACL and NAT.",
+    description: "ACL과 NAT를 지원하는 방화벽.",
     tabs: [...routedTabs],
     ports: [...fastEthernet(8, "Ethernet0/"), { name: "Vlan1", kind: "ethernet", mode: "routed", vlan: 1, ipCapable: true }, { name: "Vlan2", kind: "ethernet", mode: "routed", vlan: 2, ipCapable: true }, { name: "Console0", kind: "console", mode: "access" }],
     modules: []
@@ -87,7 +87,7 @@ export const deviceCatalog: DeviceModel[] = [
     kind: "pc",
     model: "PC-PT",
     labelPrefix: "PC",
-    description: "Desktop host with command prompt and RS232.",
+    description: "명령 프롬프트와 RS232를 가진 데스크톱 호스트.",
     tabs: [...hostTabs],
     ports: [{ name: "FastEthernet0", kind: "fast-ethernet", mode: "access", vlan: 1, ipCapable: true }, { name: "RS232", kind: "console", mode: "access" }],
     modules: [{ id: "slot0", label: "Host adapter", accepts: ["PT-HOST-NM-1W"] }]
@@ -97,7 +97,7 @@ export const deviceCatalog: DeviceModel[] = [
     kind: "pc",
     model: "Laptop-PT",
     labelPrefix: "Laptop",
-    description: "Portable host with Ethernet, wireless, and command prompt.",
+    description: "Ethernet, 무선, 명령 프롬프트를 갖춘 휴대용 호스트.",
     tabs: [...hostTabs],
     ports: [{ name: "FastEthernet0", kind: "fast-ethernet", mode: "access", vlan: 1, ipCapable: true }, { name: "Wireless0", kind: "wireless", mode: "access", vlan: 1, ipCapable: true }, { name: "RS232", kind: "console", mode: "access" }],
     modules: []
@@ -107,7 +107,7 @@ export const deviceCatalog: DeviceModel[] = [
     kind: "server",
     model: "Server-PT",
     labelPrefix: "Server",
-    description: "Server with HTTP, DHCP, DNS, TFTP service surfaces.",
+    description: "HTTP, DHCP, DNS, TFTP 서비스를 제공하는 서버.",
     tabs: ["physical", "config", "desktop", "services"],
     ports: [{ name: "FastEthernet0", kind: "fast-ethernet", mode: "access", vlan: 1, ipCapable: true }],
     modules: []
@@ -117,7 +117,7 @@ export const deviceCatalog: DeviceModel[] = [
     kind: "wireless",
     model: "Access Point-PT",
     labelPrefix: "AP",
-    description: "Ethernet to wireless bridge.",
+    description: "Ethernet과 무선을 연결하는 브리지.",
     tabs: ["physical", "config"],
     ports: [{ name: "FastEthernet0", kind: "fast-ethernet", mode: "access", vlan: 1 }, { name: "Wireless0", kind: "wireless", mode: "access", vlan: 1 }],
     modules: []
@@ -127,7 +127,7 @@ export const deviceCatalog: DeviceModel[] = [
     kind: "wireless",
     model: "Wireless Router WRT300N",
     labelPrefix: "WRouter",
-    description: "Wireless router with Internet uplink and four LAN switch ports.",
+    description: "Internet 업링크와 LAN switch 포트 4개를 가진 무선 라우터.",
     tabs: ["physical", "config", "services"],
     ports: [
       { name: "Internet", kind: "gigabit-ethernet", mode: "routed", vlan: 1, ipCapable: true },
@@ -141,7 +141,7 @@ export const deviceCatalog: DeviceModel[] = [
     kind: "hub",
     model: "Hub-PT",
     labelPrefix: "Hub",
-    description: "Repeater that floods frames out active ports.",
+    description: "활성 포트로 프레임을 플러딩하는 리피터.",
     tabs: ["physical", "config"],
     ports: fastEthernet(8, "Port"),
     modules: []
@@ -149,14 +149,14 @@ export const deviceCatalog: DeviceModel[] = [
 ];
 
 export const cableCatalog: Array<{ type: CableType; label: string }> = [
-  { type: "auto", label: "Auto" },
-  { type: "console", label: "Console" },
-  { type: "copper-straight", label: "Copper Straight" },
-  { type: "copper-cross", label: "Copper Cross" },
-  { type: "fiber", label: "Fiber" },
+  { type: "auto", label: "자동" },
+  { type: "console", label: "콘솔" },
+  { type: "copper-straight", label: "구리 직결" },
+  { type: "copper-cross", label: "구리 크로스" },
+  { type: "fiber", label: "광케이블" },
   { type: "serial-dce", label: "Serial DCE" },
   { type: "serial-dte", label: "Serial DTE" },
-  { type: "wireless", label: "Wireless" }
+  { type: "wireless", label: "무선" }
 ];
 
 function router(id: string, model: string, description: string, portSet: "fast" | "gigabit", slots = 2): DeviceModel {
@@ -235,6 +235,9 @@ export function defaultConfig(hostname: string, kind: DeviceKind): DeviceConfig 
   return {
     hostname,
     startupConfig: [],
+    domainLookup: true,
+    lineConfigs: [],
+    routingProtocols: [],
     staticRoutes: [],
     vlans: [{ id: 1, name: "default" }],
     dhcpPools: [],
@@ -258,7 +261,7 @@ export function canPortUseCable(port: NetworkPort, cable: CableType): boolean {
 }
 
 export function displayKind(kind: DeviceKind): string {
-  return ({ router: "Router", switch: "Switch", firewall: "Firewall", pc: "PC", server: "Server", wireless: "Wireless", hub: "Hub" })[kind];
+  return ({ router: "라우터", switch: "스위치", firewall: "방화벽", pc: "PC", server: "서버", wireless: "무선", hub: "허브" })[kind];
 }
 
 export function getDeviceModel(modelId: string): DeviceModel {
@@ -275,28 +278,28 @@ export function getModuleSpec(moduleId: string): ModuleSpec | undefined {
 
 export function installModule(device: NetworkDevice, slotId: string, moduleId: string): { ok: boolean; message: string; device: NetworkDevice } {
   if (device.powerOn) {
-    return { ok: false, message: "Power off the device before installing a module.", device };
+    return { ok: false, message: "모듈을 설치하기 전에 장비 전원을 끄세요.", device };
   }
   const model = getDeviceModel(device.modelId);
   const slot = model.modules.find((candidate) => candidate.id === slotId);
   if (!slot) {
-    return { ok: false, message: "This device does not have that module slot.", device };
+    return { ok: false, message: "이 장비에는 해당 모듈 슬롯이 없습니다.", device };
   }
   if (device.modules.some((module) => module.slotId === slotId)) {
-    return { ok: false, message: "Remove the installed module before adding another one.", device };
+    return { ok: false, message: "다른 모듈을 추가하기 전에 설치된 모듈을 제거하세요.", device };
   }
   if (!slot.accepts.includes(moduleId)) {
-    return { ok: false, message: "That module is not supported in this slot.", device };
+    return { ok: false, message: "이 슬롯에서는 해당 모듈을 지원하지 않습니다.", device };
   }
   const spec = getModuleSpec(moduleId);
   if (!spec) {
-    return { ok: false, message: "Unknown module.", device };
+    return { ok: false, message: "알 수 없는 모듈입니다.", device };
   }
   const existingNames = new Set(device.ports.map((port) => port.name));
   const nextPorts = spec.ports.map((port, index) => createPort(port, device.ports.length + index, { slotId, moduleId, existingNames }));
   return {
     ok: true,
-    message: `${spec.label} installed in ${slot.label}.`,
+    message: `${slot.label}에 ${spec.label} 모듈을 설치했습니다.`,
     device: {
       ...device,
       modules: [...device.modules, { slotId, moduleId }],
@@ -307,21 +310,21 @@ export function installModule(device: NetworkDevice, slotId: string, moduleId: s
 
 export function removeModule(device: NetworkDevice, slotId: string): { ok: boolean; message: string; device: NetworkDevice } {
   if (device.powerOn) {
-    return { ok: false, message: "Power off the device before removing a module.", device };
+    return { ok: false, message: "모듈을 제거하기 전에 장비 전원을 끄세요.", device };
   }
   const installed = device.modules.find((module) => module.slotId === slotId);
   if (!installed) {
-    return { ok: false, message: "No module is installed in that slot.", device };
+    return { ok: false, message: "해당 슬롯에 설치된 모듈이 없습니다.", device };
   }
   const modulePorts = device.ports.filter((port) => port.moduleSlotId === slotId);
   const connected = modulePorts.find((port) => port.linkId);
   if (connected) {
-    return { ok: false, message: `Disconnect ${connected.name} before removing the module.`, device };
+    return { ok: false, message: `모듈을 제거하기 전에 ${connected.name} 연결을 해제하세요.`, device };
   }
   const removedPortNames = new Set(modulePorts.map((port) => port.name));
   return {
     ok: true,
-    message: `${installed.moduleId} removed from ${slotId}.`,
+    message: `${slotId}에서 ${installed.moduleId} 모듈을 제거했습니다.`,
     device: {
       ...device,
       modules: device.modules.filter((module) => module.slotId !== slotId),

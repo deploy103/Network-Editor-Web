@@ -67,7 +67,7 @@ export function createBlankProject(ownerId: string): NetworkProject {
   return {
     id: createId("project"),
     ownerId,
-    name: "New Network",
+    name: "새 네트워크",
     devices: [],
     links: [],
     simulationEvents: [],
@@ -83,7 +83,7 @@ export function loadProjects(ownerId: string): NetworkProject[] {
 }
 
 export function saveProject(project: NetworkProject): NetworkProject {
-  const next = normalizeProject({ ...project, name: clean(project.name || "Untitled Network", 100), updatedAt: nowIso() });
+  const next = normalizeProject({ ...project, name: clean(project.name || "제목 없는 네트워크", 100), updatedAt: nowIso() });
   const projects = loadAllProjects();
   const exists = projects.some((item) => item.id === next.id);
   const stored = exists ? projects.map((item) => (item.id === next.id ? next : item)) : [...projects, next];
@@ -155,7 +155,7 @@ function normalizeImportedProject(project: NetworkProject, ownerId: string): Net
     ...project,
     id: createId("project"),
     ownerId,
-    name: clean(project.name || "Imported Network", 100),
+    name: clean(project.name || "가져온 네트워크", 100),
     links,
     devices: project.devices.map((device) => ({
       ...device,
