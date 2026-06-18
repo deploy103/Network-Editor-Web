@@ -186,7 +186,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
             : session.mode === "dhcp"
               ? ["network ", "default-router ", "dns-server ", "start-ip ", "max-leases ", "shutdown", "no shutdown", "end", "exit", "help"]
               : session.mode === "line"
-                ? ["password ", "login", "no login", "transport input all", "transport input ssh", "transport input telnet", "transport input none", "exec-timeout 10 0", "logging synchronous", "no logging synchronous", "end", "exit", "help"]
+                ? ["password ", "login", "login local", "no login", "transport input all", "transport input ssh", "transport input telnet", "transport input none", "exec-timeout 10 0", "logging synchronous", "no logging synchronous", "end", "exit", "help"]
                 : session.mode === "router"
                   ? ["network ", "version 2", "auto-summary", "no auto-summary", "passive-interface ", "no passive-interface ", "redistribute static", "no redistribute static", "end", "exit", "help"]
                   : session.aclType === "standard"
@@ -910,8 +910,9 @@ function applyStartupDhcpLine(device: NetworkDevice, poolId: string, command: st
 
 function applyStartupLineLine(device: NetworkDevice, lineId: string, command: string, lower: string): NetworkDevice {
   if (lower.startsWith("password ")) return updateLineConfig(device, lineId, { password: command.slice("password ".length).trim() });
+  if (lower === "login local") return updateLineConfig(device, lineId, { login: true, loginLocal: true });
   if (lower === "login") return updateLineConfig(device, lineId, { login: true });
-  if (lower === "no login") return updateLineConfig(device, lineId, { login: false });
+  if (lower === "no login") return updateLineConfig(device, lineId, { login: false, loginLocal: false });
   if (lower.startsWith("transport input ")) return updateLineConfig(device, lineId, { transportInput: command.slice("transport input ".length).trim() || "all" });
   if (lower.startsWith("exec-timeout ")) return updateLineConfig(device, lineId, { execTimeout: command.slice("exec-timeout ".length).trim() || "10 0" });
   if (lower === "logging synchronous") return updateLineConfig(device, lineId, { loggingSynchronous: true });
@@ -1260,8 +1261,9 @@ function lineCommand(device: NetworkDevice, session: CliSession, command: string
   const line = lineConfigs(device).find((item) => item.id === session.lineId);
   if (!line) return result(device, { mode: "global" }, "% Line context is missing.");
   if (lower.startsWith("password ")) return result(updateLineConfig(device, line.id, { password: command.slice("password ".length).trim() }), session, "");
+  if (lower === "login local") return result(updateLineConfig(device, line.id, { login: true, loginLocal: true }), session, "");
   if (lower === "login") return result(updateLineConfig(device, line.id, { login: true }), session, "");
-  if (lower === "no login") return result(updateLineConfig(device, line.id, { login: false }), session, "");
+  if (lower === "no login") return result(updateLineConfig(device, line.id, { login: false, loginLocal: false }), session, "");
   if (lower.startsWith("transport input ")) return result(updateLineConfig(device, line.id, { transportInput: command.slice("transport input ".length).trim() || "all" }), session, "");
   if (lower.startsWith("exec-timeout ")) return result(updateLineConfig(device, line.id, { execTimeout: command.slice("exec-timeout ".length).trim() || "10 0" }), session, "");
   if (lower === "logging synchronous") return result(updateLineConfig(device, line.id, { loggingSynchronous: true }), session, "");
@@ -1470,7 +1472,7 @@ function lineConfig(line: LineConfig): string[] {
   return [
     `line ${line.kind} ${line.range}`,
     ...(line.password ? [` password ${line.password}`] : []),
-    line.login ? " login" : " no login",
+    line.loginLocal ? " login local" : line.login ? " login" : " no login",
     ...(line.transportInput ? [` transport input ${line.transportInput}`] : []),
     ...(line.execTimeout ? [` exec-timeout ${line.execTimeout}`] : []),
     line.loggingSynchronous ? " logging synchronous" : " no logging synchronous"
@@ -1606,7 +1608,7 @@ function lineStatus(device: NetworkDevice): string {
   return [
     "Tty Typ     Tx/Rx     A Modem  Roty AccO AccI  Uses Noise Overruns Int",
     "0   CTY     -/-       - -      -    -    -     0    0     0/0      -",
-    ...lines.map((line, index) => `${String(index + 1).padEnd(3)} ${line.kind.toUpperCase().padEnd(7)} ${line.range.padEnd(9)} - ${line.login ? "login" : "nologin"} transport ${line.transportInput || "-"}`)
+    ...lines.map((line, index) => `${String(index + 1).padEnd(3)} ${line.kind.toUpperCase().padEnd(7)} ${line.range.padEnd(9)} - ${line.loginLocal ? "login local" : line.login ? "login" : "nologin"} transport ${line.transportInput || "-"}`)
   ].join("\n");
 }
 
@@ -1704,7 +1706,7 @@ function ipProtocols(device: NetworkDevice): string {
 }
 
 function ipSshStatus(device: NetworkDevice): string {
-  const enabled = Boolean(device.config.domainName && device.config.rsaKeyGenerated && localUsers(device).length && lineConfigs(device).some((line) => line.transportInput.includes("ssh") || line.transportInput.includes("all")));
+  const enabled = Boolean(device.config.domainName && device.config.rsaKeyGenerated && localUsers(device).length && lineConfigs(device).some((line) => line.loginLocal && (line.transportInput.includes("ssh") || line.transportInput.includes("all"))));
   return [
     `SSH ${enabled ? "Enabled" : "Disabled"} - version ${device.config.sshVersion ?? "2"}.0`,
     `Authentication methods: ${localUsers(device).length ? "publickey,keyboard-interactive,password" : "none configured"}`,
@@ -1843,7 +1845,7 @@ function help(mode: CliMode): string {
   if (mode === "interface") return "description <text>, ip address <ip> <mask>, ip nat inside|outside, ip access-group <list> in|out, switchport mode access|trunk, switchport access vlan <id>, switchport trunk allowed vlan <list>, clock rate <value>, shutdown, no shutdown, exit";
   if (mode === "vlan") return "name <vlan-name>, exit, end";
   if (mode === "dhcp") return "network <network> <mask>, default-router <ip>, dns-server <ip>, start-ip <ip>, max-leases <n>, shutdown, no shutdown, exit";
-  if (mode === "line") return "password <value>, login, no login, transport input <all|ssh|telnet|none>, exec-timeout <min> <sec>, logging synchronous, exit";
+  if (mode === "line") return "password <value>, login, login local, no login, transport input <all|ssh|telnet|none>, exec-timeout <min> <sec>, logging synchronous, exit";
   if (mode === "router") return "network <network> [wildcard-mask], version <n>, auto-summary, no auto-summary, passive-interface <name>, redistribute static, exit";
   if (mode === "acl") return "permit|deny <protocol> <source> <destination>, permit|deny <source> [wildcard], no <sequence>, exit";
   return "enable, configure terminal, show run, show version, show interfaces, show interfaces description, show interfaces switchport, show interfaces trunk, show ip interface, show ip interface brief, show interfaces status, show vlan brief, show ip route, show ip route summary, show ip protocols, show ip ospf neighbor, show ip eigrp neighbors, show ip rip database, show ip dhcp pool, show hosts, show access-list, show nat, show cdp neighbors, show arp, show ip dhcp binding, clear ..., write memory, reload, write erase";
@@ -2217,7 +2219,7 @@ function parseRoutingTarget(command: string): { protocol: RoutingProtocol["proto
 }
 
 function defaultLineConfig(kind: "console" | "vty", range: string): LineConfig {
-  return { id: createId("line"), kind, range, password: "", login: false, transportInput: kind === "vty" ? "all" : "", execTimeout: "10 0", loggingSynchronous: false };
+  return { id: createId("line"), kind, range, password: "", login: false, loginLocal: false, transportInput: kind === "vty" ? "all" : "", execTimeout: "10 0", loggingSynchronous: false };
 }
 
 function defaultRoutingProtocol(protocol: RoutingProtocol["protocol"], processId?: string): RoutingProtocol {
