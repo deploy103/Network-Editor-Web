@@ -177,7 +177,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
   const base = session.mode === "exec"
     ? ["enable", "show version", "show clock", "show privilege", "show history", "show interfaces", "show ip interface brief", "show ip route", "show route", "show cdp neighbors", "show arp", "ping ", "traceroute ", "terminal length 0", "help"]
     : session.mode === "privileged"
-      ? ["disable", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show clock", "show privilege", "show history", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show spanning-tree", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip ssh", "show ip route", "show ip route summary", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show mac address-table", "show mac address-table dynamic", "show mac address-table interface ", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show ip access-lists", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
+      ? ["disable", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show clock", "show privilege", "show history", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show spanning-tree", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip ssh", "show ip route", "show ip route summary", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show mac address-table", "show mac address-table dynamic", "show mac address-table interface ", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show ip dhcp server statistics", "show hosts", "show access-list", "show ip access-lists", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
         ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "username admin secret cisco", "no username ", "interface ", "int ", "interface range fa0/1 - 2", "default interface ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-name lab.local", "no ip domain-name", "ip ssh version 2", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "crypto key zeroize rsa", "logging host 192.168.1.100", "logging trap warnings", "logging buffered", "no logging console", "ip dhcp excluded-address 192.168.1.1 192.168.1.20", "ip dhcp pool ", "no ip dhcp excluded-address ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service password-encryption", "no service password-encryption", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
@@ -461,6 +461,7 @@ function expandShowCommand(rest: string[]): string {
     }
     if (isAbbrev(second, "dhcp") && isAbbrev(lowerRest[2], "binding")) return "show ip dhcp binding";
     if (isAbbrev(second, "dhcp") && isAbbrev(lowerRest[2], "pool")) return "show ip dhcp pool";
+    if (isAbbrev(second, "dhcp") && isAbbrev(lowerRest[2], "server") && isAbbrev(lowerRest[3], "statistics", 3)) return "show ip dhcp server statistics";
     if (isAbbrev(second, "access-lists", 3) || isAbbrev(second, "access-list", 3)) return ["show access-list", ...rest.slice(2)].join(" ");
     if (isAbbrev(second, "ospf", 2)) return expandShowIpOspf(rest.slice(2));
     if (isAbbrev(second, "eigrp", 2)) return expandShowIpEigrp(rest.slice(2));
@@ -1451,6 +1452,7 @@ function showCommand(device: NetworkDevice, lower: string): string {
   if (lower === "show ip nat statistics") return natStatistics(device);
   if (lower === "show ip dhcp binding") return device.runtime.dhcpLeases.map((lease) => `${lease.ipAddress.padEnd(16)}${lease.macAddress.padEnd(20)}${lease.deviceId}`).join("\n") || "No DHCP bindings.";
   if (lower === "show ip dhcp pool") return device.config.dhcpPools.map((pool) => [`풀 ${pool.name}`, `  네트워크 ${pool.network} ${pool.mask}`, `  기본 라우터 ${pool.defaultGateway}`, `  DNS 서버 ${pool.dnsServer}`, `  시작 범위 ${pool.startIp}, 최대 임대 ${pool.maxLeases}`, `  상태 ${pool.enabled ? "활성" : "비활성"}`].join("\n")).join("\n\n") || "DHCP 풀이 없습니다.";
+  if (lower === "show ip dhcp server statistics") return dhcpServerStatistics(device);
   if (lower === "show hosts") return device.config.dnsRecords.map((record) => `${record.name.padEnd(32)}${record.value}`).join("\n") || "호스트 레코드가 없습니다.";
   if (lower === "show access-list" || lower === "show access-lists") return accessListStatus(device);
   if (lower.startsWith("show access-list ")) return accessListStatus(device, lower.slice("show access-list ".length).trim());
@@ -1508,6 +1510,41 @@ function loggingStatus(device: NetworkDevice): string {
     `    Trap logging: level ${logging.trap}`,
     `    Logging to hosts: ${logging.hosts.join(", ") || "none"}`,
     ...(device.runtime.logs.length ? device.runtime.logs.map((log) => `${new Date(log.createdAt).toLocaleString("ko-KR", { hour12: false })} ${log.level.toUpperCase()}: ${log.message}`) : ["No logging messages."])
+  ].join("\n");
+}
+
+function dhcpServerStatistics(device: NetworkDevice): string {
+  const activeLeases = device.runtime.dhcpLeases.filter((lease) => lease.expiresAt > Date.now());
+  const configuredPools = device.config.dhcpPools.length;
+  const activePools = device.config.dhcpPools.filter((pool) => pool.enabled).length;
+  const excludedRanges = dhcpExcludedRanges(device).length;
+  return [
+    "Memory usage         0",
+    `Address pools        ${configuredPools}`,
+    "Database agents      0",
+    `Automatic bindings   ${activeLeases.length}`,
+    "Manual bindings      0",
+    "Expired bindings     0",
+    "Malformed messages   0",
+    "Secure arp entries   0",
+    "",
+    "Message              Received",
+    `BOOTREQUEST          ${activeLeases.length}`,
+    `DHCPDISCOVER         ${activeLeases.length}`,
+    `DHCPREQUEST          ${activeLeases.length}`,
+    "DHCPDECLINE          0",
+    "DHCPRELEASE          0",
+    "DHCPINFORM           0",
+    "",
+    "Message              Sent",
+    `BOOTREPLY            ${activeLeases.length}`,
+    `DHCPOFFER            ${activeLeases.length}`,
+    `DHCPACK              ${activeLeases.length}`,
+    "DHCPNAK              0",
+    "",
+    `DHCP service         ${device.config.services.dhcp ? "enabled" : "disabled"}`,
+    `Active pools         ${activePools}`,
+    `Excluded ranges      ${excludedRanges}`
   ].join("\n");
 }
 
