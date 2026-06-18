@@ -10,6 +10,7 @@
     "dev": "npm run dev --workspace web",
     "build": "npm run build --workspace web",
     "preview": "npm run preview --workspace web",
+    "smoke:cli": "bash scripts/smoke-cli.sh",
     "build:rust": "bash scripts/build-wasm.sh",
     "build:go": "cd server-go && go build ./...",
     "check:all": "npm run build && npm run build:rust && npm run build:go"
