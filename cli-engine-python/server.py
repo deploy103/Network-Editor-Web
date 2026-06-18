@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from ios_engine import prompt, run_cli_command
+from ios_engine import cli_completions, prompt, run_cli_command
 
 
 HOST = os.getenv("CLI_ENGINE_HOST", "127.0.0.1")
@@ -51,13 +51,18 @@ class Handler(BaseHTTPRequestHandler):
         self.write_json(200, {"status": "ok", "backend": BACKEND, "pythonIos": True, "vtysh": bool(shutil.which("vtysh"))})
 
     def do_POST(self):
-        if self.path != "/run":
+        if self.path not in ("/run", "/complete", "/prompt"):
             self.write_json(404, {"error": "not found"})
             return
         length = min(int(self.headers.get("Content-Length", "0")), 5_000_000)
         try:
             payload = json.loads(self.rfile.read(length) or b"{}")
-            self.write_json(200, handle_run(payload))
+            if self.path == "/run":
+                self.write_json(200, handle_run(payload))
+            elif self.path == "/complete":
+                self.write_json(200, {"items": cli_completions(payload.get("device") or {}, payload.get("session") or {"mode": "exec"}, str(payload.get("input") or ""))})
+            else:
+                self.write_json(200, {"prompt": prompt(payload.get("device") or {}, payload.get("session") or {"mode": "exec"})})
         except Exception as exc:
             self.write_json(500, {"error": str(exc)})
 

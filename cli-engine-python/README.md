@@ -32,6 +32,14 @@ to `POST /run` and expects:
 { "device": {}, "session": { "mode": "exec" }, "output": "..." }
 ```
 
+Additional Python-owned terminal APIs:
+
+```text
+POST /complete  -> { "items": ["show ip route", "..."] }
+POST /prompt    -> { "prompt": "Router0#" }
+GET  /health    -> { "status": "ok", "backend": "python" }
+```
+
 The default backend is the built-in Python IOS simulator. Optional FRRouting `vtysh` passthrough is still available with:
 
 ```bash
