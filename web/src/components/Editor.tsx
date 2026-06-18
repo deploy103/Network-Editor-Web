@@ -2545,7 +2545,7 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
       return;
     }
     if (device.powerOn && isCdpNeighborsCommand(normalizedInput)) {
-      setLines((items) => [...items, `${prompt} ${submittedInput}`, showCdpNeighbors(project, device)].filter(Boolean));
+      setLines((items) => [...items, `${prompt} ${submittedInput}`, showCdpNeighbors(project, device, isCdpDetailCommand(normalizedInput))].filter(Boolean));
       setInput("");
       return;
     }
@@ -2685,7 +2685,7 @@ async function runCliPacketCommand(project: NetworkProject, device: NetworkDevic
     : `중단하려면 escape sequence를 입력하세요.\n${resolved.target.label}에 100바이트 ICMP Echo 5개를 보냅니다.\n.....\n성공률 0%\n${result.message}`;
 }
 
-function showCdpNeighbors(project: NetworkProject, device: NetworkDevice): string {
+function showCdpNeighbors(project: NetworkProject, device: NetworkDevice, detail = false): string {
   const rows = project.links
     .filter((link) => link.status === "up" && (link.endpointA.deviceId === device.id || link.endpointB.deviceId === device.id))
     .map((link) => {
@@ -2694,14 +2694,34 @@ function showCdpNeighbors(project: NetworkProject, device: NetworkDevice): strin
       const localPort = endpointLabel(project, localRef.deviceId, localRef.portId);
       const peer = project.devices.find((item) => item.id === peerRef.deviceId);
       const peerPort = endpointLabel(project, peerRef.deviceId, peerRef.portId);
+      if (detail) {
+        return [
+          "-------------------------",
+          `Device ID: ${peer?.label ?? peerRef.deviceId}`,
+          `Entry address(es): ${primaryDeviceIp(peer) || "unassigned"}`,
+          `Platform: ${peer?.model ?? "unknown"}, Capabilities: ${peer?.kind ?? "device"}`,
+          `Interface: ${localPort}, Port ID (outgoing port): ${peerPort}`,
+          "Holdtime: 120 sec",
+          `Version: ${peer?.model ?? "Network Editor Web"}`
+        ].join("\n");
+      }
       return `${(peer?.label ?? peerRef.deviceId).padEnd(18)}${localPort.padEnd(22)}${(peer?.model ?? "").padEnd(22)}${peerPort}`;
     });
-  return rows.length ? ["장비 ID           로컬 인터페이스        플랫폼                포트 ID", ...rows].join("\n") : "CDP 이웃이 없습니다.";
+  if (!rows.length) return "CDP 이웃이 없습니다.";
+  return detail ? rows.join("\n\n") : ["장비 ID           로컬 인터페이스        플랫폼                포트 ID", ...rows].join("\n");
 }
 
 function isCdpNeighborsCommand(value: string): boolean {
   const [verb, feature, target] = value.split(/\s+/);
   return Boolean((verb === "show" || verb === "sho" || verb === "sh") && feature === "cdp" && target && "neighbors".startsWith(target));
+}
+
+function isCdpDetailCommand(value: string): boolean {
+  return value.split(/\s+/)[3]?.startsWith("det") ?? false;
+}
+
+function primaryDeviceIp(device: NetworkDevice | undefined): string {
+  return device?.ports.find((port) => port.ipAddress)?.ipAddress ?? "";
 }
 
 function endpointLabel(project: NetworkProject, deviceId: string, portId: string): string {
