@@ -5,54 +5,13 @@ import shutil
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from ios_engine import prompt, run_cli_command
+
 
 HOST = os.getenv("CLI_ENGINE_HOST", "127.0.0.1")
 PORT = int(os.getenv("CLI_ENGINE_PORT", "9090"))
 TIMEOUT = float(os.getenv("CLI_ENGINE_TIMEOUT", "3"))
-
-
-def prompt(device, session):
-    hostname = device.get("config", {}).get("hostname") or device.get("label") or "Router"
-    mode = session.get("mode", "exec")
-    if mode == "exec":
-        return f"{hostname}>"
-    if mode == "global":
-        return f"{hostname}(config)#"
-    if mode == "interface":
-        return f"{hostname}(config-if)#"
-    if mode == "line":
-        return f"{hostname}(config-line)#"
-    if mode == "router":
-        return f"{hostname}(config-router)#"
-    return f"{hostname}#"
-
-
-def next_session(session, command):
-    mode = session.get("mode", "exec")
-    lower = " ".join(command.strip().lower().split())
-    if not lower:
-        return session
-    if lower in ("enable", "en"):
-        return {"mode": "privileged"}
-    if lower in ("disable",):
-        return {"mode": "exec"}
-    if lower in ("configure terminal", "conf t"):
-        return {"mode": "global"} if mode == "privileged" else session
-    if lower == "end":
-        return {"mode": "privileged"}
-    if lower == "exit":
-        if mode == "global":
-            return {"mode": "privileged"}
-        if mode in ("interface", "line", "router", "vlan", "dhcp"):
-            return {"mode": "global"}
-        return {"mode": "exec"}
-    if mode == "global" and lower.startswith("interface "):
-        return {"mode": "interface"}
-    if mode == "global" and lower.startswith("line "):
-        return {"mode": "line"}
-    if mode == "global" and lower.startswith("router "):
-        return {"mode": "router"}
-    return session
+BACKEND = os.getenv("CLI_ENGINE_BACKEND", "python").lower()
 
 
 def run_vtysh(command, session):
@@ -72,10 +31,11 @@ def handle_run(payload):
     device = payload.get("device") or {}
     session = payload.get("session") or {"mode": "exec"}
     command = str(payload.get("command") or "")
-    output = run_vtysh(command, session)
-    if output is None:
-        output = "% External CLI bridge is running, but FRR vtysh was not found. Install FRR or leave VITE_CLI_ENGINE_URL empty to use the browser simulator."
-    return {"device": device, "session": next_session(session, command), "output": output}
+    if BACKEND == "vtysh":
+        output = run_vtysh(command, session)
+        if output is not None:
+            return {"device": device, "session": session, "output": output}
+    return run_cli_command(device, session, command)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -88,7 +48,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/health":
             self.write_json(404, {"error": "not found"})
             return
-        self.write_json(200, {"status": "ok", "vtysh": bool(shutil.which("vtysh"))})
+        self.write_json(200, {"status": "ok", "backend": BACKEND, "pythonIos": True, "vtysh": bool(shutil.which("vtysh"))})
 
     def do_POST(self):
         if self.path != "/run":

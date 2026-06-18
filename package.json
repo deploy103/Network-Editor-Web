@@ -7,10 +7,13 @@
     "web"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace web",
+    "dev": "bash scripts/dev-python-cli.sh",
+    "dev:web": "npm run dev --workspace web",
+    "dev:cli": "python3 cli-engine-python/server.py",
     "build": "npm run build --workspace web",
     "preview": "npm run preview --workspace web",
     "smoke:cli": "bash scripts/smoke-cli.sh",
+    "smoke:python-cli": "bash scripts/smoke-python-cli.sh",
     "build:rust": "bash scripts/build-wasm.sh",
     "build:go": "cd server-go && go build ./...",
     "check:all": "npm run build && npm run build:rust && npm run build:go"
