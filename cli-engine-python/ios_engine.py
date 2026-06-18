@@ -128,6 +128,8 @@ def expand_command(command: str, session: IOSSession) -> str:
         return expand_show(rest)
     if first == "wr" or abbr(first, "write", 2):
         return "write erase" if lrest and abbr(lrest[0], "erase") else "write memory"
+    if first == "dir":
+        return "show flash"
     if abbr(first, "copy", 2):
         text = " ".join(lrest)
         if text in ("run start", "running-config startup-config"):
@@ -147,6 +149,8 @@ def expand_command(command: str, session: IOSSession) -> str:
         return "interface " + " ".join(rest)
     if abbr(first, "hostname", 4):
         return "hostname " + " ".join(rest)
+    if abbr(first, "banner", 3):
+        return "banner " + " ".join(rest)
     if abbr(first, "username", 4):
         return "username " + " ".join(rest)
     if abbr(first, "line", 2):
@@ -173,6 +177,8 @@ def expand_command(command: str, session: IOSSession) -> str:
         return "service " + " ".join(rest)
     if abbr(first, "logging", 3):
         return "logging " + " ".join(rest)
+    if abbr(first, "default", 3):
+        return "default interface " + " ".join(rest[1:]) if lrest and (abbr(lrest[0], "interface", 3) or lrest[0] == "int") else "default " + " ".join(rest)
     if abbr(first, "clear", 2):
         return expand_clear(rest)
     if mode == "router":
@@ -182,6 +188,9 @@ def expand_command(command: str, session: IOSSession) -> str:
 
 def expand_show(rest: list[str]) -> str:
     lower = [x.lower() for x in rest]
+    if "|" in lower:
+        index = lower.index("|")
+        return f"{expand_show(rest[:index])} | {' '.join(rest[index + 1:])}"
     first = lower[0] if lower else ""
     second = lower[1] if len(lower) > 1 else ""
     if first in ("run", "running-config") or abbr(first, "running-config", 3):
@@ -194,12 +203,24 @@ def expand_show(rest: list[str]) -> str:
         return "show version"
     if abbr(first, "clock", 2):
         return "show clock"
+    if abbr(first, "inventory", 3):
+        return "show inventory"
+    if abbr(first, "flash", 2):
+        return "show flash"
+    if abbr(first, "file") and abbr(second, "systems"):
+        return "show file systems"
     if abbr(first, "history", 3):
         return "show history"
     if abbr(first, "privilege", 3):
         return "show privilege"
     if abbr(first, "logging", 3):
         return "show logging"
+    if abbr(first, "users", 2):
+        return "show users"
+    if abbr(first, "line", 2):
+        return "show line"
+    if abbr(first, "terminal", 4):
+        return "show terminal"
     if abbr(first, "interfaces", 3) or first in ("int", "interface"):
         if second == "trunk" or abbr(second, "trunk", 2):
             return "show interfaces trunk"
@@ -311,6 +332,8 @@ def expand_no(rest: list[str]) -> str:
             return "no ip nat " + " ".join(rest[2:])
     if abbr(first, "enable", 2):
         return "no enable secret" if len(lower) > 1 and abbr(lower[1], "secret") else "no enable password"
+    if abbr(first, "banner", 3) and len(lower) > 1 and abbr(lower[1], "motd"):
+        return "no banner motd"
     if abbr(first, "vlan"):
         return "no vlan " + " ".join(rest[1:])
     if abbr(first, "access-list", 3):
@@ -345,6 +368,8 @@ def expand_ip(rest: list[str], mode: str) -> str:
         return "ip default-gateway " + " ".join(rest[1:])
     if abbr(first, "domain-name", 3):
         return "ip domain-name " + " ".join(rest[1:])
+    if abbr(first, "domain-lookup", 3):
+        return "ip domain-lookup"
     if abbr(first, "ssh", 2):
         return "ip ssh version " + (rest[2] if len(rest) > 2 else "2")
     if abbr(first, "dhcp") and len(lower) > 1 and abbr(lower[1], "excluded-address", 3):
@@ -400,6 +425,8 @@ def expand_clear(rest: list[str]) -> str:
             return "clear ip dhcp binding"
         if lower[2].startswith("conf"):
             return "clear ip dhcp conflict *"
+    if len(lower) >= 4 and lower[0] == "ip" and lower[1].startswith("nat") and lower[2].startswith("translation"):
+        return "clear ip nat translation *"
     return "clear " + " ".join(rest)
 
 
@@ -472,6 +499,8 @@ def run_privileged(device: NetworkDevice, session: IOSSession, command: str, low
         return _result(device, session, "")
     if lower in ("clear ip dhcp conflict", "clear ip dhcp conflict *"):
         return _result(device, session, "")
+    if lower in ("clear ip nat translation", "clear ip nat translation *"):
+        return _result(device, session, "")
     return _result(device, session, "% Unsupported privileged EXEC command.")
 
 
@@ -483,6 +512,12 @@ def run_global(device: NetworkDevice, session: IOSSession, command: str, lower: 
             return _result(device, session, "% Invalid hostname.")
         device["label"] = hostname
         config["hostname"] = hostname
+        return _result(device, session, "")
+    if lower.startswith("default interface "):
+        port = find_port(device, command[len("default interface "):].strip())
+        if not port:
+            return _result(device, session, "% Interface not found.")
+        reset_port(port)
         return _result(device, session, "")
     if lower.startswith("enable secret "):
         config["enableSecret"] = command[len("enable secret "):].strip()
@@ -556,6 +591,18 @@ def run_global(device: NetworkDevice, session: IOSSession, command: str, lower: 
         return _result(device, session, "")
     if lower == "no ip domain-name":
         config.pop("domainName", None)
+        return _result(device, session, "")
+    if lower == "ip domain-lookup":
+        config["domainLookup"] = True
+        return _result(device, session, "")
+    if lower == "no ip domain-lookup":
+        config["domainLookup"] = False
+        return _result(device, session, "")
+    if lower.startswith("banner motd "):
+        config["motdBanner"] = parse_banner(command[len("banner motd "):])
+        return _result(device, session, "")
+    if lower == "no banner motd":
+        config.pop("motdBanner", None)
         return _result(device, session, "")
     if lower.startswith("ip ssh version "):
         version = command.split()[-1]
@@ -928,6 +975,9 @@ def run_acl(device: NetworkDevice, session: IOSSession, command: str, lower: str
 
 
 def show_command(device: NetworkDevice, lower: str) -> str:
+    if " | " in lower:
+        base, pipe = lower.split(" | ", 1)
+        return apply_show_filter(show_command(device, base), pipe)
     if lower.startswith("show running-config interface "):
         port = find_port(device, lower[len("show running-config interface "):])
         return "\n".join(interface_config(port)) if port else "% Interface not found."
@@ -940,12 +990,23 @@ def show_command(device: NetworkDevice, lower: str) -> str:
         return f"{device.get('model', 'Cisco IOS')} Software, Network Editor Python IOS\nDevice uptime is simulated\nSystem image file is \"python-ios:{device.get('modelId', 'generic')}\"\n{len(device.get('ports', []))} interfaces"
     if lower == "show clock":
         return time.strftime("%Y-%m-%d %H:%M:%S KST", time.localtime())
+    if lower == "show inventory":
+        return f"NAME: \"{device.get('label', 'Device')}\", DESCR: \"{device.get('model', 'Cisco IOS')}\"\nPID: {device.get('modelId', 'generic')}, VID: PYIOS, SN: {device.get('id', 'unknown')}"
+    if lower in ("show flash", "show flash:"):
+        startup_bytes = len("\n".join(cfg(device).get("startupConfig", [])))
+        image_bytes = 8192 + len(device.get("ports", [])) * 256
+        return f"Directory of flash:/\n\n    1  -rw-       {image_bytes:8d}  python-ios-{device.get('modelId', 'generic')}.bin\n    2  -rw-       {startup_bytes:8d}  startup-config\n64016384 bytes total (63901696 bytes free)"
+    if lower == "show file systems":
+        startup_bytes = len("\n".join(cfg(device).get("startupConfig", []))) or 1
+        return f"File Systems:\n\n     Size(b)     Free(b)      Type  Flags  Prefixes\n*   64016384    63901696     flash     rw  flash:\n       {startup_bytes:6d}       0     nvram     rw  nvram:"
     if lower == "show privilege":
         return "Current privilege level is 15"
     if lower == "show history":
         return "Command history is maintained by the terminal session."
     if lower == "show logging":
         return logging_status(device)
+    if lower == "show users":
+        return "Line       User       Host(s)              Idle       Location\n* 0 con 0  console    idle                 00:00:00   local"
     if lower == "show ip interface brief":
         return "\n".join(["Interface              IP-Address      OK? Method Status", *[f"{p.get('name','').ljust(22)}{(p.get('ipAddress') or 'unassigned').ljust(16)}YES manual {'up' if p.get('adminUp', True) and device.get('powerOn', True) else 'down'}" for p in device.get("ports", [])]])
     if lower == "show ip interface":
@@ -1043,12 +1104,16 @@ def running_config(device: NetworkDevice) -> str:
     lines.extend(f"logging host {host}" for host in log.get("hosts", []))
     if config.get("domainName"):
         lines.append(f"ip domain-name {config['domainName']}")
+    if config.get("domainLookup") is False:
+        lines.append("no ip domain-lookup")
     if config.get("sshVersion"):
         lines.append(f"ip ssh version {config['sshVersion']}")
     if config.get("rsaKeyGenerated"):
         lines.append("crypto key generate rsa modulus 1024")
     if config.get("defaultGateway"):
         lines.append(f"ip default-gateway {config['defaultGateway']}")
+    if config.get("motdBanner"):
+        lines.append(f"banner motd #{config['motdBanner']}#")
     lines.extend(user_config(user) for user in config.get("localUsers", []))
     for vlan in config.get("vlans", []):
         lines.extend([f"vlan {vlan.get('id')}", f" name {vlan.get('name')}"])
@@ -1473,6 +1538,16 @@ def parse_user(command: str) -> dict[str, Any] | None:
     return None
 
 
+def parse_banner(value: str) -> str:
+    text = value.strip()
+    if len(text) >= 2:
+        delimiter = text[0]
+        end = text.find(delimiter, 1)
+        if end > 0:
+            return text[1:end]
+    return text.strip("#")
+
+
 def parse_acl_rule(command: str, list_name: str | None = None, acl_type: str | None = None) -> dict[str, Any] | None:
     tokens = command.split()
     if tokens and tokens[0].isdigit():
@@ -1543,6 +1618,41 @@ def route_table(device: NetworkDevice, filter_text: str = "") -> str:
     default = next((r for r in cfg(device).get("staticRoutes", []) if r.get("network") == "0.0.0.0" and r.get("mask") == "0.0.0.0"), None)
     gateway = f"Gateway of last resort is {default.get('nextHop')} to network 0.0.0.0" if default else "Gateway of last resort is not set"
     return "\n".join(["Codes: C - connected, S - static, L - local", gateway, "", *(lines or ["No routes installed."])])
+
+
+def apply_show_filter(output: str, pipe: str) -> str:
+    tokens = pipe.split(maxsplit=1)
+    if not tokens:
+        return output
+    action = tokens[0]
+    pattern = tokens[1] if len(tokens) > 1 else ""
+    if not pattern:
+        return output
+    lines = output.splitlines()
+    if action in ("include", "inc"):
+        return "\n".join(line for line in lines if pattern.lower() in line.lower()) or ""
+    if action in ("exclude", "exc"):
+        return "\n".join(line for line in lines if pattern.lower() not in line.lower())
+    if action in ("begin", "beg"):
+        for index, line in enumerate(lines):
+            if pattern.lower() in line.lower():
+                return "\n".join(lines[index:])
+        return ""
+    if action in ("section", "sec"):
+        sections: list[str] = []
+        index = 0
+        while index < len(lines):
+            line = lines[index]
+            if line and not line.startswith(" ") and pattern.lower() in line.lower():
+                sections.append(line)
+                index += 1
+                while index < len(lines) and (not lines[index] or lines[index].startswith(" ")):
+                    sections.append(lines[index])
+                    index += 1
+                continue
+            index += 1
+        return "\n".join(sections)
+    return output
 
 
 def route_summary(device: NetworkDevice) -> str:
