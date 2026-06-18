@@ -147,11 +147,11 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
   const base = session.mode === "exec"
     ? ["enable", "show version", "show clock", "show interfaces", "show ip interface brief", "show ip route", "show route", "show cdp neighbors", "show arp", "ping ", "traceroute ", "terminal length 0", "help"]
     : session.mode === "privileged"
-      ? ["disable", "configure terminal", "conf t", "show running-config", "show startup-config", "show version", "show clock", "show inventory", "show logging", "show interfaces", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface brief", "show ip route", "show route", "show ip protocols", "show vlan brief", "show mac address-table", "show cdp neighbors", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
+      ? ["disable", "configure terminal", "conf t", "show running-config", "show startup-config", "show version", "show clock", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show interfaces", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface brief", "show ip route", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show vlan brief", "show mac address-table", "show cdp neighbors", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
         ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "interface ", "int ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-lookup", "no ip domain-lookup", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "access-list ", "no access-list ", "nat ", "no nat ", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
-        : session.mode === "interface"
-          ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk allowed vlan ", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
+      : session.mode === "interface"
+          ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk allowed vlan ", "no switchport", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
           : session.mode === "vlan"
             ? ["name ", "end", "exit", "help"]
             : session.mode === "dhcp"
@@ -288,6 +288,7 @@ function expandNoCommand(rest: string[]): string {
   const first = lowerRest[0] ?? "";
   if (isAbbrev(first, "shutdown", 2)) return "no shutdown";
   if (isAbbrev(first, "description", 4)) return "no description";
+  if (isAbbrev(first, "switchport", 2)) return "no switchport";
   if (isAbbrev(first, "enable", 2)) {
     if (isAbbrev(lowerRest[1], "secret")) return "no enable secret";
     if (isAbbrev(lowerRest[1], "password")) return "no enable password";
@@ -351,6 +352,10 @@ function expandShowCommand(rest: string[]): string {
   if (isAbbrev(first, "clock", 2)) return "show clock";
   if (isAbbrev(first, "inventory", 3)) return "show inventory";
   if (isAbbrev(first, "logging", 3)) return "show logging";
+  if (isAbbrev(first, "users", 2)) return "show users";
+  if (isAbbrev(first, "line", 2)) return "show line";
+  if (isAbbrev(first, "terminal", 4)) return "show terminal";
+  if (isAbbrev(first, "protocols", 3)) return "show protocols";
   if (first === "route" || first === "ro") return "show ip route";
   if (first === "arp") return "show arp";
   if (first === "host" || first === "hosts") return "show hosts";
@@ -360,7 +365,7 @@ function expandShowCommand(rest: string[]): string {
   if (isAbbrev(first, "access-list", 3) || first === "access-lists") return "show access-list";
   if (first === "cdp" && isAbbrev(second, "neighbors", 3)) return "show cdp neighbors";
   if (first === "ip") {
-    if (isAbbrev(second, "route", 2)) return "show ip route";
+    if (isAbbrev(second, "route", 2)) return ["show ip route", ...rest.slice(2)].join(" ");
     if (isAbbrev(second, "protocols", 3)) return "show ip protocols";
     if (isAbbrev(second, "arp")) return "show ip arp";
     if (isAbbrev(second, "interface", 3)) return "show ip interface brief";
@@ -585,12 +590,16 @@ function applyStartupGlobalLine(device: NetworkDevice, command: string, lower: s
   if (lower === "no enable password") return { ...device, config: { ...device.config, enablePassword: undefined } };
   if (lower.startsWith("banner motd ")) return { ...device, config: { ...device.config, motdBanner: parseBannerText(command.slice("banner motd ".length)) } };
   if (lower === "no banner motd") return { ...device, config: { ...device.config, motdBanner: undefined } };
-  if (lower.startsWith("ip default-gateway ")) return { ...device, config: { ...device.config, defaultGateway: command.split(/\s+/)[2] ?? "" } };
+  if (lower.startsWith("ip default-gateway ")) {
+    const gateway = command.split(/\s+/)[2] ?? "";
+    return isIpv4(gateway) ? { ...device, config: { ...device.config, defaultGateway: gateway } } : device;
+  }
   if (lower === "no ip default-gateway") return { ...device, config: { ...device.config, defaultGateway: undefined } };
   if (lower === "ip domain-lookup") return { ...device, config: { ...device.config, domainLookup: true } };
   if (lower === "no ip domain-lookup") return { ...device, config: { ...device.config, domainLookup: false } };
   if (lower.startsWith("ip route ")) {
     const [, , network, mask, nextHop] = command.split(/\s+/);
+    if (!isIpv4(network) || !isIpv4(mask) || !isIpv4(nextHop)) return device;
     return network && mask && nextHop
       ? { ...device, config: { ...device.config, staticRoutes: [...device.config.staticRoutes, { id: createId("route"), network, mask, nextHop }] } }
       : device;
@@ -633,6 +642,7 @@ function applyStartupInterfaceLine(device: NetworkDevice, portId: string, comman
   }
   if (lower === "switchport mode access") return updatePort(device, port.id, { mode: "access", ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" });
   if (lower === "switchport mode trunk") return updatePort(device, port.id, { mode: "trunk", allowedVlans: port.allowedVlans.length ? port.allowedVlans : [1], ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" });
+  if (lower === "no switchport") return updatePort(device, port.id, { mode: "routed", ipCapable: true });
   if (lower.startsWith("switchport access vlan ")) {
     const vlan = numberAfter(command, "switchport access vlan");
     return validVlan(vlan) ? ensureVlan(updatePort(device, port.id, { mode: "access", vlan }), vlan) : device;
@@ -751,10 +761,15 @@ function globalCommand(device: NetworkDevice, session: CliSession, command: stri
   if (lower.startsWith("ip route ")) {
     const [, , network, mask, nextHop] = command.split(/\s+/);
     if (!network || !mask || !nextHop) return result(device, session, "% Usage: ip route <network> <mask> <next-hop>");
+    if (!isIpv4(network) || !isIpv4(mask) || !isIpv4(nextHop)) return result(device, session, "% Invalid IP address or mask.");
     return result({ ...device, config: { ...device.config, staticRoutes: [...device.config.staticRoutes, { id: createId("route"), network, mask, nextHop }] } }, session, "");
   }
 
-  if (lower.startsWith("ip default-gateway ")) return result({ ...device, config: { ...device.config, defaultGateway: command.split(/\s+/)[2] ?? "" } }, session, "");
+  if (lower.startsWith("ip default-gateway ")) {
+    const gateway = command.split(/\s+/)[2] ?? "";
+    if (!isIpv4(gateway)) return result(device, session, "% Invalid default gateway address.");
+    return result({ ...device, config: { ...device.config, defaultGateway: gateway } }, session, "");
+  }
   if (lower === "no ip default-gateway") return result({ ...device, config: { ...device.config, defaultGateway: undefined } }, session, "");
   if (lower === "ip domain-lookup") return result({ ...device, config: { ...device.config, domainLookup: true } }, session, "");
   if (lower === "no ip domain-lookup") return result({ ...device, config: { ...device.config, domainLookup: false } }, session, "");
@@ -785,6 +800,7 @@ function globalCommand(device: NetworkDevice, session: CliSession, command: stri
   if (lower.startsWith("ip host ")) {
     const [, , name, value] = command.split(/\s+/);
     if (!name || !value) return result(device, session, "% Usage: ip host <name> <address>");
+    if (!isIpv4(value)) return result(device, session, "% Invalid host address.");
     return result({
       ...device,
       config: {
@@ -847,6 +863,7 @@ function interfaceCommand(device: NetworkDevice, session: CliSession, command: s
   if (lower.startsWith("ip address ")) {
     const [, , ipAddress, subnetMask] = command.split(/\s+/);
     if (!ipAddress || !subnetMask) return result(device, session, "% Usage: ip address <ip> <mask>");
+    if (!isIpv4(ipAddress) || !isIpv4(subnetMask)) return result(device, session, "% Invalid IP address or mask.");
     if (!port.ipCapable && port.mode !== "routed") return result(device, session, "% IP address is not supported on this layer-2 interface.");
     return result(updatePort(device, port.id, { ipAddress, subnetMask, mode: "routed" }), session, "");
   }
@@ -855,6 +872,7 @@ function interfaceCommand(device: NetworkDevice, session: CliSession, command: s
   if (lower === "no shutdown") return result(updatePort(device, port.id, { adminUp: true }), session, "");
   if (lower === "switchport mode access") return result(updatePort(device, port.id, { mode: "access", ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" }), session, "");
   if (lower === "switchport mode trunk") return result(updatePort(device, port.id, { mode: "trunk", allowedVlans: port.allowedVlans.length ? port.allowedVlans : [1], ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" }), session, "");
+  if (lower === "no switchport") return result(updatePort(device, port.id, { mode: "routed", ipCapable: true }), session, "");
   if (lower.startsWith("description ")) return result(updatePort(device, port.id, { description: command.slice("description ".length).trim().slice(0, 80) }), session, "");
   if (lower === "no description") return result(updatePort(device, port.id, { description: "" }), session, "");
   if (lower.startsWith("switchport access vlan ")) {
@@ -893,11 +911,21 @@ function dhcpCommand(device: NetworkDevice, session: CliSession, command: string
   if (!pool) return result(device, { mode: "global" }, "% DHCP 풀 컨텍스트가 없습니다.");
   if (lower.startsWith("network ")) {
     const [, network, mask] = command.split(/\s+/);
+    if ((network && !isIpv4(network)) || (mask && !isIpv4(mask))) return result(device, session, "% Invalid DHCP network or mask.");
     return result(updatePool(device, pool.id, { network: network ?? "", mask: mask ?? "" }), session, "");
   }
-  if (lower.startsWith("default-router ")) return result(updatePool(device, pool.id, { defaultGateway: command.split(/\s+/)[1] ?? "" }), session, "");
-  if (lower.startsWith("dns-server ")) return result(updatePool(device, pool.id, { dnsServer: command.split(/\s+/)[1] ?? "" }), session, "");
-  if (lower.startsWith("start-ip ")) return result(updatePool(device, pool.id, { startIp: command.split(/\s+/)[1] ?? "" }), session, "");
+  if (lower.startsWith("default-router ")) {
+    const gateway = command.split(/\s+/)[1] ?? "";
+    return isIpv4(gateway) ? result(updatePool(device, pool.id, { defaultGateway: gateway }), session, "") : result(device, session, "% Invalid default-router address.");
+  }
+  if (lower.startsWith("dns-server ")) {
+    const dnsServer = command.split(/\s+/)[1] ?? "";
+    return isIpv4(dnsServer) ? result(updatePool(device, pool.id, { dnsServer }), session, "") : result(device, session, "% Invalid dns-server address.");
+  }
+  if (lower.startsWith("start-ip ")) {
+    const startIp = command.split(/\s+/)[1] ?? "";
+    return isIpv4(startIp) ? result(updatePool(device, pool.id, { startIp }), session, "") : result(device, session, "% Invalid start-ip address.");
+  }
   if (lower.startsWith("max-leases ")) return result(updatePool(device, pool.id, { maxLeases: Math.max(1, numberAfter(command, "max-leases")) }), session, "");
   if (lower === "shutdown") return result(updatePool(device, pool.id, { enabled: false }), session, "");
   if (lower === "no shutdown") return result(updatePool(device, pool.id, { enabled: true }), session, "");
@@ -953,6 +981,10 @@ function showCommand(device: NetworkDevice, lower: string): string {
   if (lower === "show clock") return new Date().toLocaleString("ko-KR", { hour12: false });
   if (lower === "show inventory") return [`NAME: "${device.label}", DESCR: "${device.model}"`, `PID: ${device.modelId}, VID: PTWEB, SN: ${device.id}`, ...device.modules.map((module) => `NAME: "${module.slotId}", PID: ${module.moduleId}`)].join("\n");
   if (lower === "show logging") return device.runtime.logs.length ? device.runtime.logs.map((log) => `${new Date(log.createdAt).toLocaleString("ko-KR", { hour12: false })} ${log.level.toUpperCase()}: ${log.message}`).join("\n") : "No logging messages.";
+  if (lower === "show users") return ["Line       User       Host(s)              Idle       Location", "* 0 con 0  console    idle                 00:00:00   local"].join("\n");
+  if (lower === "show line") return lineStatus(device);
+  if (lower === "show terminal") return ["Line 0, Location: local", "Length: 24 lines, Width: 80 columns", "History is enabled, history size is 80", "Editing is enabled. Completion is enabled."].join("\n");
+  if (lower === "show protocols") return protocolsStatus(device);
   if (lower === "show startup-config") return device.config.startupConfig.join("\n") || "% Startup config is not saved.";
   if (lower === "show ip interface brief") {
     return ["Interface              IP-Address      OK? Method Status", ...device.ports.map((port) => `${port.name.padEnd(22)}${(port.ipAddress || "unassigned").padEnd(16)}YES manual ${port.adminUp && device.powerOn ? "up" : "down"}`)].join("\n");
@@ -972,6 +1004,7 @@ function showCommand(device: NetworkDevice, lower: string): string {
   if (lower === "show mac address-table") return device.runtime.macTable.length ? ["Vlan  Mac Address         Type      Ports", ...device.runtime.macTable.map((entry) => `${String(entry.vlan).padEnd(6)}${entry.macAddress.padEnd(20)}${entry.type.padEnd(10)}${entry.portName}`)].join("\n") : "No entries learned.";
   if (lower === "show arp" || lower === "show ip arp") return device.runtime.arpTable.length ? ["Protocol  Address         Hardware Addr       Interface", ...device.runtime.arpTable.map((entry) => `Internet  ${entry.ipAddress.padEnd(16)}${entry.macAddress.padEnd(20)}${entry.portName}`)].join("\n") : "No ARP entries.";
   if (lower === "show ip route") return routeTable(device);
+  if (lower.startsWith("show ip route ")) return routeTable(device, lower.slice("show ip route ".length).trim());
   if (lower === "show ip protocols") return ipProtocols(device);
   if (lower === "show ip dhcp binding") return device.runtime.dhcpLeases.map((lease) => `${lease.ipAddress.padEnd(16)}${lease.macAddress.padEnd(20)}${lease.deviceId}`).join("\n") || "No DHCP bindings.";
   if (lower === "show ip dhcp pool") return device.config.dhcpPools.map((pool) => [`풀 ${pool.name}`, `  네트워크 ${pool.network} ${pool.mask}`, `  기본 라우터 ${pool.defaultGateway}`, `  DNS 서버 ${pool.dnsServer}`, `  시작 범위 ${pool.startIp}, 최대 임대 ${pool.maxLeases}`, `  상태 ${pool.enabled ? "활성" : "비활성"}`].join("\n")).join("\n\n") || "DHCP 풀이 없습니다.";
@@ -1090,7 +1123,23 @@ function trunkStatus(device: NetworkDevice): string {
   ].join("\n");
 }
 
-function routeTable(device: NetworkDevice): string {
+function lineStatus(device: NetworkDevice): string {
+  const lines = lineConfigs(device);
+  return [
+    "Tty Typ     Tx/Rx     A Modem  Roty AccO AccI  Uses Noise Overruns Int",
+    "0   CTY     -/-       - -      -    -    -     0    0     0/0      -",
+    ...lines.map((line, index) => `${String(index + 1).padEnd(3)} ${line.kind.toUpperCase().padEnd(7)} ${line.range.padEnd(9)} - ${line.login ? "login" : "nologin"} transport ${line.transportInput || "-"}`)
+  ].join("\n");
+}
+
+function protocolsStatus(device: NetworkDevice): string {
+  return device.ports
+    .filter((port) => port.kind !== "console")
+    .map((port) => `${port.name} is ${device.powerOn && port.adminUp ? "up" : "down"}, line protocol is ${device.powerOn && port.adminUp && port.linkId ? "up" : "down"}${port.ipAddress ? `\n  Internet address is ${port.ipAddress}/${maskToPrefix(port.subnetMask)}` : ""}`)
+    .join("\n\n") || "No protocol interfaces.";
+}
+
+function routeTable(device: NetworkDevice, filter = ""): string {
   const connected = device.ports
     .filter((port) => port.adminUp && port.ipAddress && port.subnetMask && isIpv4(port.ipAddress) && isIpv4(port.subnetMask))
     .flatMap((port) => {
@@ -1106,14 +1155,22 @@ function routeTable(device: NetworkDevice): string {
     return `S    ${route.network}/${prefix} [1/0] via ${route.nextHop}`;
   });
   const defaultRoute = device.config.staticRoutes.find((route) => route.network === "0.0.0.0" && route.mask === "0.0.0.0");
-  const gatewayLine = defaultRoute ? `기본 경로 게이트웨이는 ${defaultRoute.nextHop} -> network 0.0.0.0 입니다` : "기본 경로 게이트웨이가 설정되지 않았습니다";
-  const body = [...connected, ...staticRoutes].filter((line, index, list) => list.indexOf(line) === index);
+  const gatewayLine = defaultRoute ? `기본 경로 게이트웨이는 ${defaultRoute.nextHop} -> network 0.0.0.0 입니다` : device.config.defaultGateway ? `기본 게이트웨이는 ${device.config.defaultGateway} 입니다` : "기본 경로 게이트웨이가 설정되지 않았습니다";
+  const body = filterRouteLines([...connected, ...staticRoutes].filter((line, index, list) => list.indexOf(line) === index), filter);
   return [
     "코드: C - 연결됨, S - 정적, L - 로컬",
     gatewayLine,
     "",
     ...(body.length ? body : ["설치된 라우트가 없습니다."])
   ].join("\n");
+}
+
+function filterRouteLines(lines: string[], filter: string): string[] {
+  if (!filter) return lines;
+  if (filter === "connected" || filter === "directly-connected") return lines.filter((line) => line.startsWith("C") || line.startsWith("L"));
+  if (filter === "static") return lines.filter((line) => line.startsWith("S"));
+  if (isIpv4(filter)) return lines.filter((line) => line.includes(filter));
+  return lines.filter((line) => line.toLowerCase().includes(filter.toLowerCase()));
 }
 
 function ipProtocols(device: NetworkDevice): string {
@@ -1188,16 +1245,32 @@ function searchHelp(term: string): string {
 }
 
 function applyPipe(output: string, rawCommand: string): string {
-  const match = rawCommand.match(/\|\s*(i|inc|include|e|exc|exclude|b|beg|begin)\s+(.+)$/i);
+  const match = rawCommand.match(/\|\s*(i|inc|include|e|exc|exclude|b|beg|begin|s|sec|section)\s+(.+)$/i);
   if (!match) return output;
   const token = match[1].toLowerCase();
-  const mode = token.startsWith("i") ? "include" : token.startsWith("e") ? "exclude" : "begin";
+  const mode = token.startsWith("i") ? "include" : token.startsWith("e") ? "exclude" : token.startsWith("s") ? "section" : "begin";
   const term = match[2].trim().toLowerCase();
   const lines = output.split("\n");
   if (mode === "include") return lines.filter((line) => line.toLowerCase().includes(term)).join("\n") || "% No matching lines.";
   if (mode === "exclude") return lines.filter((line) => !line.toLowerCase().includes(term)).join("\n") || "% No lines remain.";
+  if (mode === "section") return pipeSection(lines, term);
   const index = lines.findIndex((line) => line.toLowerCase().includes(term));
   return index >= 0 ? lines.slice(index).join("\n") : "% No matching start line.";
+}
+
+function pipeSection(lines: string[], term: string): string {
+  const sections: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line.toLowerCase().includes(term)) continue;
+    sections.push(line);
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      if (lines[cursor] && !/^\s/.test(lines[cursor])) break;
+      sections.push(lines[cursor]);
+      index = cursor;
+    }
+  }
+  return sections.join("\n") || "% No matching sections.";
 }
 
 function updatePort(device: NetworkDevice, portId: string, patch: Partial<NetworkPort>): NetworkDevice {
