@@ -204,6 +204,7 @@ function normalizeConfig(config: DeviceConfig | undefined, hostname: string, kin
     staticRoutes: normalizeStaticRoutes(config?.staticRoutes),
     vlans: Array.isArray(config?.vlans) && config.vlans.length ? config.vlans : base.vlans,
     dhcpPools: normalizeDhcpPools(config?.dhcpPools),
+    dhcpExcludedRanges: normalizeDhcpExcludedRanges(config?.dhcpExcludedRanges),
     dnsRecords: normalizeDnsRecords(config?.dnsRecords, base.dnsRecords),
     accessRules: normalizeAccessRules(config?.accessRules ?? legacy?.firewallRules),
     natRules: Array.isArray(config?.natRules) ? config.natRules : [],
@@ -257,6 +258,17 @@ function normalizeDhcpPools(pools: DeviceConfig["dhcpPools"] | undefined): Devic
       enabled: pool.enabled !== false
     };
   });
+}
+
+function normalizeDhcpExcludedRanges(ranges: DeviceConfig["dhcpExcludedRanges"] | undefined): NonNullable<DeviceConfig["dhcpExcludedRanges"]> {
+  if (!Array.isArray(ranges)) return [];
+  return ranges
+    .filter((range) => range.startIp)
+    .map((range) => ({
+      id: range.id || createId("dhcp_exclude"),
+      startIp: range.startIp,
+      endIp: range.endIp || undefined
+    }));
 }
 
 function normalizeDnsRecords(records: DeviceConfig["dnsRecords"] | undefined, fallback: DeviceConfig["dnsRecords"]): DeviceConfig["dnsRecords"] {

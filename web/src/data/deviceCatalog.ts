@@ -250,6 +250,7 @@ export function defaultConfig(hostname: string, kind: DeviceKind): DeviceConfig 
     staticRoutes: [],
     vlans: [{ id: 1, name: "default" }],
     dhcpPools: [],
+    dhcpExcludedRanges: [],
     dnsRecords: kind === "server" ? [{ id: createId("dns"), name: "www.lab.local", value: "192.168.1.10" }] : [],
     accessRules: [],
     natRules: [],

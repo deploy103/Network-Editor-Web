@@ -1,7 +1,7 @@
 import { defaultConfig } from "../data/deviceCatalog";
 import { createId } from "../utils/id";
 import { isIpv4, maskToPrefix, networkAddress } from "./ip";
-import type { DhcpPool, DeviceConfig, NetworkDevice, NetworkPort, RuntimeState } from "../types/network";
+import type { DhcpExcludedRange, DhcpPool, DeviceConfig, NetworkDevice, NetworkPort, RuntimeState } from "../types/network";
 
 export type CliMode = "exec" | "privileged" | "global" | "interface" | "vlan" | "dhcp" | "line" | "router" | "acl";
 export type CliPendingAction = "reload" | "erase-startup" | "enable-password";
@@ -179,7 +179,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
     : session.mode === "privileged"
       ? ["disable", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show clock", "show privilege", "show history", "show inventory", "show logging", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show spanning-tree", "show interfaces", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip ssh", "show ip route", "show ip route summary", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show mac address-table", "show mac address-table dynamic", "show mac address-table interface ", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp pool", "show hosts", "show access-list", "show ip access-lists", "show nat", "clear arp", "clear arp-cache", "clear mac address-table", "clear ip dhcp binding", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
-        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "username admin secret cisco", "no username ", "interface ", "int ", "interface range fa0/1 - 2", "default interface ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-name lab.local", "no ip domain-name", "ip ssh version 2", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "crypto key zeroize rsa", "ip dhcp pool ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service password-encryption", "no service password-encryption", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
+        ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "username admin secret cisco", "no username ", "interface ", "int ", "interface range fa0/1 - 2", "default interface ", "vlan ", "no vlan ", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-name lab.local", "no ip domain-name", "ip ssh version 2", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "crypto key zeroize rsa", "ip dhcp excluded-address 192.168.1.1 192.168.1.20", "ip dhcp pool ", "no ip dhcp excluded-address ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service password-encryption", "no service password-encryption", "service dhcp", "no service dhcp", "service dns", "service http", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
           ? ["description ", "desc ", "no description", "ip address ", "ip add ", "no ip address", "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "ip access-group 101 in", "ip access-group 101 out", "no ip access-group 101 in", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk allowed vlan ", "no switchport", "spanning-tree portfast", "no spanning-tree portfast", "spanning-tree bpduguard enable", "spanning-tree bpduguard disable", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
           : session.mode === "vlan"
@@ -364,6 +364,7 @@ function expandNoCommand(rest: string[]): string {
     if (isAbbrev(lowerRest[1], "default-gateway", 3)) return "no ip default-gateway";
     if (isAbbrev(lowerRest[1], "domain-name", 3)) return "no ip domain-name";
     if (isAbbrev(lowerRest[1], "domain-lookup", 3)) return "no ip domain-lookup";
+    if (isAbbrev(lowerRest[1], "dhcp") && isAbbrev(lowerRest[2], "excluded-address", 3)) return `no ip dhcp excluded-address ${rest.slice(3).join(" ")}`;
     if (isAbbrev(lowerRest[1], "dhcp") && isAbbrev(lowerRest[2], "pool")) return `no ip dhcp pool ${rest.slice(3).join(" ")}`;
     if (isAbbrev(lowerRest[1], "host")) return `no ip host ${rest.slice(2).join(" ")}`;
     if (isAbbrev(lowerRest[1], "access-group", 3)) return `no ip access-group ${rest.slice(2).join(" ")}`;
@@ -389,6 +390,7 @@ function expandIpCommand(rest: string[], session: CliSession): string {
   if (isAbbrev(first, "ssh", 2) && isAbbrev(lowerRest[1], "version", 3)) return `ip ssh version ${rest[2] ?? "2"}`;
   if (isAbbrev(first, "domain-lookup", 3)) return "ip domain-lookup";
   if (isAbbrev(first, "host")) return `ip host ${rest.slice(1).join(" ")}`;
+  if (isAbbrev(first, "dhcp") && isAbbrev(lowerRest[1], "excluded-address", 3)) return `ip dhcp excluded-address ${rest.slice(2).join(" ")}`;
   if (isAbbrev(first, "dhcp") && isAbbrev(lowerRest[1], "pool")) return `ip dhcp pool ${rest.slice(2).join(" ")}`;
   if (isAbbrev(first, "access-list", 3)) return `ip access-list ${rest.slice(1).join(" ")}`;
   if (isAbbrev(first, "nat", 2)) return `ip nat ${rest.slice(1).join(" ")}`;
@@ -742,6 +744,8 @@ function isGlobalStartupLine(lower: string): boolean {
     lower.startsWith("no ip access-list ") ||
     lower.startsWith("ip nat inside source static ") ||
     lower.startsWith("no ip nat inside source static ") ||
+    lower.startsWith("ip dhcp excluded-address ") ||
+    lower.startsWith("no ip dhcp excluded-address ") ||
     lower.startsWith("access-list ") ||
     lower.startsWith("nat ") ||
     lower.startsWith("service ") ||
@@ -819,6 +823,14 @@ function applyStartupGlobalLine(device: NetworkDevice, command: string, lower: s
     return name && value
       ? { ...device, config: { ...device.config, services: { ...device.config.services, dns: true }, dnsRecords: [...device.config.dnsRecords.filter((record) => record.name.toLowerCase() !== name.toLowerCase()), { id: createId("dns"), name, value }] } }
       : device;
+  }
+  if (lower.startsWith("ip dhcp excluded-address ")) {
+    const range = parseDhcpExcludedRange(command);
+    return range ? upsertDhcpExcludedRange(device, range) : device;
+  }
+  if (lower.startsWith("no ip dhcp excluded-address ")) {
+    const range = parseDhcpExcludedRange(command.slice(3));
+    return range ? removeDhcpExcludedRange(device, range.startIp, range.endIp) : device;
   }
   if (lower.startsWith("access-list ")) {
     const rule = parseAccessList(command);
@@ -1110,6 +1122,18 @@ function globalCommand(device: NetworkDevice, session: CliSession, command: stri
       config: { ...device.config, dhcpPools: device.config.dhcpPools.filter((pool) => pool.name.toLowerCase() !== name) },
       runtime: { ...device.runtime, dhcpLeases: [] }
     }, session, "");
+  }
+
+  if (lower.startsWith("ip dhcp excluded-address ")) {
+    const range = parseDhcpExcludedRange(command);
+    if (!range) return result(device, session, "% Usage: ip dhcp excluded-address <start-ip> [end-ip]");
+    return result(upsertDhcpExcludedRange(device, range), session, "");
+  }
+
+  if (lower.startsWith("no ip dhcp excluded-address ")) {
+    const range = parseDhcpExcludedRange(command.slice(3));
+    if (!range) return result(device, session, "% Usage: no ip dhcp excluded-address <start-ip> [end-ip]");
+    return result(removeDhcpExcludedRange(device, range.startIp, range.endIp), session, "");
   }
 
   if (lower.startsWith("ip host ")) {
@@ -1468,6 +1492,7 @@ function runningConfig(device: NetworkDevice): string {
     ...accessRulesConfig(device.config.accessRules),
     ...device.config.natRules.map((rule) => `ip nat inside source static ${rule.insideLocal} ${rule.insideGlobal}`),
     ...Object.entries(device.config.services).map(([name, enabled]) => `${enabled ? "" : "no "}service ${name}`),
+    ...dhcpExcludedRanges(device).map((range) => `ip dhcp excluded-address ${range.startIp}${range.endIp ? ` ${range.endIp}` : ""}`),
     ...device.config.dhcpPools.flatMap((pool) => [
       `ip dhcp pool ${pool.name}`,
       ` network ${pool.network} ${pool.mask}`,
@@ -1926,6 +1951,7 @@ function searchHelp(term: string): string {
     "ip nat outside",
     "access-list 101 permit ip any any",
     "ip access-group 101 in",
+    "ip dhcp excluded-address <start-ip> [end-ip]",
     "ip dhcp pool <name>",
     "ip host <name> <address>"
   ];
@@ -2186,6 +2212,36 @@ function routingProtocols(device: NetworkDevice): RoutingProtocol[] {
 
 function localUsers(device: NetworkDevice): LocalUser[] {
   return device.config.localUsers ?? [];
+}
+
+function dhcpExcludedRanges(device: NetworkDevice): DhcpExcludedRange[] {
+  return device.config.dhcpExcludedRanges ?? [];
+}
+
+function parseDhcpExcludedRange(command: string): DhcpExcludedRange | null {
+  const [, , , startIp, endIp] = command.split(/\s+/);
+  if (!isIpv4(startIp) || (endIp && !isIpv4(endIp))) return null;
+  return { id: createId("dhcp_exclude"), startIp, endIp };
+}
+
+function upsertDhcpExcludedRange(device: NetworkDevice, range: DhcpExcludedRange): NetworkDevice {
+  return {
+    ...device,
+    config: {
+      ...device.config,
+      dhcpExcludedRanges: [...dhcpExcludedRanges(device).filter((item) => item.startIp !== range.startIp), range]
+    }
+  };
+}
+
+function removeDhcpExcludedRange(device: NetworkDevice, startIp: string, endIp?: string): NetworkDevice {
+  return {
+    ...device,
+    config: {
+      ...device.config,
+      dhcpExcludedRanges: dhcpExcludedRanges(device).filter((range) => !(range.startIp === startIp && (!endIp || range.endIp === endIp)))
+    }
+  };
 }
 
 function parseLocalUser(command: string): LocalUser | null {
