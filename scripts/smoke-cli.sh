@@ -74,6 +74,10 @@ assert(acl.includes("Extended IP access list 101"), "show access-lists must grou
 assert(acl.includes("permit ip any any"), "show access-lists must show IOS ACL entry body");
 assert(acl.includes("Extended IP access list WEB-FILTER"), "named ACL must show as extended access list");
 assert(acl.includes("permit tcp any host 192.168.10.2 eq 80"), "named ACL must preserve entry options");
+const ipInterface = run("sh ip int fa0/1");
+assert(ipInterface.includes("Inbound access list is 101"), "show ip interface must show inbound ACL binding");
+const ipBrief = run("sh ip int br");
+assert(ipBrief.includes("IP-Address"), "show ip int br must still expand to brief output");
 run("wr");
 run("conf t");
 run("hostname UnsavedName");
