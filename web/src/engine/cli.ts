@@ -241,7 +241,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
                   : session.aclType === "standard"
                     ? ["permit any", "permit host ", "permit 192.168.1.0 0.0.0.255", "deny any", "deny host ", "no 10", "do show access-lists", "end", "exit", "help"]
                     : ["permit ip any any", "deny ip any any", "permit tcp any host 192.168.1.10 eq 80", "permit icmp any any", "no 10", "do show access-lists", "end", "exit", "help"];
-  return unique([...base, ...device.ports.flatMap((port) => [`interface ${port.name}`, `int ${shortPortAlias(port.name)}`, `show interface ${port.name}`])]);
+  return unique([...base, ...device.ports.flatMap((port) => [`interface ${port.name}`, `int ${shortPortAlias(port.name)}`, `show interface ${port.name}`, `show interface ${port.name} switchport`])]);
 }
 
 function abbreviatedCandidateMatch(query: string, candidate: string): boolean {
@@ -572,6 +572,7 @@ function expandShowCommand(rest: string[]): string {
     if (isAbbrev(second, "trunk", 2)) return "show interfaces trunk";
     if (isAbbrev(second, "switchport", 2)) return "show interfaces switchport";
     if (isAbbrev(second, "counters", 4)) return "show interfaces counters";
+    if (isAbbrev(lowerRest.at(-1), "switchport", 2) && rest.length > 2) return `show interface ${rest.slice(1, -1).join(" ")} switchport`;
     if (rest.length > 1) return `show interface ${rest.slice(1).join(" ")}`;
     return "show interfaces";
   }
@@ -1943,6 +1944,11 @@ function showCommand(device: NetworkDevice, lower: string, session?: CliSession)
   if (lower === "show interfaces description") return interfaceDescriptions(device);
   if (lower === "show interfaces counters") return interfaceCounters(device);
   if (lower === "show interfaces switchport") return switchportStatus(device);
+  if (lower.startsWith("show interface ") && lower.endsWith(" switchport")) {
+    const name = lower.slice("show interface ".length, lower.length - " switchport".length).trim();
+    const port = findPort(device, name);
+    return port ? switchportStatus(device, port) : `% Interface ${name} not found.`;
+  }
   if (lower === "show interfaces trunk") return trunkStatus(device);
   if (lower.startsWith("show interface ")) {
     const name = lower.slice("show interface ".length);
@@ -2488,8 +2494,8 @@ function ipInterfaceStatus(device: NetworkDevice, selectedPort?: NetworkPort): s
   }).join("\n\n");
 }
 
-function switchportStatus(device: NetworkDevice): string {
-  return device.ports
+function switchportStatus(device: NetworkDevice, selectedPort?: NetworkPort): string {
+  return (selectedPort ? [selectedPort] : device.ports)
     .filter((port) => port.kind !== "console")
     .map((port) => [
       `Name: ${port.name}`,
