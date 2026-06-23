@@ -3339,6 +3339,17 @@ small,
   align-content: start;
 }
 
+.service-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.services-detail .compact-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
 .service-log-toolbar {
   display: grid;
   grid-template-columns: minmax(120px, 1fr) auto auto auto;
