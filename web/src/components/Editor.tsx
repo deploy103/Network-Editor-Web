@@ -3606,7 +3606,7 @@ function transportAllows(transportInput: string, protocol: "ssh" | "telnet"): bo
   return tokens.includes("all") || tokens.includes(protocol);
 }
 
-const desktopQuickCommands = ["help", "ipconfig /all", "ipconfig /renew", "ipconfig /release", "arp -a", "route print", "ping www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "http www.lab.local", "ftp www.lab.local", "email www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
+const desktopQuickCommands = ["help", "ipconfig /all", "ipconfig /renew", "ipconfig /release", "arp -a", "route print", "ping www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "web www.lab.local", "ftp www.lab.local", "mail www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
 
 function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: NetworkDevice; project: NetworkProject; onProjectChange: (project: NetworkProject, message: string) => void; onUpdate: (device: NetworkDevice) => void }) {
   const dataPorts = device.ports.filter((port) => port.kind !== "console");
@@ -3733,7 +3733,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
       "  ipconfig /all | ipconfig /renew | ipconfig /release",
       "  arp -a | route print",
       "  ping <ip|이름> | tracert <ip|이름> | nslookup <이름>",
-      "  http <ip|이름> | ftp <ip|이름> [ls|get 파일] | email <서버> <받는사람> [메시지]",
+      "  http|web|browser <ip|이름> | ftp <ip|이름> [ls|get 파일] | email|mail <서버> <받는사람> [메시지]",
       "  ssh <ip|이름> | telnet <ip|이름> | tftp <ip|이름> | syslog <ip|이름> <메시지>"
     ].join("\n");
   }
@@ -3820,9 +3820,10 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     onProjectChange(appendDesktopEvent(reachability.project, device.id, server.id, "DNS", `${record.name}을(를) ${record.value}(으)로 확인했습니다.`, "delivered"), `DNS가 ${record.name}을(를) 확인했습니다.`);
     return `서버: ${server.label}\n이름: ${record.name}\n주소: ${record.value}`;
   }
-  if (lower.startsWith("http ")) {
-    if (!command.slice(5).trim()) return "사용법: http <ip|이름>";
-    const resolved = await resolveDesktopNetworkTarget(project, device, command.slice(5), onProjectChange);
+  if (lower.startsWith("http ") || lower.startsWith("web ") || lower.startsWith("browser ")) {
+    const targetText = command.split(/\s+/).slice(1).join(" ");
+    if (!targetText.trim()) return "사용법: http <ip|이름>";
+    const resolved = await resolveDesktopNetworkTarget(project, device, targetText, onProjectChange);
     if (!resolved.target) return resolved.error;
     const { target, project: resolvedProject } = resolved;
     const result = await simulatePing(resolvedProject, device.id, target.id);
@@ -3866,9 +3867,9 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     }
     return `Connected to ${target.label}.\n220 PTWeb FTP Service ready\nUser: anonymous\n230 User logged in\nftp> ${action}\n200 PORT command successful\n150 Opening ASCII mode data connection\n  readme.txt\n  running-config.txt\n  network-backup.ptweb\n226 Transfer complete`;
   }
-  if (lower.startsWith("email ")) {
+  if (lower.startsWith("email ") || lower.startsWith("mail ")) {
     const [, targetText = "", recipient = "", ...messageParts] = command.split(/\s+/);
-    if (!targetText.trim() || !recipient.trim()) return "사용법: email <서버 ip|이름> <받는사람> [메시지]";
+    if (!targetText.trim() || !recipient.trim()) return "사용법: email|mail <서버 ip|이름> <받는사람> [메시지]";
     const message = messageParts.join(" ").trim() || `${device.label} mail test`;
     const resolved = await resolveDesktopNetworkTarget(project, device, targetText, onProjectChange);
     if (!resolved.target) return resolved.error;
