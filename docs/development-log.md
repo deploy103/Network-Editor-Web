@@ -24,6 +24,7 @@
 - Expanded Desktop command prompt behavior with `ipconfig /displaydns`, DNS reverse lookup, and bounded `ping -n <count>` replies.
 - Added DHCP binding CSV export and per-binding release controls in the Services DHCP panel.
 - Improved CLI `show ip dhcp binding` with IOS-style headers, lease expiration, binding type, and smoke coverage.
+- Added CLI `show ... | count <text>` pipe support and smoke coverage for include, exclude, begin, section, and count filters.
 
 ### TODO
 
