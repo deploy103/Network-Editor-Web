@@ -3929,6 +3929,7 @@ function EventPanel({
   const selectedPacketEvents = selectedPacketKey
     ? project.simulationEvents.filter((event) => (event.packetId ?? event.id) === selectedPacketKey)
     : [];
+  const visiblePacketEvents = selectedPacketEvents.slice(-8);
   const eventStats = {
     total: project.simulationEvents.length,
     forwarded: project.simulationEvents.filter((event) => event.status === "forwarded").length,
@@ -4061,8 +4062,8 @@ function EventPanel({
                   </dl>
                   {selectedPacketEvents.length > 1 && (
                     <ol className="pdu-hop-list">
-                      {selectedPacketEvents.length > 8 && <li className="more"><span>이전 {selectedPacketEvents.length - 8}단계 더 있음</span></li>}
-                      {selectedPacketEvents.slice(-8).map((event, index) => (
+                      {selectedPacketEvents.length > visiblePacketEvents.length && <li className="more"><span>이전 {selectedPacketEvents.length - visiblePacketEvents.length}단계 더 있음</span></li>}
+                      {visiblePacketEvents.map((event, index) => (
                         <li
                           aria-current={event.id === activeEventId ? "true" : undefined}
                           aria-label={`${event.type} ${eventStatusLabel(event.status)} 단계, ${eventDeviceLabel(project, event.lastDeviceId)}에서 ${eventDeviceLabel(project, event.atDeviceId)}`}
@@ -4073,7 +4074,7 @@ function EventPanel({
                           role="button"
                           tabIndex={onFocusEvent ? 0 : -1}
                         >
-                          <b>{index + 1}</b>
+                          <b>{selectedPacketEvents.length - visiblePacketEvents.length + index + 1}</b>
                           <span>{eventDeviceLabel(project, event.lastDeviceId)} -&gt; {eventDeviceLabel(project, event.atDeviceId)}</span>
                           <small>{event.type} / {eventStatusLabel(event.status)}</small>
                         </li>
