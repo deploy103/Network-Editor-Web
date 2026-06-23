@@ -70,6 +70,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
   const [complexPduSourceId, setComplexPduSourceId] = useState("");
   const [complexPduProtocol, setComplexPduProtocol] = useState<ComplexPduProtocol>("icmp");
   const [complexPduCount, setComplexPduCount] = useState(1);
+  const [complexPduTtl, setComplexPduTtl] = useState(128);
+  const [complexPduIntervalMs, setComplexPduIntervalMs] = useState(0);
   const [engineName, setEngineName] = useState("엔진 로딩 중");
   const [focusedEventId, setFocusedEventId] = useState("");
   const deviceWindow = project.devices.find((device) => device.id === deviceWindowId) ?? null;
@@ -328,20 +330,24 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     const previousEventCount = project.simulationEvents.length;
     const protocolLabel = complexPduProtocolLabel(complexPduProtocol);
     const repeatCount = Math.max(1, Math.min(10, complexPduCount));
+    const ttl = Math.max(1, Math.min(255, complexPduTtl));
+    const intervalMs = Math.max(0, Math.min(2000, complexPduIntervalMs));
     if (complexPduProtocol === "icmp") {
       let nextProject = project;
       let success = 0;
       let dropped = 0;
       let lastMessage = "";
       for (let index = 0; index < repeatCount; index += 1) {
+        const eventStart = nextProject.simulationEvents.length;
         const result = await simulatePing(nextProject, sourceId, targetId);
-        nextProject = result.project;
+        nextProject = annotateComplexPduEvents(result.project, eventStart, ttl, intervalMs, index, repeatCount);
         lastMessage = result.message;
         if (result.success) success += 1;
         else dropped += 1;
+        if (intervalMs > 0 && index < repeatCount - 1) await waitForInterval(intervalMs);
       }
       onChange(nextProject);
-      setMessage(`Complex PDU ${protocolLabel} ${repeatCount}회 완료: 성공 ${success}개, 실패 ${dropped}개. ${lastMessage}`);
+      setMessage(`Complex PDU ${protocolLabel} ${repeatCount}회 완료: 성공 ${success}개, 실패 ${dropped}개. TTL ${ttl}, 간격 ${intervalMs}ms. ${lastMessage}`);
       setTimeMode("simulation");
       setFocusedEventId(nextProject.simulationEvents[previousEventCount]?.id ?? nextProject.simulationEvents.at(-1)?.id ?? "");
       return;
@@ -353,8 +359,9 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     let lastInfo = "";
     const complexPacketId = createId("packet");
     for (let index = 0; index < repeatCount; index += 1) {
+      const eventStart = nextProject.simulationEvents.length;
       const reachability = await simulatePing(nextProject, sourceId, targetId);
-      nextProject = reachability.project;
+      nextProject = annotateComplexPduEvents(reachability.project, eventStart, ttl, intervalMs, index, repeatCount);
       let status: SimulationEvent["status"] = "delivered";
       let info = "";
       if (!reachability.success) {
@@ -367,13 +374,15 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
         info = `${source.label}에서 ${target.label}(으)로 ${protocolLabel} PDU를 전달했습니다.`;
       }
       if (repeatCount > 1) info = `[${index + 1}/${repeatCount}] ${info}`;
+      info = `${info}${complexPduOptionSuffix(ttl, intervalMs)}`;
       lastInfo = info;
       nextProject = appendDesktopEvent(nextProject, sourceId, targetId, complexPduProtocol.toUpperCase(), info, status, complexPacketId);
       if (complexPduProtocol === "syslog" && status === "delivered") {
-        nextProject = appendServerLog(nextProject, targetId, "info", `${source.label}: Complex PDU syslog test ${index + 1}/${repeatCount}`);
+        nextProject = appendServerLog(nextProject, targetId, "info", `${source.label}: Complex PDU syslog test ${index + 1}/${repeatCount} TTL ${ttl}`);
       }
       if (status === "delivered") delivered += 1;
       else dropped += 1;
+      if (intervalMs > 0 && index < repeatCount - 1) await waitForInterval(intervalMs);
     }
     onChange(nextProject);
     setTimeMode("simulation");
@@ -1146,6 +1155,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
               {complexPduProtocols.map((protocol) => <option key={protocol.value} value={protocol.value}>{protocol.label}</option>)}
             </select>
             <label className="complex-pdu-count">횟수<input aria-label="Complex PDU 반복 횟수" max={10} min={1} type="number" value={complexPduCount} onChange={(event) => setComplexPduCount(boundedNumber(event.target.value, 1, 10))} /></label>
+            <label className="complex-pdu-count">TTL<input aria-label="Complex PDU TTL" max={255} min={1} type="number" value={complexPduTtl} onChange={(event) => setComplexPduTtl(boundedNumber(event.target.value, 1, 255))} /></label>
+            <label className="complex-pdu-count">간격<input aria-label="Complex PDU 반복 간격" max={2000} min={0} step={100} type="number" value={complexPduIntervalMs} onChange={(event) => setComplexPduIntervalMs(boundedNumber(event.target.value, 0, 2000))} /></label>
             <span>{complexPduSource ? "목적지 선택" : "출발지 선택"}</span>
             <button className="hud-icon-button" onClick={(event) => { event.stopPropagation(); selectMode(); }} title="PDU 취소" type="button"><X size={14} /></button>
           </div>
@@ -2162,6 +2173,25 @@ function eventStatusLabel(status: SimulationEvent["status"]): string {
 
 function complexPduProtocolLabel(protocol: ComplexPduProtocol): string {
   return complexPduProtocols.find((item) => item.value === protocol)?.label ?? protocol.toUpperCase();
+}
+
+function complexPduOptionSuffix(ttl: number, intervalMs: number): string {
+  const parts = [`TTL ${ttl}`];
+  if (intervalMs > 0) parts.push(`${intervalMs}ms interval`);
+  return ` (${parts.join(", ")})`;
+}
+
+function annotateComplexPduEvents(project: NetworkProject, fromIndex: number, ttl: number, intervalMs: number, repeatIndex: number, repeatCount: number): NetworkProject {
+  const suffix = complexPduOptionSuffix(ttl, intervalMs);
+  const prefix = repeatCount > 1 ? `[${repeatIndex + 1}/${repeatCount}] ` : "";
+  return {
+    ...project,
+    simulationEvents: project.simulationEvents.map((event, index) => index < fromIndex ? event : { ...event, info: `${prefix}${event.info}${suffix}` })
+  };
+}
+
+function waitForInterval(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function complexPduServiceEnabled(device: NetworkDevice, protocol: ComplexPduProtocol): boolean {
