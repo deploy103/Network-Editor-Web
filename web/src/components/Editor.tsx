@@ -3923,6 +3923,10 @@ function EventPanel({
   const activeEventId = focusedEventId ?? "";
   const focusedIndex = filteredEvents.findIndex((event) => event.id === activeEventId);
   const selectedEvent = filteredEvents.find((event) => event.id === activeEventId) ?? filteredEvents.at(-1);
+  const selectedPacketKey = selectedEvent ? selectedEvent.packetId ?? selectedEvent.id : "";
+  const selectedPacketEvents = selectedPacketKey
+    ? project.simulationEvents.filter((event) => (event.packetId ?? event.id) === selectedPacketKey)
+    : [];
   const eventStats = {
     total: project.simulationEvents.length,
     forwarded: project.simulationEvents.filter((event) => event.status === "forwarded").length,
@@ -4053,6 +4057,17 @@ function EventPanel({
                     <div><dt>현재</dt><dd>{eventDeviceLabel(project, selectedEvent.atDeviceId)}</dd></div>
                     <div><dt>패킷</dt><dd>{(selectedEvent.packetId ?? selectedEvent.id).slice(-10)}</dd></div>
                   </dl>
+                  {selectedPacketEvents.length > 1 && (
+                    <ol className="pdu-hop-list">
+                      {selectedPacketEvents.slice(-8).map((event, index) => (
+                        <li className={event.status} key={event.id}>
+                          <b>{index + 1}</b>
+                          <span>{eventDeviceLabel(project, event.lastDeviceId)} -&gt; {eventDeviceLabel(project, event.atDeviceId)}</span>
+                          <small>{event.type} / {eventStatusLabel(event.status)}</small>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
                   <div className="pdu-layer-list">{(selectedEvent.osiLayers?.length ? selectedEvent.osiLayers : ["Layer 2", "Layer 3"]).map((layer) => <span key={layer}>{layer}</span>)}</div>
                 </div>
               )}
