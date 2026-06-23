@@ -4230,6 +4230,28 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
     setServiceNotice(`DHCP 바인딩 CSV를 내보냈습니다 (${device.runtime.dhcpLeases.length}개).`);
   }
 
+  function exportDnsRecords() {
+    if (!device.config.dnsRecords.length) {
+      setServiceNotice("내보낼 DNS 레코드가 없습니다.");
+      return;
+    }
+    const headers = ["name", "address"];
+    const rows = device.config.dnsRecords.map((record) => [record.name, record.value]);
+    const lines = [headers, ...rows].map((row) => row.map(csvCell).join(","));
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${device.label.replace(/[^a-zA-Z0-9_.-]/g, "_") || "device"}-dns-records.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
+    setServiceNotice(`DNS 레코드 CSV를 내보냈습니다 (${device.config.dnsRecords.length}개).`);
+  }
+
   function clearDhcpLease(ipAddress: string, clientDeviceId: string) {
     onUpdate({
       ...device,
@@ -4439,7 +4461,7 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
           )}
           {servicePane === "dns" && (
             <div className="config-group">
-              <header><strong>DNS</strong><label className="toggle"><input checked={device.config.services.dns} onChange={(event) => toggleService("dns", event.target.checked)} type="checkbox" />서비스</label><small>레코드 {device.config.dnsRecords.length}개</small></header>
+              <header><strong>DNS</strong><label className="toggle"><input checked={device.config.services.dns} onChange={(event) => toggleService("dns", event.target.checked)} type="checkbox" />서비스</label><div className="service-header-actions"><small>레코드 {device.config.dnsRecords.length}개</small><button className="secondary-action" disabled={!device.config.dnsRecords.length} onClick={exportDnsRecords} type="button">CSV</button></div></header>
               <div className="service-draft-grid dns-draft">
                 <label>이름<input value={recordDraft.name} onChange={(event) => setRecordDraft({ ...recordDraft, name: event.target.value })} placeholder="www.lab.local" /></label>
                 <label>주소<input value={recordDraft.value} onChange={(event) => setRecordDraft({ ...recordDraft, value: event.target.value })} placeholder="192.168.1.10" /></label>
