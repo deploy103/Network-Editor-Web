@@ -314,6 +314,13 @@ assert(logging.includes("192.168.10.50"), "show logging must show configured hos
 assert(logging.includes("Console logging: disabled"), "show logging must show console logging state");
 device = { ...device, runtime: { ...device.runtime, logs: [{ id: "log_cli_smoke", level: "info", message: "cli smoke log", createdAt: Date.now() }] } };
 assert(run("show logging").includes("cli smoke log"), "show logging must show buffered runtime logs");
+device = { ...device, runtime: { ...device.runtime, logs: [
+  { id: "log_http_smoke", level: "info", message: "HTTP GET from PC0", createdAt: Date.now() },
+  { id: "log_ftp_smoke", level: "info", message: "FTP LIST from PC0", createdAt: Date.now() }
+] } };
+run("clear service logs ftp");
+assert(run("show logging").includes("HTTP GET from PC0"), "clear service logs ftp must preserve other service logs");
+assert(!run("show logging").includes("FTP LIST from PC0"), "clear service logs ftp must remove FTP logs");
 run("clear logging");
 assert(run("show logging").includes("No logging messages"), "clear logging must remove buffered runtime logs");
 run("wr");
