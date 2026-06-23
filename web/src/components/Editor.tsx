@@ -642,6 +642,39 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage("진단 리포트를 내보냈습니다.");
   }
 
+  function exportSimulationEvents() {
+    if (project.simulationEvents.length === 0) {
+      setMessage("내보낼 시뮬레이션 이벤트가 없습니다.");
+      return;
+    }
+    const headers = ["time", "type", "status", "source", "target", "lastDevice", "atDevice", "packetId", "info", "osiLayers"];
+    const rows = project.simulationEvents.map((event) => [
+      new Date(event.time).toISOString(),
+      event.type,
+      event.status,
+      eventDeviceLabel(project, event.sourceDeviceId ?? event.lastDeviceId),
+      eventDeviceLabel(project, event.targetDeviceId ?? event.atDeviceId),
+      eventDeviceLabel(project, event.lastDeviceId),
+      eventDeviceLabel(project, event.atDeviceId),
+      event.packetId ?? "",
+      event.info,
+      event.osiLayers.join(" / ")
+    ]);
+    const lines = [headers, ...rows].map((row) => row.map(csvCell).join(","));
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${project.name.replace(/[^a-zA-Z0-9_.-]/g, "_") || "network"}-simulation-events.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
+    setMessage("시뮬레이션 이벤트 CSV를 내보냈습니다.");
+  }
+
   function updateViewport() {
     const workspace = workspaceRef.current;
     if (!workspace) return;
@@ -964,6 +997,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
         { label: "프로젝트 복구", action: repairCurrentProject },
         { label: "진단 실행", action: () => setMessage(`프로젝트 수준 이슈 ${diagnoseProject(project).length}개`) },
         { label: "진단 리포트 내보내기", action: exportDiagnosticReport },
+        { label: "시뮬레이션 이벤트 CSV 내보내기", action: exportSimulationEvents, disabled: project.simulationEvents.length === 0 },
         { label: "Simple PDU 추가", action: startSimplePduTool, disabled: project.devices.length < 2 },
         { label: "Complex PDU 추가", action: startComplexPduTool, disabled: project.devices.length < 2 },
         { label: "장비 자동 정렬", action: autoArrangeTopology, disabled: project.devices.length === 0 },
@@ -1418,6 +1452,11 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
 function saveStatusLabel(status: SaveStatus, lastSavedAt: string): string {
   if (status === "saved" && lastSavedAt) return `저장됨 ${lastSavedAt}`;
   return ({ saved: "저장됨", pending: "저장 대기", saving: "저장 중", error: "저장 오류" })[status];
+}
+
+function csvCell(value: string): string {
+  if (!/[",\n\r]/.test(value)) return value;
+  return `"${value.replace(/"/g, "\"\"")}"`;
 }
 
 function enabledServices(device: NetworkDevice): string[] {
