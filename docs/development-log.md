@@ -35,6 +35,7 @@
 - Added CLI `show ip dhcp binding <ip|client|mac>` filtering with missing-binding feedback.
 - Added CLI `show mac address-table address <mac>` filtering with normalized MAC comparison.
 - Added CLI `show arp <ip|mac|interface>` and `show ip arp <ip|mac|interface>` filtering.
+- Added CLI `show hosts <name|address>` filtering with missing-host feedback.
 
 ### TODO
 
