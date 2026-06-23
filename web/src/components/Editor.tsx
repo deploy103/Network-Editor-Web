@@ -544,6 +544,22 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage(`링크 끝점 포트를 ${adminUp ? "활성화" : "shutdown"}했습니다.`);
   }
 
+  function setSerialClockRate(linkId: string) {
+    const link = project.links.find((item) => item.id === linkId);
+    if (!link || (link.type !== "serial-dce" && link.type !== "serial-dte")) return;
+    const clockEndpoint = link.dceEndpoint === "B" ? link.endpointB : link.endpointA;
+    const nextProject = recalc({
+      ...project,
+      devices: project.devices.map((device) => ({
+        ...device,
+        ports: device.ports.map((port) => device.id === clockEndpoint.deviceId && port.id === clockEndpoint.portId ? { ...port, clockRate: 64000 } : port)
+      }))
+    });
+    onChange(nextProject);
+    setSelectedLinkId(linkId);
+    setMessage("Serial DCE clock rate를 64000으로 설정했습니다.");
+  }
+
   function setAllDevicePower(powerOn: boolean) {
     if (project.devices.length === 0) {
       setMessage("전원을 제어할 장비가 없습니다.");
@@ -1460,6 +1476,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
           onClose={() => setLinkMenu(null)}
           onOpenDevice={(deviceId) => openDeviceWindow(deviceId)}
           onSetEndpointAdmin={setLinkEndpointAdmin}
+          onSetSerialClock={setSerialClockRate}
           onRemove={(linkId) => {
             onChange(removeLink(project, linkId));
             if (selectedLinkId === linkId) setSelectedLinkId("");
@@ -1851,6 +1868,7 @@ function LinkContextMenu({
   onClose,
   onOpenDevice,
   onSetEndpointAdmin,
+  onSetSerialClock,
   onRemove
 }: {
   link: NetworkLink | null;
@@ -1860,6 +1878,7 @@ function LinkContextMenu({
   onClose: () => void;
   onOpenDevice: (deviceId: string) => void;
   onSetEndpointAdmin: (linkId: string, adminUp: boolean) => void;
+  onSetSerialClock: (linkId: string) => void;
   onRemove: (linkId: string) => void;
 }) {
   useEffect(() => {
@@ -1874,6 +1893,7 @@ function LinkContextMenu({
   const endpoints = linkEndpointSummaries(project, link);
   const endpointPorts = [link.endpointA, link.endpointB].map((ref) => project.devices.find((device) => device.id === ref.deviceId)?.ports.find((port) => port.id === ref.portId)).filter((port): port is NetworkPort => Boolean(port));
   const allPortsAdminUp = endpointPorts.length === 2 && endpointPorts.every((port) => port.adminUp);
+  const serialClockMissing = (link.type === "serial-dce" || link.type === "serial-dte") && endpointPorts.every((port) => !port.clockRate);
   const left = typeof window === "undefined" ? x : Math.min(x, Math.max(8, window.innerWidth - 280));
   const top = typeof window === "undefined" ? y : Math.min(y, Math.max(8, window.innerHeight - 330));
 
@@ -1900,6 +1920,7 @@ function LinkContextMenu({
         <small>상태</small>
         <button disabled={!allPortsAdminUp} onClick={() => { onSetEndpointAdmin(link.id, false); onClose(); }} type="button"><Power size={15} />링크 비활성화</button>
         <button disabled={allPortsAdminUp || endpointPorts.length !== 2} onClick={() => { onSetEndpointAdmin(link.id, true); onClose(); }} type="button"><Power size={15} />링크 활성화</button>
+        {(link.type === "serial-dce" || link.type === "serial-dte") && <button disabled={!serialClockMissing} onClick={() => { onSetSerialClock(link.id); onClose(); }} type="button"><CircleDot size={15} />DCE clock 64000</button>}
       </div>
       <div className="context-menu-section danger-zone">
         <button className="danger" onClick={() => onRemove(link.id)} type="button"><Trash2 size={15} />케이블 삭제</button>
