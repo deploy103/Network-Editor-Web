@@ -114,7 +114,7 @@ export interface DhcpExcludedRange {
 export interface AccessRule {
   id: string;
   action: "permit" | "deny";
-  protocol: "ip" | "icmp" | "tcp" | "udp" | "http" | "dns" | "dhcp";
+  protocol: "ip" | "icmp" | "tcp" | "udp" | "http" | "ftp" | "dns" | "dhcp";
   source: string;
   destination: string;
   interfaceName: string;
@@ -158,6 +158,7 @@ export interface DeviceConfig {
   routingProtocols?: Array<{ id: string; protocol: "rip" | "ospf" | "eigrp"; processId?: string; networks: string[]; version?: string; routerId?: string; autoSummary: boolean; passiveInterfaces: string[]; passiveInterfaceDefault?: boolean; passiveInterfaceExceptions?: string[]; redistributeStatic: boolean; defaultInformationOriginate?: boolean; defaultInformationAlways?: boolean }>;
   services: {
     http: boolean;
+    ftp: boolean;
     dhcp: boolean;
     dns: boolean;
     tftp: boolean;
