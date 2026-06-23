@@ -41,6 +41,7 @@
 - Added CLI `show ip route interface <interface>` filtering with compact interface-name matching.
 - Added CLI `show ip protocols <protocol>` filtering with missing-protocol feedback.
 - Updated README implemented surface summary for service exports, Desktop aliases, and CLI filters.
+- Added CLI `show ip route local` filtering for local `/32` routes.
 
 ### TODO
 
