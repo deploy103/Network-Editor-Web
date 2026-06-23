@@ -1974,7 +1974,7 @@ function showCommand(device: NetworkDevice, lower: string, session?: CliSession)
   if (lower === "show ip rip" || lower === "show ip rip database") return ripDatabase(device);
   if (lower === "show ip nat translations") return natTranslations(device);
   if (lower === "show ip nat statistics") return natStatistics(device);
-  if (lower === "show ip dhcp binding") return device.runtime.dhcpLeases.map((lease) => `${lease.ipAddress.padEnd(16)}${lease.macAddress.padEnd(20)}${lease.deviceId}`).join("\n") || "No DHCP bindings.";
+  if (lower === "show ip dhcp binding") return dhcpBindingStatus(device);
   if (lower === "show ip dhcp conflict") return "No DHCP conflicts.";
   if (lower === "show ip dhcp pool") return dhcpPoolStatus(device);
   if (lower === "show ip dhcp server statistics") return dhcpServerStatistics(device);
@@ -2166,6 +2166,20 @@ function serviceDetail(device: NetworkDevice, service: string): string {
   if (service === "syslog") return `${device.runtime.logs.length} buffered messages`;
   if (service === "tftp") return "running-config.txt, startup-config, network-backup.ptweb";
   return "";
+}
+
+function dhcpBindingStatus(device: NetworkDevice): string {
+  if (!device.runtime.dhcpLeases.length) return "No DHCP bindings.";
+  return [
+    "Bindings from all pools not associated with VRF:",
+    "IP address       Client-ID/              Lease expiration         Type",
+    "                 Hardware address/",
+    "                 User name",
+    ...device.runtime.dhcpLeases.map((lease) => {
+      const expires = new Date(lease.expiresAt).toLocaleString("ko-KR", { hour12: false });
+      return `${lease.ipAddress.padEnd(17)}${lease.macAddress.padEnd(24)}${expires.padEnd(25)}Automatic (${lease.deviceId})`;
+    })
+  ].join("\n");
 }
 
 function dhcpServerStatistics(device: NetworkDevice): string {

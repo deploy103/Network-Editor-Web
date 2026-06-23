@@ -254,6 +254,8 @@ device = {
     ]
   }
 };
+const dhcpBinding = run("show ip dhcp binding");
+assert(dhcpBinding.includes("Bindings from all pools") && dhcpBinding.includes("Lease expiration") && dhcpBinding.includes("pc-a"), "show ip dhcp binding must render IOS-style binding table");
 run(`clear mac address-table dynamic interface ${sparePort}`);
 assert(!device.runtime.macTable.some((entry) => entry.type === "dynamic" && entry.portName === sparePort), "clear mac address-table dynamic interface must remove matching dynamic entries only");
 assert(device.runtime.macTable.some((entry) => entry.type === "static" && entry.portName === sparePort), "clear mac address-table dynamic interface must keep static entries");
