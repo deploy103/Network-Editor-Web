@@ -241,7 +241,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
                   : session.aclType === "standard"
                     ? ["permit any", "permit host ", "permit 192.168.1.0 0.0.0.255", "deny any", "deny host ", "no 10", "do show access-lists", "end", "exit", "help"]
                     : ["permit ip any any", "deny ip any any", "permit tcp any host 192.168.1.10 eq 80", "permit icmp any any", "no 10", "do show access-lists", "end", "exit", "help"];
-  return unique([...base, ...device.ports.flatMap((port) => [`interface ${port.name}`, `int ${shortPortAlias(port.name)}`, `show interface ${port.name}`, `show interface ${port.name} switchport`])]);
+  return unique([...base, ...device.ports.flatMap((port) => [`interface ${port.name}`, `int ${shortPortAlias(port.name)}`, `show interface ${port.name}`, `show interface ${port.name} status`, `show interface ${port.name} switchport`])]);
 }
 
 function abbreviatedCandidateMatch(query: string, candidate: string): boolean {
@@ -572,6 +572,7 @@ function expandShowCommand(rest: string[]): string {
     if (isAbbrev(second, "trunk", 2)) return "show interfaces trunk";
     if (isAbbrev(second, "switchport", 2)) return "show interfaces switchport";
     if (isAbbrev(second, "counters", 4)) return "show interfaces counters";
+    if (isAbbrev(lowerRest.at(-1), "status", 2) && rest.length > 2) return `show interface ${rest.slice(1, -1).join(" ")} status`;
     if (isAbbrev(lowerRest.at(-1), "switchport", 2) && rest.length > 2) return `show interface ${rest.slice(1, -1).join(" ")} switchport`;
     if (rest.length > 1) return `show interface ${rest.slice(1).join(" ")}`;
     return "show interfaces";
@@ -1950,19 +1951,16 @@ function showCommand(device: NetworkDevice, lower: string, session?: CliSession)
     return port ? switchportStatus(device, port) : `% Interface ${name} not found.`;
   }
   if (lower === "show interfaces trunk") return trunkStatus(device);
+  if (lower === "show interfaces status") return interfacesStatus(device);
+  if (lower.startsWith("show interface ") && lower.endsWith(" status")) {
+    const name = lower.slice("show interface ".length, lower.length - " status".length).trim();
+    const port = findPort(device, name);
+    return port ? interfacesStatus(device, port) : `% Interface ${name} not found.`;
+  }
   if (lower.startsWith("show interface ")) {
     const name = lower.slice("show interface ".length);
     const port = findPort(device, name);
     return port ? interfaceStatus(device, port) : `% Interface ${name} not found.`;
-  }
-  if (lower === "show interfaces status") {
-    return ["Port                  Name               Status       Vlan  Duplex Speed Type", ...device.ports
-      .filter((port) => port.kind !== "console")
-      .map((port) => {
-        const status = port.linkId && device.powerOn && port.adminUp ? "connected" : port.adminUp ? "notconnect" : "disabled";
-        const vlan = port.mode === "trunk" ? "trunk" : port.mode === "routed" ? "routed" : String(port.vlan);
-        return `${port.name.padEnd(22)}${(port.description || "").slice(0, 16).padEnd(19)}${status.padEnd(13)}${vlan.padEnd(6)}${(port.duplex ?? "auto").padEnd(7)}${(port.speed ?? "auto").padEnd(6)}${port.kind}`;
-      })].join("\n");
   }
   if (lower === "show vlan brief") return vlanBrief(device);
   if (lower === "show vlan summary") return vlanSummary(device);
@@ -2452,6 +2450,16 @@ function interfaceDescriptions(device: NetworkDevice): string {
       return `${port.name.padEnd(30)}${status.padEnd(15)}${protocol.padEnd(9)}${port.description || ""}`;
     })
   ].join("\n");
+}
+
+function interfacesStatus(device: NetworkDevice, selectedPort?: NetworkPort): string {
+  return ["Port                  Name               Status       Vlan  Duplex Speed Type", ...(selectedPort ? [selectedPort] : device.ports)
+    .filter((port) => port.kind !== "console")
+    .map((port) => {
+      const status = port.linkId && device.powerOn && port.adminUp ? "connected" : port.adminUp ? "notconnect" : "disabled";
+      const vlan = port.mode === "trunk" ? "trunk" : port.mode === "routed" ? "routed" : String(port.vlan);
+      return `${port.name.padEnd(22)}${(port.description || "").slice(0, 16).padEnd(19)}${status.padEnd(13)}${vlan.padEnd(6)}${(port.duplex ?? "auto").padEnd(7)}${(port.speed ?? "auto").padEnd(6)}${port.kind}`;
+    })].join("\n");
 }
 
 function interfaceCounters(device: NetworkDevice): string {
