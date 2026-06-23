@@ -4082,6 +4082,11 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
     onUpdate({ ...device, config: { ...device.config, services: { ...device.config.services, [service]: enabled } } });
   }
 
+  function clearServiceLogs(prefix: string) {
+    onUpdate({ ...device, runtime: { ...device.runtime, logs: device.runtime.logs.filter((log) => !log.message.startsWith(prefix)) } });
+    setServiceNotice(`${prefix} 로그를 비웠습니다.`);
+  }
+
   function addPool() {
     const name = poolDraft.name.trim();
     const network = poolDraft.network.trim();
@@ -4274,7 +4279,7 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
           )}
           {servicePane === "http" && (
             <div className="config-group">
-              <header><strong>HTTP</strong><label className="toggle"><input checked={device.config.services.http} onChange={(event) => toggleService("http", event.target.checked)} type="checkbox" />서비스</label></header>
+              <header><strong>HTTP</strong><label className="toggle"><input checked={device.config.services.http} onChange={(event) => toggleService("http", event.target.checked)} type="checkbox" />서비스</label><button className="secondary-action" disabled={!httpLogs.length} onClick={() => clearServiceLogs("HTTP")} type="button">로그 비우기</button></header>
               <div className="diagnostic-row info"><strong>{device.config.services.http ? "HTTP 켜짐" : "HTTP 꺼짐"}</strong><span>서버에 도달 가능할 때 웹 브라우저와 `http` 데스크톱 명령이 이 서비스를 사용합니다.</span></div>
               {httpLogs.length === 0 ? <p className="empty-state">HTTP 요청 로그가 없습니다.</p> : httpLogs.slice(-8).reverse().map((log) => (
                 <div className="diagnostic-row info" key={log.id}>
@@ -4286,7 +4291,7 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
           )}
           {servicePane === "ftp" && (
             <div className="config-group">
-              <header><strong>FTP</strong><label className="toggle"><input checked={device.config.services.ftp} onChange={(event) => toggleService("ftp", event.target.checked)} type="checkbox" />서비스</label></header>
+              <header><strong>FTP</strong><label className="toggle"><input checked={device.config.services.ftp} onChange={(event) => toggleService("ftp", event.target.checked)} type="checkbox" />서비스</label><button className="secondary-action" disabled={!ftpLogs.length} onClick={() => clearServiceLogs("FTP")} type="button">로그 비우기</button></header>
               <div className="diagnostic-row info"><strong>{device.config.services.ftp ? "FTP 켜짐" : "FTP 꺼짐"}</strong><span>데스크톱 `ftp 서버` 명령과 FTP Complex PDU가 이 서비스를 검사합니다.</span></div>
               <div className="compact-row"><span>readme.txt / running-config.txt / network-backup.ptweb</span><small>가상 FTP 디렉터리</small></div>
               {ftpLogs.length === 0 ? <p className="empty-state">FTP 전송 로그가 없습니다.</p> : ftpLogs.slice(-8).reverse().map((log) => (
@@ -4299,7 +4304,7 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
           )}
           {servicePane === "email" && (
             <div className="config-group">
-              <header><strong>EMAIL</strong><label className="toggle"><input checked={device.config.services.email} onChange={(event) => toggleService("email", event.target.checked)} type="checkbox" />서비스</label></header>
+              <header><strong>EMAIL</strong><label className="toggle"><input checked={device.config.services.email} onChange={(event) => toggleService("email", event.target.checked)} type="checkbox" />서비스</label><button className="secondary-action" disabled={!emailLogs.length} onClick={() => clearServiceLogs("EMAIL")} type="button">로그 비우기</button></header>
               <div className="diagnostic-row info"><strong>{device.config.services.email ? "EMAIL 켜짐" : "EMAIL 꺼짐"}</strong><span>데스크톱 `email 서버 사용자 메시지` 명령과 EMAIL Complex PDU가 이 서비스를 검사합니다.</span></div>
               <div className="compact-row"><span>admin@lab.local / user@lab.local</span><small>가상 메일박스</small></div>
               {emailLogs.length === 0 ? <p className="empty-state">수신된 EMAIL 메시지가 없습니다.</p> : emailLogs.slice(-8).reverse().map((log) => (
@@ -4312,7 +4317,7 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
           )}
           {servicePane === "tftp" && (
             <div className="config-group">
-              <header><strong>TFTP</strong><label className="toggle"><input checked={device.config.services.tftp} onChange={(event) => toggleService("tftp", event.target.checked)} type="checkbox" />서비스</label></header>
+              <header><strong>TFTP</strong><label className="toggle"><input checked={device.config.services.tftp} onChange={(event) => toggleService("tftp", event.target.checked)} type="checkbox" />서비스</label><button className="secondary-action" disabled={!tftpLogs.length} onClick={() => clearServiceLogs("TFTP")} type="button">로그 비우기</button></header>
               <div className="diagnostic-row info"><strong>{device.config.services.tftp ? "TFTP 켜짐" : "TFTP 꺼짐"}</strong><span>데스크톱 `tftp 서버` 명령이 도달성과 서비스 상태를 검사하고 이벤트에 기록합니다.</span></div>
               {tftpLogs.length === 0 ? <p className="empty-state">TFTP 요청 로그가 없습니다.</p> : tftpLogs.slice(-8).reverse().map((log) => (
                 <div className="diagnostic-row info" key={log.id}>
