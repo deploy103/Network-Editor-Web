@@ -2187,9 +2187,21 @@ small,
 }
 
 .user-packet-window header {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   color: #24333d;
   font-size: 12px;
+}
+
+.user-packet-window header select {
+  min-width: 72px;
+  max-width: 92px;
+  border: 1px solid #cfd8e0;
+  border-radius: 5px;
+  background: #ffffff;
+  padding: 4px 6px;
+  color: #40515d;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .user-packet-window header small {

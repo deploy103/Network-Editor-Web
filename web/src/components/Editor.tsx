@@ -4344,6 +4344,7 @@ function EventPanel({
   const [osiFilter, setOsiFilter] = useState("all");
   const [eventSearch, setEventSearch] = useState("");
   const [pduDetailTab, setPduDetailTab] = useState<PduDetailTab>("osi");
+  const [userPacketFilter, setUserPacketFilter] = useState("all");
   const [autoPlaying, setAutoPlaying] = useState(false);
   const [captureDelayMs, setCaptureDelayMs] = useState(450);
   const playTimer = useRef<number | null>(null);
@@ -4354,6 +4355,8 @@ function EventPanel({
     (!eventSearchQuery || eventSearchText(project, event).includes(eventSearchQuery))
   );
   const userPackets = userCreatedPacketRows(project);
+  const userPacketProtocols = Array.from(new Set(userPackets.map((packet) => packet.protocol))).sort();
+  const visibleUserPackets = userPacketFilter === "all" ? userPackets : userPackets.filter((packet) => packet.protocol.toLowerCase() === userPacketFilter);
   const activeEventId = focusedEventId ?? "";
   const focusedIndex = filteredEvents.findIndex((event) => event.id === activeEventId);
   const selectedEvent = filteredEvents.find((event) => event.id === activeEventId) ?? filteredEvents.at(-1);
@@ -4483,9 +4486,9 @@ function EventPanel({
             </div>
             <aside className="simulation-side">
               <div className="user-packet-window">
-                <header><strong>사용자 생성 패킷</strong><small>최근 {userPackets.length}개</small></header>
+                <header><strong>사용자 생성 패킷</strong><small>표시 {visibleUserPackets.length}/{userPackets.length}개</small><select aria-label="사용자 생성 패킷 필터" value={userPacketFilter} onChange={(event) => setUserPacketFilter(event.target.value)}><option value="all">전체</option>{userPacketProtocols.map((protocol) => <option key={protocol} value={protocol.toLowerCase()}>{protocol}</option>)}</select></header>
                 <div className="user-packet-head"><span>프로토콜</span><span>출발지</span><span>목적지</span><span>상태</span></div>
-                {userPackets.map((packet) => (
+                {visibleUserPackets.map((packet) => (
                   <button
                     className={`${packet.status} ${activeEventId === packet.id ? "selected" : ""}`}
                     key={packet.id}
@@ -4500,7 +4503,7 @@ function EventPanel({
                     <small>{eventStatusLabel(packet.status)}</small>
                   </button>
                 ))}
-                {userPackets.length === 0 && <p className="event-empty-state">아직 사용자 생성 패킷이 없습니다.</p>}
+                {userPackets.length === 0 ? <p className="event-empty-state">아직 사용자 생성 패킷이 없습니다.</p> : visibleUserPackets.length === 0 && <p className="event-empty-state">현재 필터와 일치하는 사용자 생성 패킷이 없습니다.</p>}
               </div>
               {selectedEvent && (
                 <div className={`pdu-info-panel ${selectedEvent.status}`}>
