@@ -277,6 +277,8 @@ assert(device.runtime.dhcpLeases.length === 1 && device.runtime.dhcpLeases[0].ip
 run("clear ip dhcp binding *");
 assert(device.runtime.dhcpLeases.length === 0, "clear ip dhcp binding * must remove all leases");
 assert(run("sh vlan id 20").includes("VLAN20"), "show vlan id must render VLAN detail");
+assert(run("show vlan name VLAN20").includes("Trunk ports allowing VLAN 20"), "show vlan name must render VLAN detail");
+assert(run("show vlan summary").includes("Number of active VLANs"), "show vlan summary must render VLAN counters");
 const acl = run("sh access-lists");
 assert(acl.includes("Extended IP access list 101"), "show access-lists must group IOS ACLs by list");
 assert(acl.includes("permit ip any any"), "show access-lists must show IOS ACL entry body");
