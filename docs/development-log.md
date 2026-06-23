@@ -27,6 +27,7 @@
 - Added CLI `show ... | count <text>` pipe support and smoke coverage for include, exclude, begin, section, and count filters.
 - Added CLI `show vlan summary` plus smoke coverage for VLAN id/name detail lookups.
 - Added CLI `show interface <port> switchport` for single-port switchport inspection.
+- Added CLI `show interface <port> status` for single-port status inspection.
 
 ### TODO
 
