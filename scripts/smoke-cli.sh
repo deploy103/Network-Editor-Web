@@ -273,6 +273,9 @@ device = {
 };
 const dhcpBinding = run("show ip dhcp binding");
 assert(dhcpBinding.includes("Bindings from all pools") && dhcpBinding.includes("Lease expiration") && dhcpBinding.includes("pc-a"), "show ip dhcp binding must render IOS-style binding table");
+const filteredDhcpBinding = run("show ip dhcp binding 192.168.10.50");
+assert(filteredDhcpBinding.includes("192.168.10.50") && !filteredDhcpBinding.includes("192.168.10.51"), "show ip dhcp binding <ip> must filter binding output");
+assert(run("show ip dhcp binding 192.168.10.99").includes("not found"), "show ip dhcp binding <ip> must report missing bindings");
 run(`clear mac address-table dynamic interface ${sparePort}`);
 assert(!device.runtime.macTable.some((entry) => entry.type === "dynamic" && entry.portName === sparePort), "clear mac address-table dynamic interface must remove matching dynamic entries only");
 assert(device.runtime.macTable.some((entry) => entry.type === "static" && entry.portName === sparePort), "clear mac address-table dynamic interface must keep static entries");

@@ -556,7 +556,7 @@ function expandShowCommand(rest: string[]): string {
       if (rest.length > 2) return `show ip interface ${rest.slice(2).join(" ")}`;
       return "show ip interface";
     }
-    if (isAbbrev(second, "dhcp") && isAbbrev(lowerRest[2], "binding")) return "show ip dhcp binding";
+    if (isAbbrev(second, "dhcp") && isAbbrev(lowerRest[2], "binding")) return ["show ip dhcp binding", ...rest.slice(3)].join(" ").trim();
     if (isAbbrev(second, "dhcp") && isAbbrev(lowerRest[2], "conflict", 4)) return "show ip dhcp conflict";
     if (isAbbrev(second, "dhcp") && isAbbrev(lowerRest[2], "pool")) return ["show ip dhcp pool", ...rest.slice(3)].join(" ").trim();
     if (isAbbrev(second, "dhcp") && isAbbrev(lowerRest[2], "server") && isAbbrev(lowerRest[3], "statistics", 3)) return "show ip dhcp server statistics";
@@ -1988,7 +1988,7 @@ function showCommand(device: NetworkDevice, lower: string, session?: CliSession)
   if (lower === "show ip rip" || lower === "show ip rip database") return ripDatabase(device);
   if (lower === "show ip nat translations") return natTranslations(device);
   if (lower === "show ip nat statistics") return natStatistics(device);
-  if (lower === "show ip dhcp binding") return dhcpBindingStatus(device);
+  if (lower === "show ip dhcp binding" || lower.startsWith("show ip dhcp binding ")) return dhcpBindingStatus(device, lower.slice("show ip dhcp binding".length).trim());
   if (lower === "show ip dhcp conflict") return "No DHCP conflicts.";
   if (lower === "show ip dhcp pool" || lower.startsWith("show ip dhcp pool ")) return dhcpPoolStatus(device, lower.slice("show ip dhcp pool".length).trim());
   if (lower === "show ip dhcp server statistics") return dhcpServerStatistics(device);
@@ -2182,14 +2182,18 @@ function serviceDetail(device: NetworkDevice, service: string): string {
   return "";
 }
 
-function dhcpBindingStatus(device: NetworkDevice): string {
-  if (!device.runtime.dhcpLeases.length) return "No DHCP bindings.";
+function dhcpBindingStatus(device: NetworkDevice, filter = ""): string {
+  const query = filter.trim().toLowerCase();
+  const leases = query
+    ? device.runtime.dhcpLeases.filter((lease) => lease.ipAddress === query || lease.deviceId.toLowerCase().includes(query) || lease.macAddress.toLowerCase() === query)
+    : device.runtime.dhcpLeases;
+  if (!leases.length) return query ? `% DHCP binding ${filter} not found.` : "No DHCP bindings.";
   return [
     "Bindings from all pools not associated with VRF:",
     "IP address       Client-ID/              Lease expiration         Type",
     "                 Hardware address/",
     "                 User name",
-    ...device.runtime.dhcpLeases.map((lease) => {
+    ...leases.map((lease) => {
       const expires = new Date(lease.expiresAt).toLocaleString("ko-KR", { hour12: false });
       return `${lease.ipAddress.padEnd(17)}${lease.macAddress.padEnd(24)}${expires.padEnd(25)}Automatic (${lease.deviceId})`;
     })
