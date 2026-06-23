@@ -525,6 +525,25 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage(`${device.label} 전원을 ${device.powerOn ? "껐습니다" : "켰습니다"}.`);
   }
 
+  function setLinkEndpointAdmin(linkId: string, adminUp: boolean) {
+    const link = project.links.find((item) => item.id === linkId);
+    if (!link) return;
+    const endpointKeys = new Set([
+      `${link.endpointA.deviceId}:${link.endpointA.portId}`,
+      `${link.endpointB.deviceId}:${link.endpointB.portId}`
+    ]);
+    const nextProject = recalc({
+      ...project,
+      devices: project.devices.map((device) => ({
+        ...device,
+        ports: device.ports.map((port) => endpointKeys.has(`${device.id}:${port.id}`) ? { ...port, adminUp } : port)
+      }))
+    });
+    onChange(nextProject);
+    setSelectedLinkId(linkId);
+    setMessage(`링크 끝점 포트를 ${adminUp ? "활성화" : "shutdown"}했습니다.`);
+  }
+
   function setAllDevicePower(powerOn: boolean) {
     if (project.devices.length === 0) {
       setMessage("전원을 제어할 장비가 없습니다.");
@@ -1440,6 +1459,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
           y={linkMenu.y}
           onClose={() => setLinkMenu(null)}
           onOpenDevice={(deviceId) => openDeviceWindow(deviceId)}
+          onSetEndpointAdmin={setLinkEndpointAdmin}
           onRemove={(linkId) => {
             onChange(removeLink(project, linkId));
             if (selectedLinkId === linkId) setSelectedLinkId("");
@@ -1830,6 +1850,7 @@ function LinkContextMenu({
   y,
   onClose,
   onOpenDevice,
+  onSetEndpointAdmin,
   onRemove
 }: {
   link: NetworkLink | null;
@@ -1838,6 +1859,7 @@ function LinkContextMenu({
   y: number;
   onClose: () => void;
   onOpenDevice: (deviceId: string) => void;
+  onSetEndpointAdmin: (linkId: string, adminUp: boolean) => void;
   onRemove: (linkId: string) => void;
 }) {
   useEffect(() => {
@@ -1850,6 +1872,8 @@ function LinkContextMenu({
 
   if (!link) return null;
   const endpoints = linkEndpointSummaries(project, link);
+  const endpointPorts = [link.endpointA, link.endpointB].map((ref) => project.devices.find((device) => device.id === ref.deviceId)?.ports.find((port) => port.id === ref.portId)).filter((port): port is NetworkPort => Boolean(port));
+  const allPortsAdminUp = endpointPorts.length === 2 && endpointPorts.every((port) => port.adminUp);
   const left = typeof window === "undefined" ? x : Math.min(x, Math.max(8, window.innerWidth - 280));
   const top = typeof window === "undefined" ? y : Math.min(y, Math.max(8, window.innerHeight - 330));
 
@@ -1871,6 +1895,11 @@ function LinkContextMenu({
         <small>끝점</small>
         <button onClick={() => { onOpenDevice(link.endpointA.deviceId); onClose(); }} type="button"><Info size={15} />{endpoints[0]?.device ?? "끝점 A"}</button>
         <button onClick={() => { onOpenDevice(link.endpointB.deviceId); onClose(); }} type="button"><Info size={15} />{endpoints[1]?.device ?? "끝점 B"}</button>
+      </div>
+      <div className="context-menu-section">
+        <small>상태</small>
+        <button disabled={!allPortsAdminUp} onClick={() => { onSetEndpointAdmin(link.id, false); onClose(); }} type="button"><Power size={15} />링크 비활성화</button>
+        <button disabled={allPortsAdminUp || endpointPorts.length !== 2} onClick={() => { onSetEndpointAdmin(link.id, true); onClose(); }} type="button"><Power size={15} />링크 활성화</button>
       </div>
       <div className="context-menu-section danger-zone">
         <button className="danger" onClick={() => onRemove(link.id)} type="button"><Trash2 size={15} />케이블 삭제</button>
