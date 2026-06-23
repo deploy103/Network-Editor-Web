@@ -44,6 +44,7 @@
 - Added CLI `show ip route local` filtering for local `/32` routes.
 - Added CLI `show ip route gateway <ip>` / `show ip route via <ip>` filtering for static next hops.
 - Added CLI `show services enabled|disabled` state filtering.
+- Expanded CLI completion hints for newly added filter commands.
 
 ### TODO
 
