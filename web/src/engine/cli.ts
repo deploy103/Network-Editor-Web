@@ -2752,6 +2752,10 @@ function filterRouteLines(lines: string[], filter: string): string[] {
   if (filter === "connected" || filter === "directly-connected") return lines.filter((line) => line.startsWith("C") || line.startsWith("L"));
   if (filter === "local") return lines.filter((line) => line.startsWith("L"));
   if (filter === "static") return lines.filter((line) => line.startsWith("S"));
+  if (filter.startsWith("gateway ") || filter.startsWith("via ")) {
+    const nextHop = filter.replace(/^(gateway|via)\s+/, "").trim();
+    return lines.filter((line) => line.toLowerCase().includes(`via ${nextHop.toLowerCase()}`));
+  }
   if (filter.startsWith("interface ")) {
     const name = filter.slice("interface ".length).trim().toLowerCase();
     const compactName = name.replace(/\s+/g, "");
