@@ -560,6 +560,59 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage("Serial DCE clock rate를 64000으로 설정했습니다.");
   }
 
+  function repairLinkVlans(linkId: string) {
+    const link = project.links.find((item) => item.id === linkId);
+    const pair = link ? linkEndpointPair(project, link) : null;
+    if (!link || !pair) return;
+    const { aPort, bPort } = pair;
+    const patches = new Map<string, Partial<NetworkPort>>();
+    const ensureVlansByDevice = new Map<string, number[]>();
+
+    function patchPort(deviceId: string, port: NetworkPort, patch: Partial<NetworkPort>) {
+      patches.set(`${deviceId}:${port.id}`, { ...(patches.get(`${deviceId}:${port.id}`) ?? {}), ...patch });
+    }
+    function ensureDeviceVlan(deviceId: string, vlan: number) {
+      ensureVlansByDevice.set(deviceId, [...(ensureVlansByDevice.get(deviceId) ?? []), vlan]);
+    }
+
+    if (aPort.mode === "access" && bPort.mode === "access" && aPort.vlan !== bPort.vlan) {
+      patchPort(pair.bDevice.id, bPort, { vlan: aPort.vlan });
+      ensureDeviceVlan(pair.bDevice.id, aPort.vlan);
+    } else if (aPort.mode === "trunk" && bPort.mode === "trunk" && !aPort.allowedVlans.some((vlan) => bPort.allowedVlans.includes(vlan))) {
+      const union = Array.from(new Set([...aPort.allowedVlans, ...bPort.allowedVlans, 1].filter(validVlanId))).sort((left, right) => left - right);
+      patchPort(pair.aDevice.id, aPort, { allowedVlans: union });
+      patchPort(pair.bDevice.id, bPort, { allowedVlans: union });
+      union.forEach((vlan) => { ensureDeviceVlan(pair.aDevice.id, vlan); ensureDeviceVlan(pair.bDevice.id, vlan); });
+    } else if (aPort.mode === "trunk" && bPort.mode === "access" && !aPort.allowedVlans.includes(bPort.vlan)) {
+      const allowedVlans = Array.from(new Set([...aPort.allowedVlans, bPort.vlan].filter(validVlanId))).sort((left, right) => left - right);
+      patchPort(pair.aDevice.id, aPort, { allowedVlans });
+      ensureDeviceVlan(pair.aDevice.id, bPort.vlan);
+    } else if (bPort.mode === "trunk" && aPort.mode === "access" && !bPort.allowedVlans.includes(aPort.vlan)) {
+      const allowedVlans = Array.from(new Set([...bPort.allowedVlans, aPort.vlan].filter(validVlanId))).sort((left, right) => left - right);
+      patchPort(pair.bDevice.id, bPort, { allowedVlans });
+      ensureDeviceVlan(pair.bDevice.id, aPort.vlan);
+    }
+
+    if (patches.size === 0) {
+      setMessage("이 링크에는 자동 복구할 VLAN 문제가 없습니다.");
+      return;
+    }
+    const nextProject = recalc({
+      ...project,
+      devices: project.devices.map((device) => {
+        const ensuredVlans = ensureVlansByDevice.get(device.id) ?? [];
+        return {
+          ...device,
+          config: ensuredVlans.length ? { ...device.config, vlans: ensureVlanRows(device.config.vlans, ensuredVlans) } : device.config,
+          ports: device.ports.map((port) => ({ ...port, ...(patches.get(`${device.id}:${port.id}`) ?? {}) }))
+        };
+      })
+    });
+    onChange(nextProject);
+    setSelectedLinkId(linkId);
+    setMessage("링크 VLAN 설정을 자동 복구했습니다.");
+  }
+
   function setAllDevicePower(powerOn: boolean) {
     if (project.devices.length === 0) {
       setMessage("전원을 제어할 장비가 없습니다.");
@@ -1477,6 +1530,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
           onOpenDevice={(deviceId) => openDeviceWindow(deviceId)}
           onSetEndpointAdmin={setLinkEndpointAdmin}
           onSetSerialClock={setSerialClockRate}
+          onRepairVlans={repairLinkVlans}
           onRemove={(linkId) => {
             onChange(removeLink(project, linkId));
             if (selectedLinkId === linkId) setSelectedLinkId("");
@@ -1869,6 +1923,7 @@ function LinkContextMenu({
   onOpenDevice,
   onSetEndpointAdmin,
   onSetSerialClock,
+  onRepairVlans,
   onRemove
 }: {
   link: NetworkLink | null;
@@ -1879,6 +1934,7 @@ function LinkContextMenu({
   onOpenDevice: (deviceId: string) => void;
   onSetEndpointAdmin: (linkId: string, adminUp: boolean) => void;
   onSetSerialClock: (linkId: string) => void;
+  onRepairVlans: (linkId: string) => void;
   onRemove: (linkId: string) => void;
 }) {
   useEffect(() => {
@@ -1894,6 +1950,7 @@ function LinkContextMenu({
   const endpointPorts = [link.endpointA, link.endpointB].map((ref) => project.devices.find((device) => device.id === ref.deviceId)?.ports.find((port) => port.id === ref.portId)).filter((port): port is NetworkPort => Boolean(port));
   const allPortsAdminUp = endpointPorts.length === 2 && endpointPorts.every((port) => port.adminUp);
   const serialClockMissing = (link.type === "serial-dce" || link.type === "serial-dte") && endpointPorts.every((port) => !port.clockRate);
+  const hasVlanIssue = linkHasVlanIssue(project, link);
   const left = typeof window === "undefined" ? x : Math.min(x, Math.max(8, window.innerWidth - 280));
   const top = typeof window === "undefined" ? y : Math.min(y, Math.max(8, window.innerHeight - 330));
 
@@ -1921,6 +1978,7 @@ function LinkContextMenu({
         <button disabled={!allPortsAdminUp} onClick={() => { onSetEndpointAdmin(link.id, false); onClose(); }} type="button"><Power size={15} />링크 비활성화</button>
         <button disabled={allPortsAdminUp || endpointPorts.length !== 2} onClick={() => { onSetEndpointAdmin(link.id, true); onClose(); }} type="button"><Power size={15} />링크 활성화</button>
         {(link.type === "serial-dce" || link.type === "serial-dte") && <button disabled={!serialClockMissing} onClick={() => { onSetSerialClock(link.id); onClose(); }} type="button"><CircleDot size={15} />DCE clock 64000</button>}
+        <button disabled={!hasVlanIssue} onClick={() => { onRepairVlans(link.id); onClose(); }} type="button"><Wrench size={15} />VLAN 자동 복구</button>
       </div>
       <div className="context-menu-section danger-zone">
         <button className="danger" onClick={() => onRemove(link.id)} type="button"><Trash2 size={15} />케이블 삭제</button>
@@ -2308,6 +2366,25 @@ function linkStatusDetail(project: NetworkProject, link: NetworkLink): string {
   if (aPort.mode === "trunk" && bPort.mode === "access" && !aPort.allowedVlans.includes(bPort.vlan)) return `Trunk가 access VLAN ${bPort.vlan}을 허용하지 않습니다.`;
   if (bPort.mode === "trunk" && aPort.mode === "access" && !bPort.allowedVlans.includes(aPort.vlan)) return `Trunk가 access VLAN ${aPort.vlan}을 허용하지 않습니다.`;
   return "링크가 정상 동작 중입니다.";
+}
+
+function linkEndpointPair(project: NetworkProject, link: NetworkLink): { aDevice: NetworkDevice; aPort: NetworkPort; bDevice: NetworkDevice; bPort: NetworkPort } | null {
+  const aDevice = project.devices.find((device) => device.id === link.endpointA.deviceId);
+  const bDevice = project.devices.find((device) => device.id === link.endpointB.deviceId);
+  const aPort = aDevice?.ports.find((port) => port.id === link.endpointA.portId);
+  const bPort = bDevice?.ports.find((port) => port.id === link.endpointB.portId);
+  return aDevice && aPort && bDevice && bPort ? { aDevice, aPort, bDevice, bPort } : null;
+}
+
+function linkHasVlanIssue(project: NetworkProject, link: NetworkLink): boolean {
+  const pair = linkEndpointPair(project, link);
+  if (!pair) return false;
+  const { aPort, bPort } = pair;
+  if (aPort.mode === "access" && bPort.mode === "access") return aPort.vlan !== bPort.vlan;
+  if (aPort.mode === "trunk" && bPort.mode === "trunk") return !aPort.allowedVlans.some((vlan) => bPort.allowedVlans.includes(vlan));
+  if (aPort.mode === "trunk" && bPort.mode === "access") return !aPort.allowedVlans.includes(bPort.vlan);
+  if (bPort.mode === "trunk" && aPort.mode === "access") return !bPort.allowedVlans.includes(aPort.vlan);
+  return false;
 }
 
 function linkEndpointSummaries(project: NetworkProject, link: NetworkLink): Array<{ side: string; device: string; port: string; mode: string; state: string }> {
