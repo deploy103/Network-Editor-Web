@@ -3606,7 +3606,7 @@ function transportAllows(transportInput: string, protocol: "ssh" | "telnet"): bo
   return tokens.includes("all") || tokens.includes(protocol);
 }
 
-const desktopQuickCommands = ["help", "ipconfig /all", "ipconfig /renew", "ipconfig /release", "arp -a", "route print", "ping www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "web www.lab.local", "ftp www.lab.local", "mail www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
+const desktopQuickCommands = ["help", "ipconfig /all", "ipconfig /displaydns", "ipconfig /renew", "ipconfig /release", "arp -a", "route print", "ping -n 4 www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "web www.lab.local", "ftp www.lab.local", "mail www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
 
 function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: NetworkDevice; project: NetworkProject; onProjectChange: (project: NetworkProject, message: string) => void; onUpdate: (device: NetworkDevice) => void }) {
   const dataPorts = device.ports.filter((port) => port.kind !== "console");
@@ -3730,9 +3730,9 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
   if (lower === "help" || lower === "?") {
     return [
       "지원 명령:",
-      "  ipconfig /all | ipconfig /renew | ipconfig /release",
+      "  ipconfig /all | ipconfig /displaydns | ipconfig /renew | ipconfig /release",
       "  arp -a | route print",
-      "  ping <ip|이름> | tracert <ip|이름> | nslookup <이름>",
+      "  ping [-n 횟수] <ip|이름> | tracert <ip|이름> | nslookup <이름|ip>",
       "  http|web|browser <ip|이름> | ftp <ip|이름> [ls|get 파일] | email|mail <서버> <받는사람> [메시지]",
       "  ssh <ip|이름> | telnet <ip|이름> | tftp <ip|이름> | syslog <ip|이름> <메시지>"
     ].join("\n");
@@ -3748,6 +3748,25 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
         `  DNS 서버 . . . . . . . . . . . . : ${port.dnsServer || "0.0.0.0"}`
       ].join("\n"))
       .join("\n");
+  }
+  if (lower === "ipconfig /displaydns") {
+    const dnsServerIp = device.ports.find((port) => port.dnsServer)?.dnsServer ?? "";
+    if (!dnsServerIp) return "DNS 확인자 캐시에 표시할 서버가 없습니다.";
+    const server = project.devices.find((item) => item.config.services.dns && item.ports.some((port) => port.ipAddress === dnsServerIp));
+    if (!server) return `DNS 서버 ${dnsServerIp}을(를) 찾을 수 없습니다.`;
+    return [
+      "Windows IP Configuration",
+      "",
+      "DNS Resolver Cache",
+      `Server: ${server.label} (${dnsServerIp})`,
+      "",
+      ...(server.config.dnsRecords.length ? server.config.dnsRecords.flatMap((record) => [
+        `Record Name . . . . . : ${record.name}`,
+        `Record Type . . . . . : A`,
+        `A (Host) Record . . . : ${record.value}`,
+        ""
+      ]) : ["캐시된 DNS 레코드가 없습니다."])
+    ].join("\n").trimEnd();
   }
   if (lower === "ipconfig /renew") {
     const result = requestDhcp(project, device.id);
@@ -3773,12 +3792,34 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     return routes.join("\n") || "설치된 라우트가 없습니다.";
   }
   if (lower.startsWith("ping ")) {
-    if (!command.slice(5).trim()) return "사용법: ping <ip|이름>";
-    const resolved = await resolveDesktopNetworkTarget(project, device, command.slice(5), onProjectChange);
-    if (!resolved.target) return `Ping 대상 ${command.slice(5).trim()}을(를) 찾을 수 없습니다: ${resolved.error}`;
-    const result = await simulatePing(resolved.project, device.id, resolved.target.id);
-    onProjectChange(result.project, result.message);
-    return result.success ? result.message : `요청 시간이 초과되었습니다. ${result.message}`;
+    const parsed = parseDesktopPingCommand(command);
+    if (!parsed.targetText.trim()) return "사용법: ping [-n 횟수] <ip|이름>";
+    const resolved = await resolveDesktopNetworkTarget(project, device, parsed.targetText, onProjectChange);
+    if (!resolved.target) return `Ping 대상 ${parsed.targetText.trim()}을(를) 찾을 수 없습니다: ${resolved.error}`;
+    let nextProject = resolved.project;
+    let received = 0;
+    const targetAddress = primaryDeviceIp(resolved.target) || parsed.targetText.trim();
+    const replies: string[] = [];
+    for (let index = 0; index < parsed.count; index += 1) {
+      const result = await simulatePing(nextProject, device.id, resolved.target.id);
+      nextProject = result.project;
+      if (result.success) {
+        received += 1;
+        replies.push(`Reply from ${targetAddress}: bytes=32 time<1ms TTL=128`);
+      } else {
+        replies.push(`Request timed out. ${result.message}`);
+      }
+    }
+    const lost = parsed.count - received;
+    onProjectChange(nextProject, received === parsed.count ? `Ping ${resolved.target.label} 성공 (${received}/${parsed.count}).` : `Ping ${resolved.target.label} 손실 ${lost}/${parsed.count}.`);
+    return [
+      `Pinging ${resolved.target.label} [${targetAddress}] with 32 bytes of data:`,
+      "",
+      ...replies,
+      "",
+      `Ping statistics for ${targetAddress}:`,
+      `    Packets: Sent = ${parsed.count}, Received = ${received}, Lost = ${lost} (${Math.round((lost / parsed.count) * 100)}% loss)`
+    ].join("\n");
   }
   if (lower.startsWith("tracert ") || lower.startsWith("traceroute ")) {
     const targetText = command.split(/\s+/).slice(1).join(" ");
@@ -3810,6 +3851,16 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
       const nextProject = appendDesktopEvent(reachability.project, device.id, server.id, "DNS", `${name} DNS 질의 시간 초과: ${reachability.message}`, "dropped");
       onProjectChange(nextProject, reachability.message);
       return `${name} DNS 요청 시간이 초과되었습니다: ${reachability.message}`;
+    }
+    if (isIpv4(name)) {
+      const reverse = server.config.dnsRecords.find((item) => item.value === name);
+      if (!reverse) {
+        const nextProject = appendDesktopEvent(reachability.project, device.id, server.id, "DNS", `${name} PTR 질의가 NXDOMAIN을 반환했습니다.`, "dropped");
+        onProjectChange(nextProject, "PTR 레코드를 찾을 수 없습니다.");
+        return `서버: ${server.label}\n주소: ${dnsServerIp}\n*** ${name} PTR 레코드가 없습니다.`;
+      }
+      onProjectChange(appendDesktopEvent(reachability.project, device.id, server.id, "DNS", `${name}을(를) ${reverse.name}(으)로 역조회했습니다.`, "delivered"), `DNS가 ${name}을(를) 역조회했습니다.`);
+      return `서버: ${server.label}\n주소: ${dnsServerIp}\n이름: ${reverse.name}\n주소: ${name}`;
     }
     const record = server.config.dnsRecords.find((item) => item.name.toLowerCase() === name.toLowerCase());
     if (!record) {
@@ -3972,7 +4023,18 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     onProjectChange(appendDesktopEvent(loggedProject, device.id, target.id, "SYSLOG", `${target.label}에 SYSLOG 메시지를 기록했습니다.`, "delivered"), "SYSLOG 메시지를 기록했습니다.");
     return `SYSLOG sent to ${target.label}: ${logMessage}`;
   }
-  return "알 수 없는 데스크톱 명령입니다. ipconfig, arp -a, route print, ping <ip|이름>, tracert <ip|이름>, nslookup <이름>, http <ip|이름>, ftp <ip|이름>, email <ip|이름> <받는사람>, ssh <ip|이름>, telnet <ip|이름>, tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
+  return "알 수 없는 데스크톱 명령입니다. help, ipconfig, arp -a, route print, ping [-n 횟수] <ip|이름>, tracert <ip|이름>, nslookup <이름|ip>, http/web <ip|이름>, ftp <ip|이름>, email/mail <ip|이름> <받는사람>, ssh <ip|이름>, telnet <ip|이름>, tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
+}
+
+function parseDesktopPingCommand(command: string): { count: number; targetText: string } {
+  const tokens = command.trim().split(/\s+/).slice(1);
+  if (tokens[0]?.toLowerCase() === "-n") {
+    return { count: boundedNumber(tokens[1] ?? "4", 1, 10), targetText: tokens.slice(2).join(" ") };
+  }
+  if (tokens[0]?.toLowerCase().startsWith("-n") && tokens[0].length > 2) {
+    return { count: boundedNumber(tokens[0].slice(2), 1, 10), targetText: tokens.slice(1).join(" ") };
+  }
+  return { count: 4, targetText: tokens.join(" ") };
 }
 
 function resolveDesktopTarget(project: NetworkProject, value: string): NetworkDevice | null {
