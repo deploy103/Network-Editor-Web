@@ -660,7 +660,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage("진단 리포트를 내보냈습니다.");
   }
 
-  function exportSimulationEvents(events = project.simulationEvents) {
+  function exportSimulationEvents(events = project.simulationEvents, scope = "all") {
     if (events.length === 0) {
       setMessage("내보낼 시뮬레이션 이벤트가 없습니다.");
       return;
@@ -683,14 +683,15 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `${project.name.replace(/[^a-zA-Z0-9_.-]/g, "_") || "network"}-simulation-events.csv`;
+    const fileScope = scope.replace(/[^a-zA-Z0-9_.-]/g, "_") || "all";
+    anchor.download = `${project.name.replace(/[^a-zA-Z0-9_.-]/g, "_") || "network"}-simulation-${fileScope}-events.csv`;
     document.body.appendChild(anchor);
     anchor.click();
     window.setTimeout(() => {
       anchor.remove();
       URL.revokeObjectURL(url);
     }, 0);
-    setMessage(`시뮬레이션 이벤트 CSV를 내보냈습니다 (${events.length}개).`);
+    setMessage(`시뮬레이션 이벤트 CSV를 내보냈습니다 (${scope}, ${events.length}개).`);
   }
 
   function updateViewport() {
@@ -3906,7 +3907,7 @@ function EventPanel({
   mode?: "realtime" | "simulation";
   focusedEventId?: string;
   onClear: () => void;
-  onExportEvents?: (events?: SimulationEvent[]) => void;
+  onExportEvents?: (events?: SimulationEvent[], scope?: string) => void;
   onFocusEvent?: (eventId: string) => void;
   onRemoveLink?: (linkId: string) => void;
   onRepair?: () => void;
@@ -3994,7 +3995,7 @@ function EventPanel({
     <section className={`event-panel ${mode}`}>
       {mode === "simulation" ? (
         <>
-          <header><strong>시뮬레이션 이벤트</strong><select value={eventFilter} onChange={(event) => setEventFilter(event.target.value)}><option value="all">전체</option><option value="icmp">ICMP</option><option value="arp">ARP</option><option value="switch">SWITCH</option><option value="hub">HUB</option><option value="dhcp">DHCP</option><option value="dns">DNS</option><option value="http">HTTP</option><option value="tftp">TFTP</option><option value="syslog">SYSLOG</option><option value="delivered">전달됨</option><option value="forwarded">전송 중</option><option value="dropped">드롭됨</option></select><button disabled={eventFilter === "all"} onClick={() => { stopAutoCapture(); setEventFilter("all"); }} type="button">필터 해제</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusRelative(-1)} type="button">이전</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={captureForward} type="button">캡처/전송</button><button className={autoPlaying ? "active" : ""} disabled={!onFocusEvent || filteredEvents.length === 0} onClick={autoCapturePlay} type="button">{autoPlaying ? "정지" : "자동 재생"}</button><label className="capture-speed-control">속도<select value={captureDelayMs} onChange={(event) => setCaptureDelayMs(Number(event.target.value))}><option value={900}>느림</option><option value={450}>보통</option><option value={180}>빠름</option></select></label><button disabled={!onExportEvents || filteredEvents.length === 0} onClick={() => onExportEvents?.(filteredEvents)} type="button">CSV</button><button onClick={() => { stopAutoCapture(); onClear(); }} type="button">비우기</button></header>
+          <header><strong>시뮬레이션 이벤트</strong><select value={eventFilter} onChange={(event) => setEventFilter(event.target.value)}><option value="all">전체</option><option value="icmp">ICMP</option><option value="arp">ARP</option><option value="switch">SWITCH</option><option value="hub">HUB</option><option value="dhcp">DHCP</option><option value="dns">DNS</option><option value="http">HTTP</option><option value="tftp">TFTP</option><option value="syslog">SYSLOG</option><option value="delivered">전달됨</option><option value="forwarded">전송 중</option><option value="dropped">드롭됨</option></select><button disabled={eventFilter === "all"} onClick={() => { stopAutoCapture(); setEventFilter("all"); }} type="button">필터 해제</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusRelative(-1)} type="button">이전</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={captureForward} type="button">캡처/전송</button><button className={autoPlaying ? "active" : ""} disabled={!onFocusEvent || filteredEvents.length === 0} onClick={autoCapturePlay} type="button">{autoPlaying ? "정지" : "자동 재생"}</button><label className="capture-speed-control">속도<select value={captureDelayMs} onChange={(event) => setCaptureDelayMs(Number(event.target.value))}><option value={900}>느림</option><option value={450}>보통</option><option value={180}>빠름</option></select></label><button disabled={!onExportEvents || filteredEvents.length === 0} onClick={() => onExportEvents?.(filteredEvents, eventFilter)} type="button">CSV</button><button onClick={() => { stopAutoCapture(); onClear(); }} type="button">비우기</button></header>
           <div className="sim-status-strip">
             <span><strong>{eventStats.total}</strong> 이벤트</span>
             <span className="forwarded"><strong>{eventStats.forwarded}</strong> 전송 중</span>
