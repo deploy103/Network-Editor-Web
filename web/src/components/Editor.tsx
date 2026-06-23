@@ -3,7 +3,7 @@ import { ArrowLeft, Cable, CircleDot, CircleHelp, Copy, Cpu, Download, Edit3, Fi
 import { cableCatalog, canPortUseCable, createDevice, deviceCatalog, displayKind, getDeviceModel, getModuleSpec, installModule, removeModule } from "../data/deviceCatalog";
 import { bootBanner, bootDevice, initialConsoleSession, type CliSession } from "../engine/cli";
 import { cliEngine } from "../engine/cliEngine";
-import { diagnoseProject } from "../engine/diagnostics";
+import { diagnoseProject, type NetworkIssueSeverity } from "../engine/diagnostics";
 import { ipInSubnet, ipToNumber, isIpv4, isSubnetMask, maskToPrefix, networkAddress } from "../engine/ip";
 import { downloadProject } from "../exporters/packetTracerExport";
 import { requestDhcp } from "../engine/simulation";
@@ -4233,6 +4233,13 @@ function EventPanel({
     warnings: issues.filter((item) => item.severity === "warning").length,
     info: issues.filter((item) => item.severity === "info").length
   };
+  const [issueFilter, setIssueFilter] = useState<"all" | NetworkIssueSeverity>("all");
+  const [issueSearch, setIssueSearch] = useState("");
+  const issueSearchQuery = issueSearch.trim().toLowerCase();
+  const visibleIssues = issues.filter((item) =>
+    (issueFilter === "all" || item.severity === issueFilter) &&
+    (!issueSearchQuery || `${item.title} ${item.detail}`.toLowerCase().includes(issueSearchQuery))
+  );
   const [eventFilter, setEventFilter] = useState("all");
   const [osiFilter, setOsiFilter] = useState("all");
   const [eventSearch, setEventSearch] = useState("");
@@ -4439,22 +4446,23 @@ function EventPanel({
           {message && <p>{message}</p>}
         </>
       )}
-      <header><strong>네트워크 진단</strong><small>오류 {issueStats.errors} / 경고 {issueStats.warnings} / 정보 {issueStats.info}</small>{onRepair && issues.length > 0 && <button className="secondary-action" onClick={onRepair} type="button">복구</button>}</header>
+      <header><strong>네트워크 진단</strong><small>오류 {issueStats.errors} / 경고 {issueStats.warnings} / 정보 {issueStats.info}</small><select aria-label="진단 심각도 필터" value={issueFilter} onChange={(event) => setIssueFilter(event.target.value as "all" | NetworkIssueSeverity)}><option value="all">전체</option><option value="error">오류</option><option value="warning">경고</option><option value="info">정보</option></select><input aria-label="진단 검색" className="event-search-input" value={issueSearch} onChange={(event) => setIssueSearch(event.target.value)} placeholder="진단 검색" />{(issueFilter !== "all" || issueSearchQuery) && <button onClick={() => { setIssueFilter("all"); setIssueSearch(""); }} type="button">필터 해제</button>}{onRepair && issues.length > 0 && <button className="secondary-action" onClick={onRepair} type="button">복구</button>}</header>
       {issues.length > 0 && (
         <div className="sim-status-strip diagnostic-summary-strip">
           <span className="dropped"><strong>{issueStats.errors}</strong> 오류</span>
           <span className="warning"><strong>{issueStats.warnings}</strong> 경고</span>
           <span><strong>{issueStats.info}</strong> 정보</span>
           <span><strong>{issues.length}</strong> 전체</span>
+          <span><strong>{visibleIssues.length}</strong> 표시</span>
         </div>
       )}
-      {issues.length === 0 ? <p className="empty-state">프로젝트 수준 문제가 감지되지 않았습니다.</p> : issues.slice(0, 10).map((item) => (
+      {issues.length === 0 ? <p className="empty-state">프로젝트 수준 문제가 감지되지 않았습니다.</p> : visibleIssues.length === 0 ? <p className="event-empty-state">현재 필터와 일치하는 진단 이슈가 없습니다.</p> : visibleIssues.slice(0, 10).map((item) => (
         <div className={`diagnostic-row ${item.severity}`} key={item.id}>
           <strong>{item.title}</strong>
           <span>{item.detail}</span>
         </div>
       ))}
-      {issues.length > 10 && <p className="event-empty-state">추가 이슈 {issues.length - 10}개가 더 있습니다. 진단 리포트에서 전체 목록을 확인하세요.</p>}
+      {visibleIssues.length > 10 && <p className="event-empty-state">추가 이슈 {visibleIssues.length - 10}개가 더 있습니다. 진단 리포트에서 전체 목록을 확인하세요.</p>}
       {onRemoveLink && project.links.length > 0 && (
         <>
           <header><strong>케이블</strong><small>링크 {project.links.length}개</small></header>
