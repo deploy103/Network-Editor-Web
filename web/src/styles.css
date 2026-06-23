@@ -2336,6 +2336,7 @@ small,
   border-radius: 5px;
   background: rgba(255, 255, 255, 0.72);
   padding: 4px 5px;
+  cursor: pointer;
 }
 
 .pdu-hop-list li.delivered {
@@ -2354,6 +2355,11 @@ small,
   border-color: #2563eb;
   background: #eef6ff;
   box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.pdu-hop-list li:focus-visible {
+  outline: 2px solid rgba(29, 111, 104, 0.7);
+  outline-offset: 1px;
 }
 
 .pdu-hop-list b,

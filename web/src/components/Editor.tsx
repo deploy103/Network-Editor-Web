@@ -4060,7 +4060,16 @@ function EventPanel({
                   {selectedPacketEvents.length > 1 && (
                     <ol className="pdu-hop-list">
                       {selectedPacketEvents.slice(-8).map((event, index) => (
-                        <li className={`${event.status} ${event.id === activeEventId ? "selected" : ""}`} key={event.id}>
+                        <li
+                          aria-current={event.id === activeEventId ? "true" : undefined}
+                          aria-label={`${event.type} ${eventStatusLabel(event.status)} 단계, ${eventDeviceLabel(project, event.lastDeviceId)}에서 ${eventDeviceLabel(project, event.atDeviceId)}`}
+                          className={`${event.status} ${event.id === activeEventId ? "selected" : ""}`}
+                          key={event.id}
+                          onClick={() => onFocusEvent?.(event.id)}
+                          onKeyDown={(keyEvent) => activateRowOnKeyboard(keyEvent, () => onFocusEvent?.(event.id))}
+                          role="button"
+                          tabIndex={onFocusEvent ? 0 : -1}
+                        >
                           <b>{index + 1}</b>
                           <span>{eventDeviceLabel(project, event.lastDeviceId)} -&gt; {eventDeviceLabel(project, event.atDeviceId)}</span>
                           <small>{event.type} / {eventStatusLabel(event.status)}</small>
