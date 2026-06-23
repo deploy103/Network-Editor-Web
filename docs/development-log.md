@@ -28,6 +28,7 @@
 - Added CLI `show vlan summary` plus smoke coverage for VLAN id/name detail lookups.
 - Added CLI `show interface <port> switchport` for single-port switchport inspection.
 - Added CLI `show interface <port> status` for single-port status inspection.
+- Added CLI `show interface <port> counters` for single-port counter inspection.
 
 ### TODO
 
