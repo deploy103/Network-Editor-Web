@@ -1214,7 +1214,7 @@ small,
 }
 
 .complex-pdu-hud {
-  max-width: min(560px, calc(100% - 24px));
+  max-width: min(720px, calc(100% - 24px));
 }
 
 .pdu-hud select {
