@@ -238,6 +238,7 @@ assert(run("sh int trunk").includes("99"), "show interfaces trunk must show nati
 assert(run("sh int desc").includes("Interface"), "show interfaces description must be supported");
 assert(run(`show interface ${sparePort} status`).includes(sparePort), "show interface <name> status must render a single port");
 assert(run(`show interface ${sparePort} switchport`).includes(`Name: ${sparePort}`), "show interface <name> switchport must render a single port");
+assert(run(`show interface ${sparePort} counters`).includes("InOctets"), "show interface <name> counters must render a single port");
 assert(run("show interfaces counters").includes("InOctets"), "show interfaces counters must be supported");
 assert(run("sh controllers").includes("controller"), "show controllers must be supported");
 assert(run("sh mac address-table dynamic").includes("No entries"), "show mac address-table dynamic must be supported");
