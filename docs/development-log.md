@@ -11,9 +11,11 @@
 - Added diagnostics severity/search filtering.
 - Added PDU detail tabs for OSI Model, Inbound PDU, and Outbound PDU.
 - Added Realtime cable list filtering by status/type and search text.
+- Improved Cisco-style remote access CLI status output for `show ip ssh`, `show line`, and `show users`.
+- Added FTP service support across device services, CLI `service ftp`, Desktop `ftp`, Complex PDU, Simulation filtering, and sample projects.
 
 ### TODO
 
 - Add more Packet Tracer-style PDU fields when packet headers are modeled explicitly.
 - Add visual regression or browser smoke tests for Simulation dock layout.
-- Expand desktop application commands beyond ping, HTTP, TFTP, SYSLOG, SSH, and TELNET.
+- Expand desktop application commands beyond ping, HTTP, FTP, TFTP, SYSLOG, SSH, and TELNET.
