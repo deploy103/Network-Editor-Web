@@ -239,6 +239,7 @@ run("network 192.168.10.0");
 run("end");
 const route = run("sh route");
 assert(route.includes("192.168.10.0/24"), "sh route must show SVI connected route");
+assert(run("show ip route interface vlan 1").includes("Vlan1"), "show ip route interface <name> must filter route output by interface");
 assert(run("sh ip route summary").includes("Total routes"), "show ip route summary must be supported");
 assert(run(`show protocols ${sparePort}`).includes(sparePort), "show protocols <interface> must filter protocol output");
 const stp = run("sh spanning-tree");

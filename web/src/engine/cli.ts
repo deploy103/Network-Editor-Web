@@ -2751,6 +2751,14 @@ function filterRouteLines(lines: string[], filter: string): string[] {
   if (!filter) return lines;
   if (filter === "connected" || filter === "directly-connected") return lines.filter((line) => line.startsWith("C") || line.startsWith("L"));
   if (filter === "static") return lines.filter((line) => line.startsWith("S"));
+  if (filter.startsWith("interface ")) {
+    const name = filter.slice("interface ".length).trim().toLowerCase();
+    const compactName = name.replace(/\s+/g, "");
+    return lines.filter((line) => {
+      const lowerLine = line.toLowerCase();
+      return lowerLine.includes(`, ${name}`) || lowerLine.replace(/\s+/g, "").includes(`,${compactName}`);
+    });
+  }
   if (isIpv4(filter)) return lines.filter((line) => line.includes(filter));
   return lines.filter((line) => line.toLowerCase().includes(filter.toLowerCase()));
 }
