@@ -17,9 +17,12 @@
 - Added user-created packet protocol filtering, full OSI 1-7 PDU detail rows, and selected PDU CSV export.
 - Added link endpoint Config shortcuts, `show services <name>` filtering, URL-scheme-aware Desktop service targets, DHCP release shortcut, and safer DHCP release behavior.
 - Added HTTP, FTP, EMAIL, and TFTP service request logs in the Services tab.
+- Added per-service log clearing buttons, CLI `clear logging`, and CLI `clear service logs <service>`.
+- Added Services tab log search and CSV export for HTTP, FTP, EMAIL, TFTP, and SYSLOG views.
+- Added Desktop command help plus `web`/`browser` HTTP aliases and `mail` EMAIL alias.
 
 ### TODO
 
 - Add more Packet Tracer-style PDU fields when packet headers are modeled explicitly.
 - Add visual regression or browser smoke tests for Simulation dock layout.
-- Expand desktop application commands beyond ping, HTTP, FTP, EMAIL, TFTP, SYSLOG, SSH, and TELNET.
+- Expand desktop application commands beyond ping, HTTP, FTP, EMAIL, TFTP, SYSLOG, SSH, TELNET, and current aliases.
