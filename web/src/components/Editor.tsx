@@ -4507,7 +4507,7 @@ function EventPanel({
               </div>
               {selectedEvent && (
                 <div className={`pdu-info-panel ${selectedEvent.status}`}>
-                  <header><strong>PDU 정보</strong><small>{selectedEvent.type} / {eventStatusLabel(selectedEvent.status)}</small></header>
+                  <header><strong>PDU 정보</strong><small>{selectedEvent.type} / {eventStatusLabel(selectedEvent.status)}</small>{onExportEvents && <button disabled={selectedPacketEvents.length === 0} onClick={() => onExportEvents(selectedPacketEvents, `packet-${(selectedEvent.packetId ?? selectedEvent.id).slice(-10)}`)} type="button">CSV</button>}</header>
                   <p>{selectedEvent.info}</p>
                   <dl className="pdu-meta-grid">
                     <div><dt>출발지</dt><dd>{eventDeviceLabel(project, selectedEvent.sourceDeviceId ?? selectedEvent.lastDeviceId)}</dd></div>
