@@ -460,6 +460,24 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage(`Simple PDU 출발지: ${device.label}. 목적지 장비를 선택하세요.`);
   }
 
+  function startComplexPduFromDevice(deviceId: string) {
+    const device = project.devices.find((item) => item.id === deviceId);
+    if (!device) return;
+    setSelectedModel("");
+    setSelectedCable("");
+    setPendingDeviceId("");
+    setConnectionDraft(null);
+    setSelectedDeviceId(deviceId);
+    setSelectedLinkId("");
+    setDeviceWindowId("");
+    setDeviceWindowTab(undefined);
+    setComplexPduMode(true);
+    setComplexPduSourceId(deviceId);
+    setPduMode(false);
+    setPduSourceId("");
+    setMessage(`Complex PDU 출발지: ${device.label}. 프로토콜과 횟수를 확인하고 목적지 장비를 선택하세요.`);
+  }
+
   function startCableFromDevice(deviceId: string) {
     const device = project.devices.find((item) => item.id === deviceId);
     if (!device) return;
@@ -1372,6 +1390,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
           onDelete={deleteDevice}
           onDuplicate={duplicateDevice}
           onConnect={startCableFromDevice}
+          onComplexPdu={startComplexPduFromDevice}
           onOpen={openDeviceWindow}
           onPdu={startPduFromDevice}
           onRename={renameDevice}
@@ -1579,6 +1598,7 @@ function DeviceContextMenu({
   onOpen,
   onDuplicate,
   onConnect,
+  onComplexPdu,
   onPdu,
   onRename,
   onTogglePower,
@@ -1591,6 +1611,7 @@ function DeviceContextMenu({
   onOpen: (deviceId: string, tab?: DeviceTab) => void;
   onDuplicate: (deviceId: string) => void;
   onConnect: (deviceId: string) => void;
+  onComplexPdu: (deviceId: string) => void;
   onPdu: (deviceId: string) => void;
   onRename: (deviceId: string) => void;
   onTogglePower: (deviceId: string) => void;
@@ -1641,6 +1662,7 @@ function DeviceContextMenu({
         <small>작업</small>
         <button onClick={() => run(() => onConnect(device.id))} type="button"><Cable size={15} />자동 케이블 연결 시작</button>
         <button onClick={() => run(() => onPdu(device.id))} type="button"><Mail size={15} />Simple PDU 보내기</button>
+        <button onClick={() => run(() => onComplexPdu(device.id))} type="button"><Plus size={15} />Complex PDU 보내기</button>
         <button onClick={() => run(() => onTogglePower(device.id))} type="button"><Power size={15} />{device.powerOn ? "전원 끄기" : "전원 켜기"}</button>
       </div>
       <div className="context-menu-section danger-zone">
