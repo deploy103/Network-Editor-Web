@@ -363,6 +363,10 @@ device = { ...device, runtime: { ...device.runtime, logs: [
 const ftpServiceLogs = run("show service logs ftp");
 assert(ftpServiceLogs.includes("Service log: FTP") && ftpServiceLogs.includes("FTP LIST from PC0"), "show service logs ftp must show filtered service logs");
 assert(!ftpServiceLogs.includes("HTTP GET from PC0"), "show service logs ftp must hide other service logs");
+const httpServiceStatus = run("show services http");
+assert(httpServiceStatus.includes("HTTP") && httpServiceStatus.includes("1 logs"), "show services http must show HTTP runtime log counts");
+const ftpServiceStatus = run("show services ftp");
+assert(ftpServiceStatus.includes("FTP") && ftpServiceStatus.includes("1 logs"), "show services ftp must show FTP runtime log counts");
 run("clear service logs ftp");
 assert(run("show logging").includes("HTTP GET from PC0"), "clear service logs ftp must preserve other service logs");
 assert(!run("show logging").includes("FTP LIST from PC0"), "clear service logs ftp must remove FTP logs");

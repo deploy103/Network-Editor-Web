@@ -45,6 +45,7 @@
 - Added CLI `show ip route gateway <ip>` / `show ip route via <ip>` filtering for static next hops.
 - Added CLI `show services enabled|disabled` state filtering.
 - Expanded CLI completion hints for newly added filter commands.
+- Added runtime log counts to CLI `show services <service>` details with smoke coverage.
 
 ### TODO
 
