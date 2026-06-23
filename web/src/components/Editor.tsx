@@ -525,6 +525,24 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage(`${device.label} 전원을 ${device.powerOn ? "껐습니다" : "켰습니다"}.`);
   }
 
+  function setAllDevicePower(powerOn: boolean) {
+    if (project.devices.length === 0) {
+      setMessage("전원을 제어할 장비가 없습니다.");
+      return;
+    }
+    onChange({ ...project, devices: project.devices.map((device) => device.powerOn === powerOn ? device : powerDevice(device, powerOn)) });
+    setMessage(`전체 장비 전원을 ${powerOn ? "켰습니다" : "껐습니다"}.`);
+  }
+
+  function powerCycleAllDevices() {
+    if (project.devices.length === 0) {
+      setMessage("재시작할 장비가 없습니다.");
+      return;
+    }
+    onChange({ ...project, devices: project.devices.map((device) => bootDevice({ ...powerDevice(device, false), powerOn: true })) });
+    setMessage("전체 장비 전원을 재시작했습니다.");
+  }
+
   function deleteDevice(deviceId: string) {
     const links = new Set(project.links.filter((link) => link.endpointA.deviceId === deviceId || link.endpointB.deviceId === deviceId).map((link) => link.id));
     onChange({
@@ -1030,6 +1048,9 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
         { label: "Complex PDU 추가", action: startComplexPduTool, disabled: project.devices.length < 2 },
         { label: "장비 자동 정렬", action: autoArrangeTopology, disabled: project.devices.length === 0 },
         { label: "선택 장비에서 전체 Ping", action: () => { void pingFromSelectedToAll(); }, disabled: !selectedDeviceId || project.devices.length < 2 },
+        { label: "전체 장비 전원 켜기", action: () => setAllDevicePower(true), disabled: project.devices.length === 0 || project.devices.every((device) => device.powerOn) },
+        { label: "전체 장비 전원 끄기", action: () => setAllDevicePower(false), disabled: project.devices.length === 0 || project.devices.every((device) => !device.powerOn) },
+        { label: "전체 장비 전원 재시작", action: powerCycleAllDevices, disabled: project.devices.length === 0 },
         { label: "런타임 테이블 초기화", action: resetRuntimeTables, disabled: project.devices.every((device) => !device.runtime.arpTable.length && !device.runtime.macTable.length && !device.runtime.dhcpLeases.length && !device.runtime.logs.length) && project.simulationEvents.length === 0 }
       ];
     }
