@@ -534,7 +534,7 @@ function expandShowCommand(rest: string[]): string {
   if (isAbbrev(first, "line", 2)) return ["show line", ...rest.slice(1)].join(" ").trim();
   if (isAbbrev(first, "terminal", 4)) return "show terminal";
   if (isAbbrev(first, "tech-support", 4) || (first === "tech" && isAbbrev(second, "support", 3))) return "show tech-support";
-  if (isAbbrev(first, "protocols", 3)) return "show protocols";
+  if (isAbbrev(first, "protocols", 3)) return ["show protocols", ...rest.slice(1)].join(" ").trim();
   if (first === "route" || first === "ro") return "show ip route";
   if (first === "arp") return ["show arp", ...rest.slice(1)].join(" ").trim();
   if (first === "host" || first === "hosts") return ["show hosts", ...rest.slice(1)].join(" ").trim();
@@ -1923,7 +1923,7 @@ function showCommand(device: NetworkDevice, lower: string, session?: CliSession)
     "Editing is enabled. Completion is enabled."
   ].join("\n");
   if (lower === "show tech-support") return techSupport(device);
-  if (lower === "show protocols") return protocolsStatus(device);
+  if (lower === "show protocols" || lower.startsWith("show protocols ")) return protocolsStatus(device, lower.slice("show protocols".length).trim());
   if (lower === "show spanning-tree" || lower.startsWith("show spanning-tree ")) return spanningTreeStatus(device, lower.slice("show spanning-tree".length).trim());
   if (lower === "show startup-config") return startupConfigDisplay(device);
   if (lower === "show ip interface brief") {
@@ -2674,8 +2674,11 @@ function lineAuthMode(line: LineConfig): string {
   return "no login";
 }
 
-function protocolsStatus(device: NetworkDevice): string {
-  return device.ports
+function protocolsStatus(device: NetworkDevice, filter = ""): string {
+  const selectedPort = filter ? findPort(device, filter) : undefined;
+  const ports = selectedPort ? [selectedPort] : filter ? [] : device.ports;
+  if (filter && !selectedPort) return `% Interface ${filter} not found.`;
+  return ports
     .filter((port) => port.kind !== "console")
     .map((port) => `${port.name} is ${device.powerOn && port.adminUp ? "up" : "down"}, line protocol is ${device.powerOn && port.adminUp && port.linkId ? "up" : "down"}${port.ipAddress ? `\n  Internet address is ${port.ipAddress}/${maskToPrefix(port.subnetMask)}` : ""}`)
     .join("\n\n") || "No protocol interfaces.";
