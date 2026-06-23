@@ -40,6 +40,7 @@
 - Added CLI `show protocols <interface>` filtering for single-interface protocol status.
 - Added CLI `show ip route interface <interface>` filtering with compact interface-name matching.
 - Added CLI `show ip protocols <protocol>` filtering with missing-protocol feedback.
+- Updated README implemented surface summary for service exports, Desktop aliases, and CLI filters.
 
 ### TODO
 
