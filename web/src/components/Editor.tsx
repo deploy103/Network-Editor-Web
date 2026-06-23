@@ -4059,6 +4059,7 @@ function EventPanel({
                   </dl>
                   {selectedPacketEvents.length > 1 && (
                     <ol className="pdu-hop-list">
+                      {selectedPacketEvents.length > 8 && <li className="more"><span>이전 {selectedPacketEvents.length - 8}단계 더 있음</span></li>}
                       {selectedPacketEvents.slice(-8).map((event, index) => (
                         <li
                           aria-current={event.id === activeEventId ? "true" : undefined}
