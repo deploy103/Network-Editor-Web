@@ -13,7 +13,6 @@ Packet Tracer style browser network lab rebuilt from scratch using the required 
 - `engine-rust/`: Rust simulation engine intended to compile to WebAssembly.
 - `server-go/`: Go HTTP API for signup/login and user project storage.
 - `db/`: PostgreSQL schema.
-- `alternative/`: source requirement and research documents.
 
 ## Development
 
@@ -46,6 +45,7 @@ This environment currently has Node/npm only, so the web build is the first veri
 - `.ptweb` is the app's own project format; Cisco Packet Tracer 6.1 proprietary `.pkt` binary export is not implemented.
 - Editor canvas with click-to-place devices, drag positioning, zoom, differentiated device shapes, link labels, and removable cables.
 - Device catalog covering routers, switches, firewall, PC, server, AP, hub, copper/serial/fiber/wireless/console links, modules, power, and port state.
-- Config and CLI flows for hostnames, interface IPs, DHCP helper addresses, admin state, VLAN access/trunk mode, static routes, DHCP pools/excluded ranges, DNS host records, HTTP/DHCP/DNS/TFTP/SYSLOG services, ACL/NAT, CDP neighbor view, `show services`, show filters, and startup-config save.
-- Desktop commands for `ipconfig`, `arp -a`, `route print`, `ping`, `tracert`, `nslookup`, `http`, `tftp`, and `syslog` checks.
-- Simulation fallback for ARP/ICMP, VLAN-aware L2 traversal, basic static routing, DHCP renew and relay with matching pool selection and subnet-bounded leasing, DNS/HTTP/TFTP/SYSLOG reachability checks, firewall ACL hits, NAT hits, wireless range/security, MAC/ARP learning, events, subnet-mask/DHCP helper/excluded-range diagnostics, and service-aware diagnostic report export.
+- Config and CLI flows for hostnames, interface IPs, DHCP helper addresses, admin state, VLAN access/trunk mode, static routes, DHCP pools/excluded ranges, DNS host records, HTTP/FTP/EMAIL/DHCP/DNS/TFTP/SYSLOG services, SSH/Telnet line access, ACL/NAT, CDP neighbor view, `show services`, show filters, and startup-config save.
+- Desktop commands for `ipconfig`, `arp -a`, `route print`, `ping`, `tracert`, `nslookup`, `http`, `ftp`, `email`, `ssh`, `telnet`, `tftp`, and `syslog` checks.
+- Simulation fallback for ARP/ICMP, VLAN-aware L2 traversal, basic static routing, DHCP renew and relay with matching pool selection and subnet-bounded leasing, DNS/HTTP/FTP/EMAIL/TFTP/SYSLOG/SSH/TELNET reachability checks, firewall ACL hits, NAT hits, wireless range/security, MAC/ARP learning, events, subnet-mask/DHCP helper/excluded-range diagnostics, and service-aware diagnostic report export.
+- Simulation dock filtering for events, OSI layer, diagnostics, cables, user-created packets, full OSI 1-7 PDU detail views, selected PDU CSV export, and playback controls.
