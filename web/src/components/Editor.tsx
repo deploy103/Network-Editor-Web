@@ -1933,7 +1933,7 @@ function LinkContextMenu({
   x: number;
   y: number;
   onClose: () => void;
-  onOpenDevice: (deviceId: string) => void;
+  onOpenDevice: (deviceId: string, tab?: DeviceTab) => void;
   onSetEndpointAdmin: (linkId: string, adminUp: boolean) => void;
   onSetSerialClock: (linkId: string) => void;
   onRepairVlans: (linkId: string) => void;
@@ -1954,7 +1954,7 @@ function LinkContextMenu({
   const serialClockMissing = (link.type === "serial-dce" || link.type === "serial-dte") && endpointPorts.every((port) => !port.clockRate);
   const hasVlanIssue = linkHasVlanIssue(project, link);
   const left = typeof window === "undefined" ? x : Math.min(x, Math.max(8, window.innerWidth - 280));
-  const top = typeof window === "undefined" ? y : Math.min(y, Math.max(8, window.innerHeight - 330));
+  const top = typeof window === "undefined" ? y : Math.min(y, Math.max(8, window.innerHeight - 380));
 
   return (
     <div className="device-context-menu link-context-menu rich-context-menu" style={{ left, top }} onClick={(event) => event.stopPropagation()} role="menu">
@@ -1974,6 +1974,8 @@ function LinkContextMenu({
         <small>끝점</small>
         <button onClick={() => { onOpenDevice(link.endpointA.deviceId); onClose(); }} type="button"><Info size={15} />{endpoints[0]?.device ?? "끝점 A"}</button>
         <button onClick={() => { onOpenDevice(link.endpointB.deviceId); onClose(); }} type="button"><Info size={15} />{endpoints[1]?.device ?? "끝점 B"}</button>
+        <button onClick={() => { onOpenDevice(link.endpointA.deviceId, "config"); onClose(); }} type="button"><Wrench size={15} />A 포트 설정</button>
+        <button onClick={() => { onOpenDevice(link.endpointB.deviceId, "config"); onClose(); }} type="button"><Wrench size={15} />B 포트 설정</button>
       </div>
       <div className="context-menu-section">
         <small>상태</small>
