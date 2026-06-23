@@ -225,7 +225,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
   const base = session.mode === "exec"
       ? ["enable", "setup", "show version", "show boot", "show inventory", "show platform", "show tech-support", "show clock", "show privilege", "show history", "show debugging", "show interfaces", "show ip interface brief", "show ip route", "show route", "show cdp neighbors", "show arp", "ping ", "traceroute ", "terminal length 0", "help"]
     : session.mode === "privileged"
-      ? ["disable", "setup", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show boot", "show inventory", "show platform", "show module", "show environment", "show tech-support", "show clock", "clock set 12:34:56 Jun 19 2026", "show privilege", "show history", "show debugging", "show logging", "show services", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show spanning-tree", "show interfaces", "show interfaces counters", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip ssh", "show ip route", "show ip route summary", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show mac address-table", "show mac address-table dynamic", "show mac address-table interface ", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp server statistics", "show hosts", "show access-list", "show ip access-lists", "show nat", "debug ip icmp", "debug ip packet", "debug ip dhcp server events", "debug spanning-tree events", "undebug all", "clear arp", "clear arp-cache", "clear arp 192.168.1.10", "clear logging", "clear service logs", "clear service logs http", "clear service logs ftp", "clear service logs email", "clear service logs tftp", "clear service logs syslog", "clear mac address-table", "clear mac address-table dynamic", "clear mac address-table dynamic interface ", "clear mac address-table vlan ", "clear ip dhcp binding", "clear ip dhcp binding *", "clear ip dhcp conflict *", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
+      ? ["disable", "setup", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show boot", "show inventory", "show platform", "show module", "show environment", "show tech-support", "show clock", "clock set 12:34:56 Jun 19 2026", "show privilege", "show history", "show debugging", "show logging", "show service logs", "show service logs http", "show service logs ftp", "show service logs email", "show service logs tftp", "show service logs syslog", "show services", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show spanning-tree", "show interfaces", "show interfaces counters", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip ssh", "show ip route", "show ip route summary", "show ip route connected", "show ip route static", "show route", "show ip protocols", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show mac address-table", "show mac address-table dynamic", "show mac address-table interface ", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show ip dhcp binding", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp server statistics", "show hosts", "show access-list", "show ip access-lists", "show nat", "debug ip icmp", "debug ip packet", "debug ip dhcp server events", "debug spanning-tree events", "undebug all", "clear arp", "clear arp-cache", "clear arp 192.168.1.10", "clear logging", "clear service logs", "clear service logs http", "clear service logs ftp", "clear service logs email", "clear service logs tftp", "clear service logs syslog", "clear mac address-table", "clear mac address-table dynamic", "clear mac address-table dynamic interface ", "clear mac address-table vlan ", "clear ip dhcp binding", "clear ip dhcp binding *", "clear ip dhcp conflict *", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
         ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "username admin secret cisco", "no username ", "interface ", "int ", "interface range fa0/1 - 2", "default interface ", "vlan ", "no vlan ", "spanning-tree vlan 1 root primary", "no spanning-tree vlan 1 root primary", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-name lab.local", "no ip domain-name", "ip name-server 8.8.8.8", "no ip name-server ", "ip ssh version 2", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "crypto key zeroize rsa", "logging host 192.168.1.100", "logging trap warnings", "logging buffered", "no logging console", "ip dhcp excluded-address 192.168.1.1 192.168.1.20", "ip dhcp pool ", "no ip dhcp excluded-address ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service password-encryption", "no service password-encryption", "service dhcp", "no service dhcp", "service dns", "no service dns", "service http", "no service http", "service ftp", "no service ftp", "service email", "no service email", "service tftp", "no service tftp", "service syslog", "no service syslog", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
@@ -522,6 +522,7 @@ function expandShowCommand(rest: string[]): string {
   if (isAbbrev(first, "module", 3)) return "show module";
   if (isAbbrev(first, "environment", 3) || isAbbrev(first, "env", 3)) return "show environment";
   if (isAbbrev(first, "logging", 3)) return "show logging";
+  if (isAbbrev(first, "service", 4) && isAbbrev(second, "logs", 3)) return ["show service logs", ...rest.slice(2)].join(" ").trim();
   if (isAbbrev(first, "services", 4)) return ["show services", ...rest.slice(1)].join(" ").trim();
   if (isAbbrev(first, "flash", 2)) return "show flash";
   if (isAbbrev(first, "file") && isAbbrev(second, "systems")) return "show file systems";
@@ -1899,6 +1900,7 @@ function showCommand(device: NetworkDevice, lower: string, session?: CliSession)
   if (lower === "show platform" || lower === "show module") return platformStatus(device);
   if (lower === "show environment") return environmentStatus(device);
   if (lower === "show logging") return loggingStatus(device);
+  if (lower === "show service logs" || lower.startsWith("show service logs ")) return serviceLogStatus(device, lower.slice("show service logs".length).trim());
   if (lower === "show services" || lower.startsWith("show services ")) return servicesStatus(device, lower.slice("show services".length).trim());
   if (lower === "show flash" || lower === "show flash:") return flashDirectory(device);
   if (lower === "show file systems") return fileSystems(device);
@@ -2125,8 +2127,25 @@ function loggingStatus(device: NetworkDevice): string {
     `    Buffer logging: ${logging.buffered ? "enabled" : "disabled"}`,
     `    Trap logging: level ${logging.trap}`,
     `    Logging to hosts: ${logging.hosts.join(", ") || "none"}`,
-    ...(device.runtime.logs.length ? device.runtime.logs.map((log) => `${new Date(log.createdAt).toLocaleString("ko-KR", { hour12: false })} ${log.level.toUpperCase()}: ${log.message}`) : ["No logging messages."])
+    ...runtimeLogLines(device.runtime.logs)
   ].join("\n");
+}
+
+function serviceLogStatus(device: NetworkDevice, service = ""): string {
+  const normalized = service.trim().toLowerCase();
+  const services: Record<string, string> = { http: "HTTP", ftp: "FTP", email: "EMAIL", tftp: "TFTP" };
+  if (!normalized || normalized === "all" || normalized === "*" || normalized === "syslog") {
+    return [`Service log: ${normalized ? normalized.toUpperCase() : "ALL"}`, ...runtimeLogLines(device.runtime.logs)].join("\n");
+  }
+  const prefix = services[normalized];
+  if (!prefix) return "% Usage: show service logs [all|http|ftp|email|tftp|syslog]";
+  return [`Service log: ${prefix}`, ...runtimeLogLines(device.runtime.logs.filter((log) => log.message.startsWith(prefix)))].join("\n");
+}
+
+function runtimeLogLines(logs: NetworkDevice["runtime"]["logs"]): string[] {
+  return logs.length
+    ? logs.map((log) => `${new Date(log.createdAt).toLocaleString("ko-KR", { hour12: false })} ${log.level.toUpperCase()}: ${log.message}`)
+    : ["No logging messages."];
 }
 
 function servicesStatus(device: NetworkDevice, filter = ""): string {
