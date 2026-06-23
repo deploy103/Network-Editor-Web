@@ -4060,7 +4060,7 @@ function EventPanel({
                   {selectedPacketEvents.length > 1 && (
                     <ol className="pdu-hop-list">
                       {selectedPacketEvents.slice(-8).map((event, index) => (
-                        <li className={event.status} key={event.id}>
+                        <li className={`${event.status} ${event.id === activeEventId ? "selected" : ""}`} key={event.id}>
                           <b>{index + 1}</b>
                           <span>{eventDeviceLabel(project, event.lastDeviceId)} -&gt; {eventDeviceLabel(project, event.atDeviceId)}</span>
                           <small>{event.type} / {eventStatusLabel(event.status)}</small>

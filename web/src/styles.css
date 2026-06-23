@@ -2350,6 +2350,12 @@ small,
   border-color: #f0c3bb;
 }
 
+.pdu-hop-list li.selected {
+  border-color: #2563eb;
+  background: #eef6ff;
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
 .pdu-hop-list b,
 .pdu-hop-list span,
 .pdu-hop-list small {
