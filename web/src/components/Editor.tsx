@@ -4054,7 +4054,8 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
   const [recordDraft, setRecordDraft] = useState({ name: "www.lab.local", value: "192.168.1.10" });
   const [servicePane, setServicePane] = useState<ServiceName>("dhcp");
   const [serviceNotice, setServiceNotice] = useState("");
-  const serviceKeys = Object.keys(device.config.services) as ServiceName[];
+  const serviceOrder: ServiceName[] = ["dhcp", "dns", "http", "ftp", "email", "tftp", "syslog"];
+  const serviceKeys = serviceOrder.filter((service) => service in device.config.services);
 
   function toggleService(service: ServiceName, enabled: boolean) {
     setServiceNotice(`${service.toUpperCase()} 서비스를 ${enabled ? "켰습니다" : "껐습니다"}.`);
