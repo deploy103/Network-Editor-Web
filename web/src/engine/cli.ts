@@ -521,7 +521,7 @@ function expandShowCommand(rest: string[]): string {
   if (isAbbrev(first, "module", 3)) return "show module";
   if (isAbbrev(first, "environment", 3) || isAbbrev(first, "env", 3)) return "show environment";
   if (isAbbrev(first, "logging", 3)) return "show logging";
-  if (isAbbrev(first, "services", 4)) return "show services";
+  if (isAbbrev(first, "services", 4)) return ["show services", ...rest.slice(1)].join(" ").trim();
   if (isAbbrev(first, "flash", 2)) return "show flash";
   if (isAbbrev(first, "file") && isAbbrev(second, "systems")) return "show file systems";
   if (isAbbrev(first, "processes", 3) && isAbbrev(second, "cpu")) return "show processes cpu";
@@ -1898,7 +1898,7 @@ function showCommand(device: NetworkDevice, lower: string, session?: CliSession)
   if (lower === "show platform" || lower === "show module") return platformStatus(device);
   if (lower === "show environment") return environmentStatus(device);
   if (lower === "show logging") return loggingStatus(device);
-  if (lower === "show services") return servicesStatus(device);
+  if (lower === "show services" || lower.startsWith("show services ")) return servicesStatus(device, lower.slice("show services".length).trim());
   if (lower === "show flash" || lower === "show flash:") return flashDirectory(device);
   if (lower === "show file systems") return fileSystems(device);
   if (lower === "show processes cpu") return "CPU utilization for five seconds: 1%/0%; one minute: 1%; five minutes: 1%";
@@ -2117,10 +2117,12 @@ function loggingStatus(device: NetworkDevice): string {
   ].join("\n");
 }
 
-function servicesStatus(device: NetworkDevice): string {
+function servicesStatus(device: NetworkDevice, filter = ""): string {
+  const services = Object.entries(device.config.services).filter(([name]) => !filter || name.toLowerCase().includes(filter.toLowerCase()));
+  if (!services.length) return `% No service matches ${filter}.`;
   return [
     "Service          State      Detail",
-    ...Object.entries(device.config.services).map(([name, enabled]) => `${name.toUpperCase().padEnd(16)}${(enabled ? "enabled" : "disabled").padEnd(11)}${serviceDetail(device, name)}`)
+    ...services.map(([name, enabled]) => `${name.toUpperCase().padEnd(16)}${(enabled ? "enabled" : "disabled").padEnd(11)}${serviceDetail(device, name)}`)
   ].join("\n");
 }
 
