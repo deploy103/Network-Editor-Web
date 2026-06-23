@@ -537,7 +537,7 @@ function expandShowCommand(rest: string[]): string {
   if (isAbbrev(first, "protocols", 3)) return "show protocols";
   if (first === "route" || first === "ro") return "show ip route";
   if (first === "arp") return ["show arp", ...rest.slice(1)].join(" ").trim();
-  if (first === "host" || first === "hosts") return "show hosts";
+  if (first === "host" || first === "hosts") return ["show hosts", ...rest.slice(1)].join(" ").trim();
   if (first === "nat") return "show nat";
   if (isAbbrev(first, "vlan")) {
     if (isAbbrev(second, "summary", 3)) return "show vlan summary";
@@ -1995,7 +1995,7 @@ function showCommand(device: NetworkDevice, lower: string, session?: CliSession)
   if (lower === "show ip dhcp conflict") return "No DHCP conflicts.";
   if (lower === "show ip dhcp pool" || lower.startsWith("show ip dhcp pool ")) return dhcpPoolStatus(device, lower.slice("show ip dhcp pool".length).trim());
   if (lower === "show ip dhcp server statistics") return dhcpServerStatistics(device);
-  if (lower === "show hosts") return hostsStatus(device);
+  if (lower === "show hosts" || lower.startsWith("show hosts ")) return hostsStatus(device, lower.slice("show hosts".length).trim());
   if (lower === "show access-list" || lower === "show access-lists") return accessListStatus(device);
   if (lower.startsWith("show access-list ")) return accessListStatus(device, lower.slice("show access-list ".length).trim());
   if (lower === "show nat") return natTranslations(device);
@@ -2085,9 +2085,13 @@ function clearMacAddressTable(device: NetworkDevice, session: CliSession, lower:
   }, session, "");
 }
 
-function hostsStatus(device: NetworkDevice): string {
+function hostsStatus(device: NetworkDevice, filter = ""): string {
   const nameServers = device.config.nameServers ?? [];
-  const hostRecords = device.config.dnsRecords;
+  const query = filter.trim().toLowerCase();
+  const hostRecords = query
+    ? device.config.dnsRecords.filter((record) => record.name.toLowerCase().includes(query) || record.value === query)
+    : device.config.dnsRecords;
+  if (query && !hostRecords.length) return `% Host ${filter} not found.`;
   if (!nameServers.length && !hostRecords.length) return "Default domain is not set\nName/address lookup uses static mappings only.\nNo host records configured.";
   return [
     `Default domain is ${device.config.domainName ?? "not set"}`,

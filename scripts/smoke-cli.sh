@@ -182,6 +182,7 @@ assert(staffPool.includes("Pool STAFF") && staffPool.includes("192.168.10.100"),
 assert(run("do show ip dhcp pool MISSING").includes("not found"), "show ip dhcp pool <name> must report missing pools");
 run("ip domain-name lab.local");
 run("ip name-server 8.8.8.8 1.1.1.1");
+run("ip host web.local 192.168.10.2");
 run("username admin privilege 15 secret cisco");
 run("ip ssh version 2");
 assert(run("crypto key generate rsa modulus 1024").includes("[OK]"), "crypto key generate rsa must report success");
@@ -329,6 +330,9 @@ const usersAll = run("show users all");
 assert(usersAll.includes("con 0") && usersAll.includes("vty 0 4") && usersAll.includes("transport ssh"), "show users all must show console and configured VTY lines");
 const hosts = run("show hosts");
 assert(hosts.includes("8.8.8.8") && hosts.includes("1.1.1.1"), "show hosts must show configured name servers");
+const filteredHosts = run("show hosts web.local");
+assert(filteredHosts.includes("web.local") && filteredHosts.includes("192.168.10.2"), "show hosts <name> must filter host records");
+assert(run("show hosts missing.local").includes("not found"), "show hosts <name> must report missing host records");
 const natTranslations = run("sh ip nat trans");
 assert(natTranslations.includes("203.0.113.2"), "show ip nat translations must show static mapping");
 const natStats = run("sh ip nat stat");
