@@ -382,6 +382,9 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
       if (complexPduProtocol === "syslog" && status === "delivered") {
         nextProject = appendServerLog(nextProject, targetId, "info", `${source.label}: Complex PDU syslog test ${index + 1}/${repeatCount} TTL ${ttl}`);
       }
+      if (complexPduProtocol === "email" && status === "delivered") {
+        nextProject = appendServerLog(nextProject, targetId, "info", `EMAIL Complex PDU from ${source.label} repeat ${index + 1}/${repeatCount} TTL ${ttl}`);
+      }
       if (status === "delivered") delivered += 1;
       else dropped += 1;
       if (intervalMs > 0 && index < repeatCount - 1) await waitForInterval(intervalMs);
