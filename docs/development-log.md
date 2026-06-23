@@ -22,6 +22,7 @@
 - Added Desktop command help plus `web`/`browser` HTTP aliases and `mail` EMAIL alias.
 - Added CLI `show service logs <service>` for filtered HTTP, FTP, EMAIL, TFTP, and SYSLOG runtime logs.
 - Expanded Desktop command prompt behavior with `ipconfig /displaydns`, DNS reverse lookup, and bounded `ping -n <count>` replies.
+- Added DHCP binding CSV export and per-binding release controls in the Services DHCP panel.
 
 ### TODO
 
