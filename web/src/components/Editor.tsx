@@ -4295,6 +4295,10 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
       setServiceNotice("DHCP 풀 이름을 입력하세요.");
       return;
     }
+    if (device.config.dhcpPools.some((pool) => pool.name.toLowerCase() === name.toLowerCase())) {
+      setServiceNotice("같은 이름의 DHCP 풀이 이미 있습니다.");
+      return;
+    }
     if (!isIpv4(network) || !isSubnetMask(mask) || maskToPrefix(mask) === 0 || !isIpv4(startIp)) {
       setServiceNotice("DHCP 네트워크, 연속 subnet mask, 시작 IP는 유효한 IPv4 값이어야 합니다.");
       return;
@@ -4373,6 +4377,10 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
   function addRecord() {
     if (!recordDraft.name.trim()) {
       setServiceNotice("DNS 이름을 입력하세요.");
+      return;
+    }
+    if (device.config.dnsRecords.some((record) => record.name.toLowerCase() === recordDraft.name.trim().toLowerCase())) {
+      setServiceNotice("같은 이름의 DNS 레코드가 이미 있습니다.");
       return;
     }
     if (!isIpv4(recordDraft.value.trim())) {
