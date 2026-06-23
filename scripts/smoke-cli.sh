@@ -240,6 +240,7 @@ run("end");
 const route = run("sh route");
 assert(route.includes("192.168.10.0/24"), "sh route must show SVI connected route");
 assert(run("sh ip route summary").includes("Total routes"), "show ip route summary must be supported");
+assert(run(`show protocols ${sparePort}`).includes(sparePort), "show protocols <interface> must filter protocol output");
 const stp = run("sh spanning-tree");
 assert(stp.includes("P2p Edge"), "spanning-tree portfast must show edge port");
 const stpVlan = run("show spanning-tree vlan 20");
