@@ -1246,6 +1246,22 @@ small,
   text-align: center;
 }
 
+.hud-icon-button {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #e4bd79;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #704a10;
+  padding: 0;
+}
+
+.hud-icon-button:hover {
+  background: #fff3d6;
+}
+
 .cable-hud strong,
 .cable-hud span,
 .placement-hud strong,

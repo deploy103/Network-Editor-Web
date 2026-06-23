@@ -1134,6 +1134,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
             <Mail size={16} />
             <strong>{pduSource ? pduSource.label : "Simple PDU"}</strong>
             <span>{pduSource ? "목적지 선택" : "출발지 선택"}</span>
+            <button className="hud-icon-button" onClick={(event) => { event.stopPropagation(); selectMode(); }} title="PDU 취소" type="button"><X size={14} /></button>
           </div>
         )}
         {complexPduMode && project.devices.length > 1 && !selectedCable && !selectedModel && (
@@ -1145,6 +1146,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
             </select>
             <label className="complex-pdu-count">횟수<input aria-label="Complex PDU 반복 횟수" max={10} min={1} type="number" value={complexPduCount} onChange={(event) => setComplexPduCount(boundedNumber(event.target.value, 1, 10))} /></label>
             <span>{complexPduSource ? "목적지 선택" : "출발지 선택"}</span>
+            <button className="hud-icon-button" onClick={(event) => { event.stopPropagation(); selectMode(); }} title="PDU 취소" type="button"><X size={14} /></button>
           </div>
         )}
         {!selectedCable && !selectedModel && !pduMode && !complexPduMode && (
