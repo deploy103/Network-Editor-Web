@@ -4206,6 +4206,8 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
   );
 }
 
+type PduDetailTab = "osi" | "inbound" | "outbound";
+
 function EventPanel({
   project,
   message,
@@ -4243,6 +4245,7 @@ function EventPanel({
   const [eventFilter, setEventFilter] = useState("all");
   const [osiFilter, setOsiFilter] = useState("all");
   const [eventSearch, setEventSearch] = useState("");
+  const [pduDetailTab, setPduDetailTab] = useState<PduDetailTab>("osi");
   const [autoPlaying, setAutoPlaying] = useState(false);
   const [captureDelayMs, setCaptureDelayMs] = useState(450);
   const playTimer = useRef<number | null>(null);
@@ -4261,6 +4264,11 @@ function EventPanel({
     ? project.simulationEvents.filter((event) => (event.packetId ?? event.id) === selectedPacketKey)
     : [];
   const visiblePacketEvents = selectedPacketEvents.slice(-8);
+  const selectedPacketIndex = selectedEvent ? selectedPacketEvents.findIndex((event) => event.id === selectedEvent.id) : -1;
+  const previousPacketEvent = selectedPacketIndex > 0 ? selectedPacketEvents[selectedPacketIndex - 1] : undefined;
+  const nextPacketEvent = selectedPacketIndex >= 0 ? selectedPacketEvents[selectedPacketIndex + 1] : undefined;
+  const pduOsiRows = selectedEvent ? pduOsiRowsFor(selectedEvent) : [];
+  const pduDetailRows = selectedEvent ? pduDetailRowsFor(project, selectedEvent, previousPacketEvent, nextPacketEvent, pduDetailTab) : [];
   const eventStats = {
     total: project.simulationEvents.length,
     forwarded: project.simulationEvents.filter((event) => event.status === "forwarded").length,
@@ -4406,6 +4414,40 @@ function EventPanel({
                     <div><dt>현재</dt><dd>{eventDeviceLabel(project, selectedEvent.atDeviceId)}</dd></div>
                     <div><dt>패킷</dt><dd>{(selectedEvent.packetId ?? selectedEvent.id).slice(-10)}</dd></div>
                   </dl>
+                  <div className="pdu-detail-tabs" role="tablist" aria-label="PDU 상세">
+                    {(["osi", "inbound", "outbound"] as const).map((tab) => (
+                      <button
+                        aria-selected={pduDetailTab === tab}
+                        className={pduDetailTab === tab ? "active" : ""}
+                        key={tab}
+                        onClick={() => setPduDetailTab(tab)}
+                        role="tab"
+                        type="button"
+                      >
+                        {pduDetailTabLabel(tab)}
+                      </button>
+                    ))}
+                  </div>
+                  {pduDetailTab === "osi" ? (
+                    <div className="pdu-osi-table" role="table" aria-label="OSI 모델 상세">
+                      {pduOsiRows.map((row) => (
+                        <div className={row.active ? "active" : ""} key={row.layer} role="row">
+                          <strong>{row.layer}</strong>
+                          <span>{row.description}</span>
+                          <small>{row.status}</small>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <dl className="pdu-detail-list">
+                      {pduDetailRows.map((row) => (
+                        <div key={row.label}>
+                          <dt>{row.label}</dt>
+                          <dd>{row.value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
                   {selectedPacketEvents.length > 1 && (
                     <ol className="pdu-hop-list">
                       {selectedPacketEvents.length > visiblePacketEvents.length && <li className="more"><span>이전 {selectedPacketEvents.length - visiblePacketEvents.length}단계 더 있음</span></li>}
@@ -4478,6 +4520,85 @@ function EventPanel({
       )}
     </section>
   );
+}
+
+const pduLayerOrder = ["Layer 7", "Layer 4", "Layer 3", "Layer 2", "Layer 1"];
+
+function pduDetailTabLabel(tab: PduDetailTab): string {
+  return ({ osi: "OSI 모델", inbound: "Inbound PDU", outbound: "Outbound PDU" })[tab];
+}
+
+function pduOsiRowsFor(event: SimulationEvent): Array<{ layer: string; description: string; status: string; active: boolean }> {
+  const activeLayers = new Set(event.osiLayers.length > 0 ? event.osiLayers : ["Layer 2", "Layer 3"]);
+  return pduLayerOrder.map((layer) => {
+    const active = activeLayers.has(layer);
+    return {
+      layer,
+      active,
+      description: active ? pduLayerDescription(event, layer) : "이 이벤트에서 처리되지 않음",
+      status: active ? pduLayerStatus(event.status) : "대기"
+    };
+  });
+}
+
+function pduLayerDescription(event: SimulationEvent, layer: string): string {
+  const protocol = event.type.toUpperCase();
+  if (layer === "Layer 7") return `${protocol} 애플리케이션 메시지를 확인합니다.`;
+  if (layer === "Layer 4") return `${protocol} 세션과 포트 흐름을 유지합니다.`;
+  if (layer === "Layer 3") return "IPv4 목적지, 게이트웨이, 라우팅 결정을 확인합니다.";
+  if (layer === "Layer 2") return "MAC 주소, VLAN, 프레임 전달 상태를 확인합니다.";
+  if (layer === "Layer 1") return "케이블, 링크 상태, 포트 신호를 확인합니다.";
+  return `${protocol} PDU를 처리합니다.`;
+}
+
+function pduLayerStatus(status: SimulationEvent["status"]): string {
+  return ({ forwarded: "처리/전송", delivered: "처리 완료", dropped: "드롭" })[status];
+}
+
+function pduDetailRowsFor(
+  project: NetworkProject,
+  event: SimulationEvent,
+  previousEvent: SimulationEvent | undefined,
+  nextEvent: SimulationEvent | undefined,
+  tab: PduDetailTab
+): Array<{ label: string; value: string }> {
+  const source = eventDeviceLabel(project, event.sourceDeviceId ?? event.lastDeviceId);
+  const target = eventDeviceLabel(project, event.targetDeviceId ?? event.atDeviceId);
+  const current = eventDeviceLabel(project, event.atDeviceId);
+  const previous = eventDeviceLabel(project, event.lastDeviceId);
+  const packetId = event.packetId ?? event.id;
+
+  if (tab === "inbound") {
+    return [
+      { label: "수신 장비", value: current },
+      { label: "직전 장비", value: previousEvent ? eventDeviceLabel(project, previousEvent.atDeviceId) : previous },
+      { label: "원본 출발지", value: source },
+      { label: "최종 목적지", value: target },
+      { label: "프로토콜", value: event.type.toUpperCase() },
+      { label: "수신 결과", value: eventStatusLabel(event.status) },
+      { label: "Inbound 요약", value: event.info }
+    ];
+  }
+
+  if (tab === "outbound") {
+    const nextHop = nextEvent ? eventDeviceLabel(project, nextEvent.atDeviceId) : event.status === "delivered" ? "목적지 도착" : "다음 홉 없음";
+    const nextAction = nextEvent?.info ?? (event.status === "dropped" ? "현재 장비에서 PDU가 드롭되었습니다." : "현재 이벤트가 이 패킷의 마지막 단계입니다.");
+    return [
+      { label: "송신 장비", value: current },
+      { label: "다음 홉", value: nextHop },
+      { label: "프레임 방향", value: `${previous} -> ${current}${nextEvent ? ` -> ${eventDeviceLabel(project, nextEvent.atDeviceId)}` : ""}` },
+      { label: "원본 출발지", value: source },
+      { label: "최종 목적지", value: target },
+      { label: "Outbound 동작", value: nextAction },
+      { label: "사용 레이어", value: (event.osiLayers.length > 0 ? event.osiLayers : ["Layer 2", "Layer 3"]).join(", ") }
+    ];
+  }
+
+  return [
+    { label: "패킷 ID", value: packetId },
+    { label: "프로토콜", value: event.type.toUpperCase() },
+    { label: "상태", value: eventStatusLabel(event.status) }
+  ];
 }
 
 function PduMarker({ project, sourceId, targetId, status, type }: { project: NetworkProject; sourceId: string; targetId: string; status: SimulationEvent["status"]; type: string }) {
