@@ -1113,8 +1113,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
           <button className={!selectedDeviceId && !selectedLinkId && !selectedCable && !selectedModel && !pduMode && !complexPduMode ? "active" : ""} onClick={selectMode} title="선택 도구" type="button"><MousePointer2 size={16} /></button>
           <button disabled={pduMode || complexPduMode || !selectedDeviceId} onClick={() => selectedDeviceId && openDeviceWindow(selectedDeviceId)} title="선택 장비 검사" type="button"><Settings size={16} /></button>
           <button disabled={pduMode || complexPduMode || (!selectedDeviceId && !selectedLinkId)} onClick={deleteSelected} title="선택 항목 삭제" type="button"><Trash2 size={16} /></button>
-          <button className={pduMode ? "active" : ""} disabled={Boolean(selectedCable) || Boolean(selectedModel) || complexPduMode} onClick={startSimplePduTool} title="Simple PDU 추가" type="button"><Mail size={16} /></button>
-          <button className={complexPduMode ? "active" : ""} disabled={Boolean(selectedCable) || Boolean(selectedModel) || pduMode} onClick={startComplexPduTool} title="Complex PDU 추가" type="button"><Plus size={16} /></button>
+          <button className={pduMode ? "active" : ""} disabled={project.devices.length < 2 || Boolean(selectedCable) || Boolean(selectedModel) || complexPduMode} onClick={startSimplePduTool} title="Simple PDU 추가" type="button"><Mail size={16} /></button>
+          <button className={complexPduMode ? "active" : ""} disabled={project.devices.length < 2 || Boolean(selectedCable) || Boolean(selectedModel) || pduMode} onClick={startComplexPduTool} title="Complex PDU 추가" type="button"><Plus size={16} /></button>
         </div>
         {(selectedCable || pendingDeviceId) && (
           <div className="cable-hud">
