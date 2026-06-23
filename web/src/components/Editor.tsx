@@ -2857,6 +2857,7 @@ function ConfigTab({ device, onUpdate, onDhcp }: { device: NetworkDevice; onUpda
         {(device.kind === "switch" || device.kind === "router" || device.kind === "firewall") && <button onClick={() => scrollConfig("vlans")} type="button">VLAN</button>}
         {(device.kind === "wireless" || device.ports.some((item) => item.kind === "wireless")) && <button onClick={() => scrollConfig("wireless")} type="button">무선</button>}
         {device.kind === "firewall" && <button onClick={() => scrollConfig("security")} type="button">보안</button>}
+        <button onClick={() => scrollConfig("runtime")} type="button">런타임</button>
       </div>
       {configNotice && <strong className={isConfigNoticeError(configNotice) ? "form-error" : "module-notice"} role={isConfigNoticeError(configNotice) ? "alert" : "status"}>{configNotice}</strong>}
       <label id={`${device.id}-config-interface`}>호스트명<input value={device.config.hostname} onChange={(event) => onUpdate({ ...device, label: event.target.value, config: { ...device.config, hostname: event.target.value } })} /></label>
@@ -2983,7 +2984,63 @@ function ConfigTab({ device, onUpdate, onDhcp }: { device: NetworkDevice; onUpda
           </div>
         </>
       )}
+      <RuntimeTablesPanel device={device} onUpdate={onUpdate} />
     </section>
+  );
+}
+
+function RuntimeTablesPanel({ device, onUpdate }: { device: NetworkDevice; onUpdate: (device: NetworkDevice) => void }) {
+  const runtime = device.runtime;
+  const totalEntries = runtime.arpTable.length + runtime.macTable.length + runtime.dhcpLeases.length + runtime.logs.length;
+  const recentLogs = runtime.logs.slice(-5).reverse();
+
+  function updateRuntime(patch: Partial<NetworkDevice["runtime"]>) {
+    onUpdate({ ...device, runtime: { ...device.runtime, ...patch } });
+  }
+
+  return (
+    <div className="config-group runtime-tables" id={`${device.id}-config-runtime`}>
+      <header>
+        <strong>런타임 테이블</strong>
+        <button className="secondary-action" disabled={totalEntries === 0} onClick={() => updateRuntime({ arpTable: [], macTable: [], dhcpLeases: [], logs: [] })} type="button">전체 비우기</button>
+      </header>
+      <div className="runtime-summary-row">
+        <span><strong>{runtime.arpTable.length}</strong> ARP</span>
+        <span><strong>{runtime.macTable.length}</strong> MAC</span>
+        <span><strong>{runtime.dhcpLeases.length}</strong> DHCP</span>
+        <span><strong>{runtime.logs.length}</strong> 로그</span>
+      </div>
+      <div className="runtime-table-grid">
+        <section className="runtime-table">
+          <header><strong>ARP</strong><button className="secondary-action" disabled={!runtime.arpTable.length} onClick={() => updateRuntime({ arpTable: [] })} type="button">비우기</button></header>
+          {runtime.arpTable.slice(0, 6).map((entry) => (
+            <div key={`${entry.ipAddress}-${entry.macAddress}`}><span>{entry.ipAddress}</span><span>{entry.macAddress}</span><small>{entry.portName || "-"}</small></div>
+          ))}
+          {!runtime.arpTable.length && <p>학습된 ARP 항목이 없습니다.</p>}
+        </section>
+        <section className="runtime-table">
+          <header><strong>MAC Address Table</strong><button className="secondary-action" disabled={!runtime.macTable.length} onClick={() => updateRuntime({ macTable: [] })} type="button">비우기</button></header>
+          {runtime.macTable.slice(0, 6).map((entry) => (
+            <div key={`${entry.vlan}-${entry.macAddress}-${entry.portName}`}><span>VLAN {entry.vlan}</span><span>{entry.macAddress}</span><small>{entry.type} / {entry.portName}</small></div>
+          ))}
+          {!runtime.macTable.length && <p>학습된 MAC 항목이 없습니다.</p>}
+        </section>
+        <section className="runtime-table">
+          <header><strong>DHCP Binding</strong><button className="secondary-action" disabled={!runtime.dhcpLeases.length} onClick={() => updateRuntime({ dhcpLeases: [] })} type="button">비우기</button></header>
+          {runtime.dhcpLeases.slice(0, 6).map((lease) => (
+            <div key={`${lease.ipAddress}-${lease.deviceId}`}><span>{lease.ipAddress}</span><span>{lease.macAddress}</span><small>{new Date(lease.expiresAt).toLocaleTimeString()}</small></div>
+          ))}
+          {!runtime.dhcpLeases.length && <p>활성 DHCP 바인딩이 없습니다.</p>}
+        </section>
+        <section className="runtime-table">
+          <header><strong>SYSLOG</strong><button className="secondary-action" disabled={!runtime.logs.length} onClick={() => updateRuntime({ logs: [] })} type="button">비우기</button></header>
+          {recentLogs.map((log) => (
+            <div className={log.level} key={log.id}><span>{new Date(log.createdAt).toLocaleTimeString()}</span><span>{log.level}</span><small>{log.message}</small></div>
+          ))}
+          {!recentLogs.length && <p>수집된 로그가 없습니다.</p>}
+        </section>
+      </div>
+    </div>
   );
 }
 

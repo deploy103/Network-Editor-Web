@@ -2695,6 +2695,97 @@ small,
   font-weight: 500;
 }
 
+.runtime-summary-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 6px;
+}
+
+.runtime-summary-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #cfd8e0;
+  border-radius: 5px;
+  background: #f8fafc;
+  color: #40515d;
+  padding: 5px 7px;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.runtime-summary-row strong {
+  color: #1f2f3a;
+}
+
+.runtime-table-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.runtime-table {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  border: 1px solid #dbe3ed;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.runtime-table header {
+  min-height: 28px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid #eef2f6;
+  padding-bottom: 5px;
+}
+
+.runtime-table > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(84px, 0.9fr) minmax(0, 1.1fr);
+  gap: 2px 7px;
+  border: 1px solid #edf1f5;
+  border-radius: 5px;
+  background: #fbfcfe;
+  padding: 5px 6px;
+  font-size: 11px;
+}
+
+.runtime-table > div.warning {
+  border-color: #f0d49a;
+  background: #fff8e6;
+}
+
+.runtime-table > div.error {
+  border-color: #f0c3bb;
+  background: #fff5f3;
+}
+
+.runtime-table span,
+.runtime-table small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-table small {
+  grid-column: 1 / -1;
+  color: #667085;
+}
+
+.runtime-table p {
+  margin: 0;
+  color: #667085;
+  font-size: 12px;
+}
+
 .config-panel > .secondary-action {
   justify-self: start;
   min-height: 34px;
