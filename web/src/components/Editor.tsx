@@ -21,6 +21,7 @@ const complexPduProtocols = [
   { value: "dns", label: "DNS Query" },
   { value: "http", label: "HTTP GET" },
   { value: "ftp", label: "FTP LIST" },
+  { value: "email", label: "EMAIL" },
   { value: "tftp", label: "TFTP Read" },
   { value: "syslog", label: "SYSLOG" }
 ] as const;
@@ -2355,6 +2356,7 @@ function complexPduServiceEnabled(device: NetworkDevice, protocol: ComplexPduPro
   if (protocol === "dns") return device.config.services.dns;
   if (protocol === "http") return device.config.services.http;
   if (protocol === "ftp") return device.config.services.ftp;
+  if (protocol === "email") return device.config.services.email;
   if (protocol === "tftp") return device.config.services.tftp;
   if (protocol === "syslog") return device.config.services.syslog;
   return false;
@@ -3590,7 +3592,7 @@ function transportAllows(transportInput: string, protocol: "ssh" | "telnet"): bo
   return tokens.includes("all") || tokens.includes(protocol);
 }
 
-const desktopQuickCommands = ["ipconfig /all", "ipconfig /renew", "arp -a", "route print", "ping www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "http www.lab.local", "ftp www.lab.local", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
+const desktopQuickCommands = ["ipconfig /all", "ipconfig /renew", "arp -a", "route print", "ping www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "http www.lab.local", "ftp www.lab.local", "email www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
 
 function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: NetworkDevice; project: NetworkProject; onProjectChange: (project: NetworkProject, message: string) => void; onUpdate: (device: NetworkDevice) => void }) {
   const dataPorts = device.ports.filter((port) => port.kind !== "console");
@@ -3693,7 +3695,7 @@ function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: Ne
             <span>{device.config.hostname || device.label}&gt;</span>
             <input value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handlePromptKeyDown} placeholder="ipconfig | ping 192.168.1.1 | tracert www.lab.local | http www.lab.local" />
           </form>
-          <small>프로젝트 장비 {project.devices.length}개 | ipconfig, arp -a, route print, ping, tracert, nslookup, http, ftp, ssh, telnet, tftp, syslog</small>
+          <small>프로젝트 장비 {project.devices.length}개 | ipconfig, arp -a, route print, ping, tracert, nslookup, http, ftp, email, ssh, telnet, tftp, syslog</small>
         </section>
       )}
       {activeApp === "browser" && (
@@ -3838,6 +3840,40 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     }
     return `Connected to ${target.label}.\n220 PTWeb FTP Service ready\nUser: anonymous\n230 User logged in\nftp> ${action}\n200 PORT command successful\n150 Opening ASCII mode data connection\n  readme.txt\n  running-config.txt\n  network-backup.ptweb\n226 Transfer complete`;
   }
+  if (lower.startsWith("email ")) {
+    const [, targetText = "", recipient = "", ...messageParts] = command.split(/\s+/);
+    if (!targetText.trim() || !recipient.trim()) return "사용법: email <서버 ip|이름> <받는사람> [메시지]";
+    const message = messageParts.join(" ").trim() || `${device.label} mail test`;
+    const resolved = await resolveDesktopNetworkTarget(project, device, targetText, onProjectChange);
+    if (!resolved.target) return resolved.error;
+    const { target, project: resolvedProject } = resolved;
+    const result = await simulatePing(resolvedProject, device.id, target.id);
+    if (!result.success) {
+      onProjectChange(appendDesktopEvent(result.project, device.id, target.id, "EMAIL", `EMAIL 전송 실패: ${result.message}`, "dropped"), result.message);
+      return `EMAIL 전송 실패: ${result.message}`;
+    }
+    if (!target.config.services.email) {
+      const nextProject = appendDesktopEvent(result.project, device.id, target.id, "EMAIL", `${target.label} EMAIL 서비스가 꺼져 있습니다.`, "dropped");
+      onProjectChange(nextProject, `${target.label} EMAIL 서비스가 꺼져 있습니다.`);
+      return `${target.label} EMAIL 서비스가 꺼져 있습니다.`;
+    }
+    const loggedProject = appendServerLog(result.project, target.id, "info", `EMAIL from ${device.label} to ${recipient}: ${message}`);
+    onProjectChange(appendDesktopEvent(loggedProject, device.id, target.id, "EMAIL", `${recipient}에게 EMAIL 메시지를 전송했습니다.`, "delivered"), "EMAIL 메시지를 전송했습니다.");
+    return [
+      `Connected to ${target.label}.`,
+      "220 PTWeb ESMTP ready",
+      `MAIL FROM:<${device.label.toLowerCase()}@ptweb.local>`,
+      "250 Sender OK",
+      `RCPT TO:<${recipient}>`,
+      "250 Recipient OK",
+      "DATA",
+      `Subject: Packet Tracer lab test`,
+      "",
+      message,
+      ".",
+      "250 Message accepted for delivery"
+    ].join("\n");
+  }
   if (lower.startsWith("ssh ") || lower.startsWith("telnet ")) {
     const protocol = lower.startsWith("ssh ") ? "ssh" : "telnet";
     const targetText = command.split(/\s+/).slice(1).join(" ");
@@ -3908,7 +3944,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     onProjectChange(appendDesktopEvent(loggedProject, device.id, target.id, "SYSLOG", `${target.label}에 SYSLOG 메시지를 기록했습니다.`, "delivered"), "SYSLOG 메시지를 기록했습니다.");
     return `SYSLOG sent to ${target.label}: ${logMessage}`;
   }
-  return "알 수 없는 데스크톱 명령입니다. ipconfig, arp -a, route print, ping <ip|이름>, tracert <ip|이름>, nslookup <이름>, http <ip|이름>, ftp <ip|이름>, ssh <ip|이름>, telnet <ip|이름>, tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
+  return "알 수 없는 데스크톱 명령입니다. ipconfig, arp -a, route print, ping <ip|이름>, tracert <ip|이름>, nslookup <이름>, http <ip|이름>, ftp <ip|이름>, email <ip|이름> <받는사람>, ssh <ip|이름>, telnet <ip|이름>, tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
 }
 
 function resolveDesktopTarget(project: NetworkProject, value: string): NetworkDevice | null {
@@ -4228,6 +4264,13 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
               <div className="compact-row"><span>readme.txt / running-config.txt / network-backup.ptweb</span><small>가상 FTP 디렉터리</small></div>
             </div>
           )}
+          {servicePane === "email" && (
+            <div className="config-group">
+              <header><strong>EMAIL</strong><label className="toggle"><input checked={device.config.services.email} onChange={(event) => toggleService("email", event.target.checked)} type="checkbox" />서비스</label></header>
+              <div className="diagnostic-row info"><strong>{device.config.services.email ? "EMAIL 켜짐" : "EMAIL 꺼짐"}</strong><span>데스크톱 `email 서버 사용자 메시지` 명령과 EMAIL Complex PDU가 이 서비스를 검사합니다.</span></div>
+              <div className="compact-row"><span>admin@lab.local / user@lab.local</span><small>가상 메일박스</small></div>
+            </div>
+          )}
           {servicePane === "tftp" && (
             <div className="config-group">
               <header><strong>TFTP</strong><label className="toggle"><input checked={device.config.services.tftp} onChange={(event) => toggleService("tftp", event.target.checked)} type="checkbox" />서비스</label></header>
@@ -4398,7 +4441,7 @@ function EventPanel({
     <section className={`event-panel ${mode}`}>
       {mode === "simulation" ? (
         <>
-          <header><strong>시뮬레이션 이벤트</strong><select value={eventFilter} onChange={(event) => setEventFilter(event.target.value)}><option value="all">전체</option><option value="icmp">ICMP</option><option value="arp">ARP</option><option value="switch">SWITCH</option><option value="hub">HUB</option><option value="dhcp">DHCP</option><option value="dns">DNS</option><option value="http">HTTP</option><option value="ftp">FTP</option><option value="tftp">TFTP</option><option value="syslog">SYSLOG</option><option value="ssh">SSH</option><option value="telnet">TELNET</option><option value="delivered">전달됨</option><option value="forwarded">전송 중</option><option value="dropped">드롭됨</option></select><select aria-label="OSI 레이어 필터" value={osiFilter} onChange={(event) => setOsiFilter(event.target.value)}><option value="all">전체 OSI</option><option value="Layer 1">Layer 1</option><option value="Layer 2">Layer 2</option><option value="Layer 3">Layer 3</option><option value="Layer 4">Layer 4</option><option value="Layer 7">Layer 7</option></select><input aria-label="시뮬레이션 이벤트 검색" className="event-search-input" value={eventSearch} onChange={(event) => setEventSearch(event.target.value)} placeholder="검색" /><button disabled={eventFilter === "all" && osiFilter === "all" && !eventSearchQuery} onClick={() => { stopAutoCapture(); setEventFilter("all"); setOsiFilter("all"); setEventSearch(""); }} type="button">필터 해제</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusEdge("first")} type="button">처음</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusRelative(-1)} type="button">이전</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={captureForward} type="button">캡처/전송</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={() => focusEdge("last")} type="button">끝</button><button className={autoPlaying ? "active" : ""} disabled={!onFocusEvent || filteredEvents.length === 0} onClick={autoCapturePlay} type="button">{autoPlaying ? "정지" : "자동 재생"}</button><label className="capture-speed-control">속도<select value={captureDelayMs} onChange={(event) => setCaptureDelayMs(Number(event.target.value))}><option value={900}>느림</option><option value={450}>보통</option><option value={180}>빠름</option></select></label><button disabled={!onExportEvents || filteredEvents.length === 0} onClick={() => onExportEvents?.(filteredEvents, eventPanelExportScope(eventFilter, osiFilter, eventSearch))} type="button">CSV</button><button onClick={() => { stopAutoCapture(); onClear(); }} type="button">비우기</button></header>
+          <header><strong>시뮬레이션 이벤트</strong><select value={eventFilter} onChange={(event) => setEventFilter(event.target.value)}><option value="all">전체</option><option value="icmp">ICMP</option><option value="arp">ARP</option><option value="switch">SWITCH</option><option value="hub">HUB</option><option value="dhcp">DHCP</option><option value="dns">DNS</option><option value="http">HTTP</option><option value="ftp">FTP</option><option value="email">EMAIL</option><option value="tftp">TFTP</option><option value="syslog">SYSLOG</option><option value="ssh">SSH</option><option value="telnet">TELNET</option><option value="delivered">전달됨</option><option value="forwarded">전송 중</option><option value="dropped">드롭됨</option></select><select aria-label="OSI 레이어 필터" value={osiFilter} onChange={(event) => setOsiFilter(event.target.value)}><option value="all">전체 OSI</option><option value="Layer 1">Layer 1</option><option value="Layer 2">Layer 2</option><option value="Layer 3">Layer 3</option><option value="Layer 4">Layer 4</option><option value="Layer 7">Layer 7</option></select><input aria-label="시뮬레이션 이벤트 검색" className="event-search-input" value={eventSearch} onChange={(event) => setEventSearch(event.target.value)} placeholder="검색" /><button disabled={eventFilter === "all" && osiFilter === "all" && !eventSearchQuery} onClick={() => { stopAutoCapture(); setEventFilter("all"); setOsiFilter("all"); setEventSearch(""); }} type="button">필터 해제</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusEdge("first")} type="button">처음</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusRelative(-1)} type="button">이전</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={captureForward} type="button">캡처/전송</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={() => focusEdge("last")} type="button">끝</button><button className={autoPlaying ? "active" : ""} disabled={!onFocusEvent || filteredEvents.length === 0} onClick={autoCapturePlay} type="button">{autoPlaying ? "정지" : "자동 재생"}</button><label className="capture-speed-control">속도<select value={captureDelayMs} onChange={(event) => setCaptureDelayMs(Number(event.target.value))}><option value={900}>느림</option><option value={450}>보통</option><option value={180}>빠름</option></select></label><button disabled={!onExportEvents || filteredEvents.length === 0} onClick={() => onExportEvents?.(filteredEvents, eventPanelExportScope(eventFilter, osiFilter, eventSearch))} type="button">CSV</button><button onClick={() => { stopAutoCapture(); onClear(); }} type="button">비우기</button></header>
           <div className="sim-status-strip">
             <span><strong>{eventStats.total}</strong> 이벤트</span>
             <span className="forwarded"><strong>{eventStats.forwarded}</strong> 전송 중</span>
@@ -4685,7 +4728,7 @@ function PduMarker({ project, sourceId, targetId, status, type }: { project: Net
 }
 
 function userCreatedPacketRows(project: NetworkProject): Array<{ id: string; protocol: string; source: string; destination: string; status: SimulationEvent["status"]; count: number }> {
-  const protocols = new Set(["ICMP", "DHCP", "DNS", "HTTP", "FTP", "TFTP", "SYSLOG", "SSH", "TELNET"]);
+  const protocols = new Set(["ICMP", "DHCP", "DNS", "HTTP", "FTP", "EMAIL", "TFTP", "SYSLOG", "SSH", "TELNET"]);
   const seenPackets = new Set<string>();
   const packetCounts = new Map<string, number>();
   for (const event of project.simulationEvents.filter((event) => protocols.has(event.type.toUpperCase()))) {

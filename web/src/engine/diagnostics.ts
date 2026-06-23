@@ -235,7 +235,7 @@ function diagnoseServices(project: NetworkProject): NetworkIssue[] {
 }
 
 function reachableServiceNames(device: NetworkDevice): Array<keyof NetworkDevice["config"]["services"]> {
-  return (["dns", "http", "ftp", "tftp", "syslog"] as Array<keyof NetworkDevice["config"]["services"]>)
+  return (["dns", "http", "ftp", "email", "tftp", "syslog"] as Array<keyof NetworkDevice["config"]["services"]>)
     .filter((service) => device.config.services[service]);
 }
 
