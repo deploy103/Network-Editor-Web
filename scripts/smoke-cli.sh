@@ -229,6 +229,41 @@ assert(run("sh int desc").includes("Interface"), "show interfaces description mu
 assert(run("show interfaces counters").includes("InOctets"), "show interfaces counters must be supported");
 assert(run("sh controllers").includes("controller"), "show controllers must be supported");
 assert(run("sh mac address-table dynamic").includes("No entries"), "show mac address-table dynamic must be supported");
+const otherPort = device.ports.find((port) => port.name !== sparePort && port.kind !== "console")?.name ?? sparePort;
+device = {
+  ...device,
+  runtime: {
+    ...device.runtime,
+    macTable: [
+      { vlan: 20, macAddress: "02:aa:aa:aa:aa:20", portName: sparePort, type: "dynamic" },
+      { vlan: 99, macAddress: "02:aa:aa:aa:aa:99", portName: otherPort, type: "dynamic" },
+      { vlan: 20, macAddress: "02:bb:bb:bb:bb:20", portName: sparePort, type: "static" }
+    ],
+    arpTable: [
+      { ipAddress: "192.168.10.2", macAddress: "02:aa:aa:aa:aa:20", portName: sparePort },
+      { ipAddress: "192.168.10.3", macAddress: "02:aa:aa:aa:aa:99", portName: otherPort }
+    ],
+    dhcpLeases: [
+      { ipAddress: "192.168.10.50", macAddress: "02:cc:cc:cc:cc:50", deviceId: "pc-a", expiresAt: Date.now() + 60000 },
+      { ipAddress: "192.168.10.51", macAddress: "02:cc:cc:cc:cc:51", deviceId: "pc-b", expiresAt: Date.now() + 60000 }
+    ]
+  }
+};
+run(`clear mac address-table dynamic interface ${sparePort}`);
+assert(!device.runtime.macTable.some((entry) => entry.type === "dynamic" && entry.portName === sparePort), "clear mac address-table dynamic interface must remove matching dynamic entries only");
+assert(device.runtime.macTable.some((entry) => entry.type === "static" && entry.portName === sparePort), "clear mac address-table dynamic interface must keep static entries");
+run("clear mac address-table vlan 99");
+assert(!device.runtime.macTable.some((entry) => entry.vlan === 99), "clear mac address-table vlan must remove matching VLAN entries");
+run("clear mac address-table static address 02:bb:bb:bb:bb:20");
+assert(device.runtime.macTable.length === 0, "clear mac address-table static address must remove the matching static MAC");
+run("clear arp 192.168.10.2");
+assert(device.runtime.arpTable.length === 1 && device.runtime.arpTable[0].ipAddress === "192.168.10.3", "clear arp <ip> must remove only the matching ARP entry");
+run("clear ip arp *");
+assert(device.runtime.arpTable.length === 0, "clear ip arp * must remove all ARP entries");
+run("clear ip dhcp binding 192.168.10.50");
+assert(device.runtime.dhcpLeases.length === 1 && device.runtime.dhcpLeases[0].ipAddress === "192.168.10.51", "clear ip dhcp binding <ip> must remove only the matching lease");
+run("clear ip dhcp binding *");
+assert(device.runtime.dhcpLeases.length === 0, "clear ip dhcp binding * must remove all leases");
 assert(run("sh vlan id 20").includes("VLAN20"), "show vlan id must render VLAN detail");
 const acl = run("sh access-lists");
 assert(acl.includes("Extended IP access list 101"), "show access-lists must group IOS ACLs by list");
