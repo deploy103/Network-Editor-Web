@@ -12,7 +12,7 @@ export function createRoutedSampleProject(ownerId: string): NetworkProject {
 
   const configuredPc = updatePortByName(pc, "FastEthernet0", { ipAddress: "192.168.10.10", subnetMask: "255.255.255.0", gateway: "192.168.10.1", dnsServer: "10.10.10.10" });
   const configuredRouter = updatePortByIndex(
-    updatePortByIndex(router, 0, { ipAddress: "192.168.10.1", subnetMask: "255.255.255.0", mode: "routed" }),
+    updatePortByIndex(router, 0, { ipAddress: "192.168.10.1", subnetMask: "255.255.255.0", mode: "routed", helperAddresses: ["10.10.10.10"] }),
     1,
     { ipAddress: "10.10.10.1", subnetMask: "255.255.255.0", mode: "routed" }
   );
@@ -20,7 +20,19 @@ export function createRoutedSampleProject(ownerId: string): NetworkProject {
     ...updatePortByName(server, "FastEthernet0", { ipAddress: "10.10.10.10", subnetMask: "255.255.255.0", gateway: "10.10.10.1", dnsServer: "10.10.10.10" }),
     config: {
       ...server.config,
-      services: { ...server.config.services, http: true, dns: true },
+      services: { ...server.config.services, http: true, dhcp: true, dns: true, tftp: true, syslog: true },
+      dhcpPools: [{
+        id: createId("pool"),
+        name: "USERS",
+        network: "192.168.10.0",
+        mask: "255.255.255.0",
+        defaultGateway: "192.168.10.1",
+        dnsServer: "10.10.10.10",
+        startIp: "192.168.10.100",
+        maxLeases: 50,
+        enabled: true
+      }],
+      dhcpExcludedRanges: [{ id: createId("dhcp_exclude"), startIp: "192.168.10.1", endIp: "192.168.10.20" }],
       dnsRecords: [{ id: createId("dns"), name: "www.lab.local", value: "10.10.10.10" }]
     }
   };

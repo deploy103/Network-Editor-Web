@@ -69,6 +69,10 @@ export interface NetworkPort {
   moduleSlotId?: string;
   moduleId?: string;
   clockRate?: number;
+  duplex?: "auto" | "full" | "half";
+  speed?: string;
+  mtu?: number;
+  bandwidth?: number;
 }
 
 export interface DeviceModule {
@@ -145,11 +149,13 @@ export interface DeviceConfig {
   dhcpPools: DhcpPool[];
   dhcpExcludedRanges?: DhcpExcludedRange[];
   dnsRecords: DnsRecord[];
+  nameServers: string[];
   accessRules: AccessRule[];
   natRules: NatRule[];
+  stpRootPrimaryVlans: number[];
   localUsers?: Array<{ id: string; name: string; secret?: string; password?: string; privilege?: number }>;
   lineConfigs?: Array<{ id: string; kind: "console" | "vty"; range: string; password: string; login: boolean; loginLocal?: boolean; transportInput: string; execTimeout: string; loggingSynchronous: boolean }>;
-  routingProtocols?: Array<{ id: string; protocol: "rip" | "ospf" | "eigrp"; processId?: string; networks: string[]; version?: string; routerId?: string; autoSummary: boolean; passiveInterfaces: string[]; redistributeStatic: boolean }>;
+  routingProtocols?: Array<{ id: string; protocol: "rip" | "ospf" | "eigrp"; processId?: string; networks: string[]; version?: string; routerId?: string; autoSummary: boolean; passiveInterfaces: string[]; passiveInterfaceDefault?: boolean; passiveInterfaceExceptions?: string[]; redistributeStatic: boolean; defaultInformationOriginate?: boolean; defaultInformationAlways?: boolean }>;
   services: {
     http: boolean;
     dhcp: boolean;
@@ -171,6 +177,7 @@ export interface RuntimeState {
   macTable: Array<{ vlan: number; macAddress: string; portName: string; type: "dynamic" | "static" }>;
   dhcpLeases: Array<{ ipAddress: string; macAddress: string; deviceId: string; expiresAt: number }>;
   logs: Array<{ id: string; level: "info" | "warning" | "error"; message: string; createdAt: number }>;
+  clock?: string;
 }
 
 export interface NetworkDevice {

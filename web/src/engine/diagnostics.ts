@@ -1,4 +1,4 @@
-import { ipInSubnet, isIpv4, maskToPrefix, networkAddress } from "./ip";
+import { ipInSubnet, ipToNumber, isIpv4, isSubnetMask, maskToPrefix, networkAddress } from "./ip";
 import { endpoint, linkLabel } from "./topology";
 import type { NetworkDevice, NetworkPort, NetworkProject } from "../types/network";
 
@@ -57,6 +57,19 @@ function diagnoseDevices(project: NetworkProject): NetworkIssue[] {
 
     for (const port of device.ports) {
       pushOwner(macOwners, port.macAddress, { device, port });
+      if ((port.helperAddresses ?? []).length > 0 && !port.ipAddress) {
+        issues.push(issue("warning", `${device.label} ${port.name} DHCP helper 인터페이스 IP가 없습니다`, "helper-address는 클라이언트 subnet에 있는 routed 인터페이스 IP가 필요합니다."));
+      }
+      for (const helperAddress of port.helperAddresses ?? []) {
+        if (!isIpv4(helperAddress)) {
+          issues.push(issue("error", `${device.label} ${port.name} DHCP helper가 올바르지 않습니다`, `${helperAddress}는 유효한 IPv4 주소가 아닙니다.`));
+        } else if (!project.devices.some((candidate) => candidate.powerOn && candidate.config.services.dhcp && candidate.config.dhcpPools.some((pool) => pool.enabled) && candidate.ports.some((candidatePort) => candidatePort.adminUp && candidatePort.ipAddress === helperAddress))) {
+          issues.push(issue("warning", `${device.label} ${port.name} DHCP helper 대상이 없습니다`, `${helperAddress} 주소의 활성 DHCP 서버가 없습니다.`));
+        }
+      }
+      if (!port.adminUp && port.linkId) {
+        issues.push(issue("warning", `${device.label} ${port.name} 포트가 shutdown 상태입니다`, "인터페이스를 활성화하기 전까지 연결된 링크는 다운 상태입니다."));
+      }
       if (!port.ipAddress) continue;
       if (port.mode !== "routed" && device.kind !== "pc" && device.kind !== "server") {
         issues.push(issue("warning", `${device.label} ${port.name} Layer 2 포트에 IP가 있습니다`, "IP 주소는 routed 포트 또는 SVI로 옮기세요."));
@@ -66,7 +79,7 @@ function diagnoseDevices(project: NetworkProject): NetworkIssue[] {
       if (!isIpv4(port.ipAddress)) {
         issues.push(issue("error", `${device.label} ${port.name} IP가 올바르지 않습니다`, `${port.ipAddress}는 유효한 IPv4 주소가 아닙니다.`));
       }
-      if (port.subnetMask && (!isIpv4(port.subnetMask) || maskToPrefix(port.subnetMask) === 0)) {
+      if (port.subnetMask && (!isSubnetMask(port.subnetMask) || maskToPrefix(port.subnetMask) === 0)) {
         issues.push(issue("error", `${device.label} ${port.name} mask가 올바르지 않습니다`, `${port.subnetMask}는 이 랩에서 사용할 수 없습니다.`));
       }
       if (port.gateway && !isIpv4(port.gateway)) {
@@ -77,9 +90,6 @@ function diagnoseDevices(project: NetworkProject): NetworkIssue[] {
       }
       if (port.gateway && port.ipAddress && port.subnetMask && isIpv4(port.gateway) && !ipInSubnet(port.gateway, port.ipAddress, port.subnetMask)) {
         issues.push(issue("warning", `${device.label} gateway가 subnet 밖에 있습니다`, `${port.gateway}는 ${networkAddress(port.ipAddress, port.subnetMask)}/${maskToPrefix(port.subnetMask)} 안에 없습니다.`));
-      }
-      if (!port.adminUp && port.linkId) {
-        issues.push(issue("warning", `${device.label} ${port.name} 포트가 shutdown 상태입니다`, "인터페이스를 활성화하기 전까지 연결된 링크는 다운 상태입니다."));
       }
     }
 
@@ -150,24 +160,39 @@ function diagnoseServices(project: NetworkProject): NetworkIssue[] {
     }
     for (const pool of device.config.dhcpPools) {
       if (!pool.enabled) continue;
-      if (!isIpv4(pool.network) || !isIpv4(pool.mask) || !isIpv4(pool.startIp)) {
-        issues.push(issue("error", `${device.label} DHCP 풀 ${pool.name} 주소 설정이 올바르지 않습니다`, "Network, mask, start IP는 모두 유효한 IPv4 값이어야 합니다."));
+      if (!isIpv4(pool.network) || !isSubnetMask(pool.mask) || maskToPrefix(pool.mask) === 0 || !isIpv4(pool.startIp)) {
+        issues.push(issue("error", `${device.label} DHCP 풀 ${pool.name} 주소 설정이 올바르지 않습니다`, "Network, subnet mask, start IP는 모두 이 랩에서 사용할 수 있는 IPv4 값이어야 합니다."));
       } else if (networkAddress(pool.startIp, pool.mask) !== networkAddress(pool.network, pool.mask)) {
-        issues.push(issue("warning", `${device.label} DHCP 풀 ${pool.name} 시작 IP가 네트워크 밖에 있습니다`, `${pool.startIp}는 ${pool.network}/${maskToPrefix(pool.mask)} 밖에 있습니다.`));
+        issues.push(issue("error", `${device.label} DHCP 풀 ${pool.name} 시작 IP가 네트워크 밖에 있습니다`, `${pool.startIp}는 ${pool.network}/${maskToPrefix(pool.mask)} 밖에 있습니다.`));
+      } else {
+        const owner = interfaceOwner(project, pool.startIp);
+        if (owner) {
+          issues.push(issue("warning", `${device.label} DHCP 풀 ${pool.name} 시작 IP가 이미 사용 중입니다`, `${pool.startIp}는 ${owner.device.label} ${owner.port.name}에 설정되어 있습니다.`));
+        }
       }
       if (pool.defaultGateway && (!isIpv4(pool.defaultGateway) || !ipInSubnet(pool.defaultGateway, pool.network, pool.mask))) {
-        issues.push(issue("warning", `${device.label} DHCP 풀 ${pool.name} gateway가 맞지 않습니다`, `${pool.defaultGateway}는 풀 네트워크 안에 없습니다.`));
+        issues.push(issue("error", `${device.label} DHCP 풀 ${pool.name} gateway가 맞지 않습니다`, `${pool.defaultGateway}는 풀 네트워크 안에 없습니다.`));
       }
       if (pool.maxLeases < 1) {
         issues.push(issue("error", `${device.label} DHCP 풀 ${pool.name} 임대 수가 없습니다`, "최대 임대 수를 1 이상으로 설정하세요."));
+      }
+    }
+    for (const range of device.config.dhcpExcludedRanges ?? []) {
+      const endIp = range.endIp ?? "";
+      if (!isIpv4(range.startIp) || (endIp && !isIpv4(endIp))) {
+        issues.push(issue("error", `${device.label} DHCP 제외 범위가 올바르지 않습니다`, `${range.startIp}${endIp ? ` - ${endIp}` : ""}는 IPv4 범위여야 합니다.`));
+      } else if (endIp && ipToNumber(endIp) < ipToNumber(range.startIp)) {
+        issues.push(issue("error", `${device.label} DHCP 제외 범위 순서가 올바르지 않습니다`, `${endIp}는 ${range.startIp}보다 작습니다.`));
+      } else if (!dhcpRangeMatchesAnyEnabledPool(device, range.startIp, endIp)) {
+        issues.push(issue("warning", `${device.label} DHCP 제외 범위가 풀 밖에 있습니다`, `${range.startIp}${endIp ? ` - ${endIp}` : ""}는 활성 DHCP 풀 네트워크와 일치하지 않습니다.`));
       }
     }
     if (device.config.services.dns && device.config.dnsRecords.some((record) => !record.name || !isIpv4(record.value))) {
       issues.push(issue("warning", `${device.label}에 올바르지 않은 DNS 레코드가 있습니다`, "모든 DNS 레코드에는 host name과 IPv4 대상이 필요합니다."));
     }
     for (const route of device.config.staticRoutes) {
-      if (!isIpv4(route.network) || !isIpv4(route.mask) || !isIpv4(route.nextHop)) {
-        issues.push(issue("error", `${device.label} static route가 올바르지 않습니다`, `${route.network} ${route.mask} via ${route.nextHop}는 IPv4 값을 사용해야 합니다.`));
+      if (!isIpv4(route.network) || !isSubnetMask(route.mask) || !isIpv4(route.nextHop)) {
+        issues.push(issue("error", `${device.label} static route가 올바르지 않습니다`, `${route.network} ${route.mask} via ${route.nextHop}는 유효한 IPv4 주소와 subnet mask를 사용해야 합니다.`));
         continue;
       }
       if (!device.ports.some((port) => port.adminUp && port.ipAddress && port.subnetMask && ipInSubnet(route.nextHop, port.ipAddress, port.subnetMask))) {
@@ -228,6 +253,22 @@ function explainVlanMismatch(aPort: NetworkPort, bPort: NetworkPort, label: stri
     return `${label}: trunk가 access VLAN ${aPort.vlan}을 허용하지 않습니다.`;
   }
   return "";
+}
+
+function dhcpRangeMatchesAnyEnabledPool(device: NetworkDevice, startIp: string, endIp: string): boolean {
+  return device.config.dhcpPools.some((pool) =>
+    pool.enabled &&
+    ipInSubnet(startIp, pool.network, pool.mask) &&
+    (!endIp || ipInSubnet(endIp, pool.network, pool.mask))
+  );
+}
+
+function interfaceOwner(project: NetworkProject, ipAddress: string): { device: NetworkDevice; port: NetworkPort } | null {
+  for (const device of project.devices) {
+    const port = device.ports.find((item) => item.ipAddress === ipAddress);
+    if (port) return { device, port };
+  }
+  return null;
 }
 
 function pushOwner<T>(map: Map<string, T[]>, key: string, value: T): void {

@@ -114,15 +114,16 @@ export function importProject(raw: string, ownerId: string): NetworkProject {
 }
 
 function parseProjectImport(raw: string): NetworkProject {
+  const text = raw.replace(/^\uFEFF/, "").trimStart();
   try {
-    if (raw.startsWith("PTWEB1\n")) {
-      const envelope = JSON.parse(raw.slice("PTWEB1\n".length)) as { project?: NetworkProject };
+    if (text.startsWith("PTWEB1\n")) {
+      const envelope = JSON.parse(text.slice("PTWEB1\n".length)) as { project?: NetworkProject };
       if (!envelope.project) {
         throw new Error("PTWEB 프로젝트가 비어 있습니다.");
       }
       return envelope.project;
     }
-    return JSON.parse(raw) as NetworkProject;
+    return JSON.parse(text) as NetworkProject;
   } catch (error) {
     if (error instanceof Error && error.message === "PTWEB 프로젝트가 비어 있습니다.") throw error;
     throw new Error("JSON/PTWEB 프로젝트 파일만 가져올 수 있습니다. Cisco Packet Tracer .pkt 바이너리는 지원하지 않습니다.");

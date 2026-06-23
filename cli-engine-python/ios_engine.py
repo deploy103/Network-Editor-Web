@@ -20,12 +20,19 @@ def run_cli_command(device: NetworkDevice, session: IOSSession, raw_command: str
 
     if next_session.get("pendingAction") == "enable-password":
         return _finish_enable_password(next_device, next_session, command)
+    if next_session.get("pendingAction") == "console-username":
+        return _finish_console_username(next_device, next_session, command)
+    if next_session.get("pendingAction") == "console-password":
+        return _finish_console_password(next_device, next_session, command)
+    if next_session.get("pendingAction") == "initial-config":
+        return _finish_initial_config_dialog(next_device, next_session, command)
     if next_session.get("pendingAction") == "reload":
         if command.lower() in ("n", "no"):
             next_session.pop("pendingAction", None)
             return _result(next_device, next_session, "Reload cancelled.")
-        reloaded = apply_startup_config(next_device)
-        return _result(reloaded, {"mode": "exec"}, "System Bootstrap, Version 15.2(PTWEB)\nSystem returned to ROM by reload.")
+        reloaded = boot_device(next_device)
+        next_boot_session = boot_session(reloaded)
+        return _result(reloaded, next_boot_session, append_console_auth_prompt(boot_banner(next_device), next_boot_session))
     if next_session.get("pendingAction") == "erase-startup":
         if command.lower() in ("n", "no"):
             next_session.pop("pendingAction", None)
@@ -39,6 +46,14 @@ def run_cli_command(device: NetworkDevice, session: IOSSession, raw_command: str
 
     if not lower:
         return _result(next_device, next_session, "")
+    if not next_device.get("powerOn", True):
+        if lower in ("power on", "boot"):
+            return run_power(next_device, "power on")
+        if lower == "show version":
+            return _result(next_device, next_session, show_command(next_device, lower))
+        if lower in ("?", "help"):
+            return _result(next_device, next_session, "power on, boot, show version")
+        return _result(next_device, next_session, "% Device power is off. Type power on or use the Physical tab power switch.")
     if lower in ("?", "help"):
         return _result(next_device, next_session, help_text(mode))
     if lower.startswith("do ") and mode not in ("exec", "privileged"):
@@ -79,12 +94,14 @@ def cli_completions(device: NetworkDevice, session: IOSSession, input_text: str)
 
 def command_candidates(device: NetworkDevice, session: IOSSession) -> list[str]:
     mode = session.get("mode", "exec")
+    if not device.get("powerOn", True):
+        return ["power on", "boot", "show version"]
     if session.get("pendingAction"):
         return []
     if mode == "exec":
-        base = ["enable", "show version", "show clock", "show ip interface brief", "show ip route", "show protocols", "show cdp neighbors", "show arp", "ping ", "traceroute ", "power on", "help"]
+        base = ["enable", "setup", "show version", "show boot", "show inventory", "show platform", "show tech-support", "show debugging", "show clock", "show ip interface brief", "show ip route", "show protocols", "show cdp neighbors", "show arp", "ping ", "traceroute ", "power on", "help"]
     elif mode == "privileged":
-        base = ["disable", "configure terminal", "conf t", "show running-config", "show running-config | include ", "show running-config | section ", "show startup-config", "show version", "show inventory", "show flash", "show file systems", "show users", "show line", "show protocols", "show controllers", "show processes cpu", "show memory", "show spanning-tree", "show spanning-tree vlan ", "show interfaces", "show interfaces counters", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route summary", "show ip protocols", "show ip ospf", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show ip dhcp binding", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp server statistics", "show access-lists", "clear arp", "clear mac address-table", "clear ip dhcp binding", "clear ip dhcp conflict *", "clear ip nat translation *", "ping ", "traceroute ", "write memory", "copy running-config startup-config", "reload", "write erase", "power off", "power cycle", "help"]
+        base = ["disable", "setup", "configure terminal", "conf t", "show running-config", "show running-config | include ", "show running-config | section ", "show startup-config", "show version", "show boot", "show inventory", "show platform", "show module", "show environment", "show tech-support", "show clock", "clock set 12:34:56 Jun 19 2026", "show debugging", "show flash", "show file systems", "show users", "show line", "show protocols", "show controllers", "show processes cpu", "show memory", "show spanning-tree", "show spanning-tree vlan ", "show interfaces", "show interfaces counters", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip route", "show ip route summary", "show ip protocols", "show ip ospf", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show ip dhcp binding", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp server statistics", "show access-lists", "debug ip icmp", "debug ip packet", "debug ip dhcp server events", "debug spanning-tree events", "undebug all", "clear arp", "clear mac address-table", "clear ip dhcp binding", "clear ip dhcp conflict *", "clear ip nat translation *", "ping ", "traceroute ", "write memory", "copy running-config startup-config", "reload", "write erase", "power off", "power cycle", "help"]
     elif mode == "global":
         base = ["hostname ", "enable secret ", "enable password ", "banner motd #", "no banner motd", "username admin privilege 15 secret cisco", "interface ", "interface range fa0/1 - 2", "default interface ", "vlan ", "spanning-tree vlan 1 root primary", "no spanning-tree vlan 1 root primary", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "ip domain-name lab.local", "ip name-server 8.8.8.8", "no ip name-server ", "ip host www.lab.local 192.168.10.10", "no ip host ", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "ip dhcp excluded-address ", "ip dhcp pool ", "ip access-list standard ", "ip access-list extended ", "access-list 101 permit ip any any", "ip nat inside source static ", "service password-encryption", "no service password-encryption", "service dns", "no service dns", "do show running-config", "end", "exit", "help"]
     elif mode == "interface":
@@ -171,6 +188,8 @@ def expand_command(command: str, session: IOSSession) -> str:
         return "end"
     if first == "exit" or abbr(first, "exit", 2):
         return "exit"
+    if abbr(first, "setup", 3):
+        return "setup"
     if first == "do":
         return "do " + expand_command(" ".join(rest), {"mode": "privileged"})
     if first in ("sh", "sho") or abbr(first, "show", 2):
@@ -179,6 +198,10 @@ def expand_command(command: str, session: IOSSession) -> str:
         return "write erase" if lrest and abbr(lrest[0], "erase") else "write memory"
     if abbr(first, "clock", 2):
         return "clock set " + " ".join(rest[1:]) if lrest and abbr(lrest[0], "set", 1) else "clock " + " ".join(rest)
+    if abbr(first, "debug", 3):
+        return "debug " + " ".join(rest)
+    if first == "u" or abbr(first, "undebug", 2):
+        return "undebug " + (" ".join(rest) if rest else "all")
     if first == "dir":
         return "show flash"
     if abbr(first, "copy", 2):
@@ -194,6 +217,8 @@ def expand_command(command: str, session: IOSSession) -> str:
         return "reload"
     if abbr(first, "reboot", 3):
         return "reboot"
+    if first == "boot":
+        return "power on"
     if first == "power":
         return expand_power(rest)
     if first == "no":
@@ -254,16 +279,26 @@ def expand_show(rest: list[str]) -> str:
         return "show startup-config"
     if abbr(first, "version", 3):
         return "show version"
+    if abbr(first, "boot", 2):
+        return "show boot"
     if abbr(first, "clock", 2):
         return "show clock"
     if abbr(first, "inventory", 3):
         return "show inventory"
+    if abbr(first, "platform", 3):
+        return "show platform"
+    if abbr(first, "module", 3):
+        return "show module"
+    if abbr(first, "environment", 3) or abbr(first, "env", 3):
+        return "show environment"
     if abbr(first, "flash", 2):
         return "show flash"
     if abbr(first, "file") and abbr(second, "systems"):
         return "show file systems"
     if abbr(first, "history", 3):
         return "show history"
+    if abbr(first, "debugging", 3):
+        return "show debugging"
     if abbr(first, "privilege", 3):
         return "show privilege"
     if abbr(first, "logging", 3):
@@ -284,6 +319,8 @@ def expand_show(rest: list[str]) -> str:
         return "show line"
     if abbr(first, "terminal", 4):
         return "show terminal"
+    if abbr(first, "tech-support", 4) or (first == "tech" and abbr(second, "support", 3)):
+        return "show tech-support"
     if abbr(first, "interfaces", 3) or first in ("int", "interface"):
         if second == "trunk" or abbr(second, "trunk", 2):
             return "show interfaces trunk"
@@ -540,6 +577,8 @@ def run_common(device: NetworkDevice, session: IOSSession, command: str, lower: 
         return _result(device, {"mode": "privileged"}, "")
     if lower == "disable":
         return _result(device, {"mode": "exec"}, "")
+    if lower == "setup":
+        return _result(device, {"mode": "exec", "pendingAction": "initial-config"}, "\n".join(["", "--- System Configuration Dialog ---", "Would you like to enter the initial configuration dialog? [yes/no]:"]))
     if lower == "end":
         return _result(device, {"mode": "privileged"}, "")
     if lower == "exit":
@@ -549,9 +588,36 @@ def run_common(device: NetworkDevice, session: IOSSession, command: str, lower: 
         if mode in ("interface", "vlan", "dhcp", "line", "router", "acl"):
             return _result(device, {"mode": "global"}, "")
         return _result(device, {"mode": "exec"}, "")
+    if lower == "show debugging":
+        return _result(device, session, debugging_status(session))
+    if lower.startswith("debug "):
+        if session.get("mode") != "privileged":
+            return _result(device, session, "% Debug commands require privileged EXEC mode.")
+        flag = command[len("debug "):].strip() or "all"
+        return _result(device, {**session, "debugFlags": unique((session.get("debugFlags") or []) + [flag])}, f"{flag} debugging is on")
+    if lower in ("undebug all", "u all", "no debug all"):
+        if session.get("mode") != "privileged":
+            return _result(device, session, "% Debug commands require privileged EXEC mode.")
+        return _result(device, {**session, "debugFlags": []}, "All possible debugging has been turned off")
+    if lower == "show terminal":
+        return _result(device, session, terminal_status(session))
     if lower.startswith("show "):
         return _result(device, session, show_command(device, lower))
-    if lower == "terminal length 0" or lower.startswith("terminal "):
+    if lower.startswith("terminal length "):
+        length = number_after(command, "terminal length")
+        if length < 0 or length > 512:
+            return _result(device, session, "% Terminal length must be 0-512.")
+        return _result(device, {**session, "terminalLength": length}, "")
+    if lower.startswith("terminal width "):
+        width = number_after(command, "terminal width")
+        if width < 40 or width > 512:
+            return _result(device, session, "% Terminal width must be 40-512.")
+        return _result(device, {**session, "terminalWidth": width}, "")
+    if lower == "terminal monitor":
+        return _result(device, {**session, "terminalMonitor": True}, "")
+    if lower in ("terminal no monitor", "terminal no-monitor"):
+        return _result(device, {**session, "terminalMonitor": False}, "")
+    if lower.startswith("terminal "):
         return _result(device, session, "")
     if lower.startswith("ping "):
         return _result(device, session, ping_output(device, command[len("ping "):].strip()))
@@ -572,7 +638,7 @@ def run_privileged(device: NetworkDevice, session: IOSSession, command: str, low
     if lower in ("configure terminal", "conf t"):
         return _result(device, {"mode": "global"}, "Enter configuration commands, one per line.  End with CNTL/Z.")
     if lower in ("write memory", "copy running-config startup-config"):
-        cfg(device)["startupConfig"] = running_config(device).splitlines()
+        cfg(device)["startupConfig"] = config_lines(device)
         return _result(device, session, "Building configuration...\n[OK]")
     if lower.startswith("clock set "):
         value = command[len("clock set "):].strip()
@@ -610,13 +676,265 @@ def run_power(device: NetworkDevice, lower: str) -> dict[str, Any]:
         runtime(device)["dhcpLeases"] = []
         return _result(device, {"mode": "exec"}, "System halted.\nPower is off.")
     if lower == "power on":
-        device["powerOn"] = True
-        return _result(device, {"mode": "exec"}, "System Bootstrap, Version 15.2(PTWEB)\nPower restored.")
+        booted = boot_device(device)
+        next_session = boot_session(booted)
+        return _result(booted, next_session, append_console_auth_prompt(f"Power restored.\n{boot_banner(device)}", next_session))
+    booted = boot_device(device)
+    next_session = boot_session(booted)
+    return _result(booted, next_session, append_console_auth_prompt(f"System halted.\n{boot_banner(device)}", next_session))
+
+
+def boot_device(device: NetworkDevice) -> NetworkDevice:
     device["powerOn"] = True
-    runtime(device)["arpTable"] = []
-    runtime(device)["macTable"] = []
-    runtime(device)["dhcpLeases"] = []
-    return _result(apply_startup_config(device), {"mode": "exec"}, "System Bootstrap, Version 15.2(PTWEB)\nSystem restarted after power cycle.")
+    return apply_startup_config(device)
+
+
+def boot_session(device: NetworkDevice) -> IOSSession:
+    if not cfg(device).get("startupConfig"):
+        return {"mode": "exec", "pendingAction": "initial-config"}
+    auth = console_auth_session(device)
+    return auth or {"mode": "exec"}
+
+
+def append_console_auth_prompt(output: str, session: IOSSession) -> str:
+    if session.get("pendingAction") == "console-username":
+        return f"{output}\n\nUser Access Verification\n\nUsername:"
+    if session.get("pendingAction") == "console-password":
+        return f"{output}\n\nUser Access Verification\n\nPassword:"
+    return output
+
+
+def console_auth_session(device: NetworkDevice) -> IOSSession | None:
+    line = console_line_auth(device)
+    if not line or not line.get("login"):
+        return None
+    if line.get("loginLocal"):
+        return {"mode": "exec", "pendingAction": "console-username"}
+    return {"mode": "exec", "pendingAction": "console-password"}
+
+
+def console_line_auth(device: NetworkDevice) -> dict[str, Any] | None:
+    for line in cfg(device).get("lineConfigs", []):
+        if line.get("kind") == "console" and str(line.get("range", "")).strip().startswith("0"):
+            return line
+    return None
+
+
+def boot_banner(device: NetworkDevice) -> str:
+    profile = hardware_profile(device)
+    startup_lines = len(cfg(device).get("startupConfig") or [])
+    lines = [
+        f"System Bootstrap, Version {bootstrap_version(device)}, RELEASE SOFTWARE",
+        "Copyright (c) Network Editor Web",
+        "",
+        f"{device.get('model', 'Cisco IOS')} platform with {profile['processor']}",
+        f"{profile['dramKb']}K bytes of main memory, {profile['ioKb']}K bytes of packet memory.",
+        f"Processor board ID {serial_number(device)}",
+        f"{profile['nvramKb']}K bytes of non-volatile configuration memory.",
+        f"{profile['flashKb']}K bytes of ATA System CompactFlash (Read/Write)",
+        "",
+        "Initializing flash filesystem...",
+        "flashfs[0]: 0 orphaned files, 0 orphaned directories",
+        "flashfs[0]: Initialization complete.",
+        "POST: CPU self-test passed.",
+        "POST: Interface controller self-test passed.",
+        "POST: NVRAM checksum passed.",
+        *module_boot_lines(device),
+        *[f"{item['count']} {item['label']}" for item in interface_type_counts(device)],
+        "",
+        f"program load complete, entry point: 0x80008000, size: {profile['imageKb']}KB",
+        f"Self decompressing the image : {'#' * 44} [OK]",
+        "",
+        f"{device.get('model', 'Cisco IOS')} Software ({software_train(device)}), Version {software_version(device)}, RELEASE SOFTWARE",
+        f"System image file is \"flash:{image_name(device)}\"",
+        "This product contains cryptographic features and is a simulated lab device.",
+        "",
+        "Loading startup-config from nvram...",
+        f"[OK] {startup_lines} configuration lines loaded." if startup_lines else "% Non-volatile configuration memory is empty.",
+    ]
+    if cfg(device).get("motdBanner"):
+        lines.extend(["", str(cfg(device).get("motdBanner"))])
+    if startup_lines:
+        lines.append("Press RETURN to get started!")
+    else:
+        lines.extend(["", "--- System Configuration Dialog ---", "Would you like to enter the initial configuration dialog? [yes/no]:"])
+    return "\n".join(lines)
+
+
+def show_version(device: NetworkDevice) -> str:
+    profile = hardware_profile(device)
+    lines = [
+        f"{device.get('model', 'Cisco IOS')} Software ({software_train(device)}), Version {software_version(device)}, RELEASE SOFTWARE",
+        "Technical Support: simulated Packet Tracer-style IOS subset",
+        "Compiled Mon 22-Jun-26 by pyios",
+        "",
+        f"ROM: Bootstrap program is {bootstrap_version(device)}",
+        f"{cfg(device).get('hostname') or device.get('label') or 'Router'} uptime is {'0 days, 0 hours, 0 minutes' if device.get('powerOn', True) else 'not running; system is powered off'}",
+        "System returned to ROM by power-on" if device.get("powerOn", True) else "System is powered off",
+        f"System image file is \"flash:{image_name(device)}\"",
+        f"Last reload reason: {'power-on' if device.get('powerOn', True) else 'power removed'}",
+        "",
+        f"{device.get('model', 'Cisco IOS')} ({profile['processor']}) processor with {profile['dramKb']}K/{profile['ioKb']}K bytes of memory.",
+        f"Processor board ID {serial_number(device)}",
+        *[f"{item['count']} {item['label']}" for item in interface_type_counts(device)],
+        f"{profile['nvramKb']}K bytes of non-volatile configuration memory.",
+        f"{profile['flashKb']}K bytes of ATA System CompactFlash (Read/Write)",
+        "",
+        "License Level: ipbase",
+        "License Type: Permanent",
+        "Configuration register is 0x2102",
+    ]
+    return "\n".join(lines)
+
+
+def boot_status(device: NetworkDevice) -> str:
+    startup_bytes = len("\n".join(cfg(device).get("startupConfig", [])))
+    return "\n".join([
+        f"BOOT path-list      : flash:{image_name(device)}",
+        "Config file         : nvram:startup-config",
+        f"Private Config file : {'nvram:private-config' if startup_bytes else 'not present'}",
+        f"Enable Break        : {'no' if device.get('powerOn', True) else 'not available while powered off'}",
+        "Manual Boot         : no",
+        "Helper path-list    :",
+        "Auto upgrade        : yes",
+        f"NVRAM config bytes  : {startup_bytes}",
+        f"Startup config      : {'present' if cfg(device).get('startupConfig') else 'not saved'}",
+    ])
+
+
+def platform_status(device: NetworkDevice) -> str:
+    profile = hardware_profile(device)
+    modules = device.get("modules") or []
+    module_rows = [f"{str(index + 1).ljust(5)}{module.get('moduleId', '').ljust(18)}{module.get('slotId', '').ljust(12)}ok" for index, module in enumerate(modules)]
+    if not module_rows:
+        module_rows = ["1    Built-in ports     chassis     ok"]
+    port_rows = [
+        f"{p.get('name', '').ljust(22)}{p.get('kind', '').ljust(18)}{('enabled' if device.get('powerOn', True) and p.get('adminUp', True) else 'disabled').ljust(10)}{'link-up' if p.get('linkId') else 'no-link'}"
+        for p in device.get("ports", [])
+    ]
+    return "\n".join([
+        f"Chassis type: {device.get('model', 'Cisco IOS')}",
+        f"Processor: {profile['processor']}",
+        f"Main memory: {profile['dramKb']}K",
+        f"Packet memory: {profile['ioKb']}K",
+        f"Flash: {profile['flashKb']}K",
+        "",
+        "Slot Module            Location    Status",
+        *module_rows,
+        "",
+        *port_rows,
+    ])
+
+
+def environment_status(device: NetworkDevice) -> str:
+    return "\n".join([
+        f"SYSTEM POWER           : {'OK' if device.get('powerOn', True) else 'OFF'}",
+        f"Power Supply 1         : {'OK' if device.get('powerOn', True) else 'not present'}",
+        "System Temperature     : OK, 31 Celsius",
+        "CPU Temperature        : OK, 38 Celsius",
+        f"Fan 1                  : {'OK' if device.get('powerOn', True) else 'stopped'}",
+        f"Fan 2                  : {'OK' if device.get('kind') in ('router', 'switch') and device.get('powerOn', True) else 'N/A'}",
+        "Voltage rails          : OK",
+        f"Interface LEDs         : {len([p for p in device.get('ports', []) if p.get('linkId') and p.get('adminUp', True) and device.get('powerOn', True)])} active",
+    ])
+
+
+def tech_support(device: NetworkDevice) -> str:
+    sections = [
+        ("show clock", runtime(device).get("clock") or time.strftime("%Y-%m-%d %H:%M:%S KST", time.localtime())),
+        ("show version", show_version(device)),
+        ("show boot", boot_status(device)),
+        ("show environment", environment_status(device)),
+        ("show running-config", running_config(device)),
+        ("show ip interface brief", show_command(device, "show ip interface brief")),
+        ("show interfaces status", interfaces_status(device)),
+        ("show interfaces counters", interfaces_counters(device)),
+        ("show ip route", route_table(device)),
+        ("show logging", logging_status(device)),
+    ]
+    return "\n\n".join(f"------------------ {title} ------------------\n{body}" for title, body in sections)
+
+
+def hardware_profile(device: NetworkDevice) -> dict[str, Any]:
+    model_id = str(device.get("modelId", ""))
+    kind = str(device.get("kind", "router"))
+    if "2911" in model_id:
+        return {"processor": "CISCO2911/K9", "dramKb": 524288, "ioKb": 131072, "nvramKb": 512, "flashKb": 262144, "imageKb": 48264}
+    if "2901" in model_id:
+        return {"processor": "CISCO2901/K9", "dramKb": 262144, "ioKb": 65536, "nvramKb": 512, "flashKb": 131072, "imageKb": 42112}
+    if "2811" in model_id:
+        return {"processor": "MPC860", "dramKb": 249856, "ioKb": 12288, "nvramKb": 239, "flashKb": 62720, "imageKb": 30896}
+    if "1941" in model_id:
+        return {"processor": "CISCO1941/K9", "dramKb": 262144, "ioKb": 65536, "nvramKb": 255, "flashKb": 262144, "imageKb": 44128}
+    if "1841" in model_id:
+        return {"processor": "MPC860", "dramKb": 114688, "ioKb": 16384, "nvramKb": 191, "flashKb": 62720, "imageKb": 28672}
+    if kind == "switch":
+        return {"processor": "PowerPC405" if "3560" in model_id else "PowerPC", "dramKb": 131072, "ioKb": 16384, "nvramKb": 64, "flashKb": 32512, "imageKb": 16896}
+    if kind == "firewall":
+        return {"processor": "Geode", "dramKb": 262144, "ioKb": 32768, "nvramKb": 64, "flashKb": 131072, "imageKb": 24576}
+    return {"processor": "PTWEB-CPU", "dramKb": 65536, "ioKb": 8192, "nvramKb": 32, "flashKb": 16384, "imageKb": 8192}
+
+
+def bootstrap_version(device: NetworkDevice) -> str:
+    if device.get("kind") == "switch":
+        return "12.2(55)SE"
+    if device.get("kind") == "firewall":
+        return "8.4(PTWEB)"
+    return "15.1(4)M4"
+
+
+def software_version(device: NetworkDevice) -> str:
+    if device.get("kind") == "switch":
+        return "15.0(2)SE4"
+    if device.get("kind") == "firewall":
+        return "9.1(PTWEB)"
+    return "15.2(4)M6"
+
+
+def software_train(device: NetworkDevice) -> str:
+    if device.get("kind") == "switch":
+        return "C2960-LANBASEK9-M"
+    if device.get("kind") == "firewall":
+        return "ASA"
+    return "C1900-UNIVERSALK9-M"
+
+
+def image_name(device: NetworkDevice) -> str:
+    if device.get("kind") == "switch":
+        return f"c2960-lanbasek9-mz.{software_version(device)}.bin"
+    if device.get("kind") == "firewall":
+        version_digits = re.sub(r"\D", "", software_version(device)) or "91"
+        return f"asa{version_digits}.bin"
+    return f"{device.get('modelId', 'router')}-universalk9-mz.{software_version(device)}.bin"
+
+
+def serial_number(device: NetworkDevice) -> str:
+    serial = re.sub(r"[^a-zA-Z0-9]", "", str(device.get("id", ""))).upper()[-11:]
+    return serial.rjust(11, "0")
+
+
+def module_boot_lines(device: NetworkDevice) -> list[str]:
+    modules = device.get("modules") or []
+    if not modules:
+        return ["No removable network modules detected."]
+    return [f"Smart Init: {module.get('moduleId')} detected in {module.get('slotId')} [OK]" for module in modules]
+
+
+def interface_type_counts(device: NetworkDevice) -> list[dict[str, Any]]:
+    labels = {
+        "ethernet": "Ethernet interfaces",
+        "fast-ethernet": "FastEthernet interfaces",
+        "gigabit-ethernet": "GigabitEthernet interfaces",
+        "serial": "Serial interfaces",
+        "console": "terminal line(s)",
+        "fiber": "Fiber interfaces",
+        "wireless": "Wireless radio interfaces",
+    }
+    counts: dict[str, int] = {}
+    for port in device.get("ports", []):
+        kind = str(port.get("kind", "ethernet"))
+        counts[kind] = counts.get(kind, 0) + 1
+    return [{"count": count, "label": labels.get(kind, f"{kind} interfaces")} for kind, count in counts.items()]
 
 
 def run_global(device: NetworkDevice, session: IOSSession, command: str, lower: str) -> dict[str, Any]:
@@ -632,7 +950,7 @@ def run_global(device: NetworkDevice, session: IOSSession, command: str, lower: 
         port = find_port(device, command[len("default interface "):].strip())
         if not port:
             return _result(device, session, "% Interface not found.")
-        reset_port(port)
+        reset_port(port, device.get("kind", "switch"))
         return _result(device, session, "")
     if lower.startswith("enable secret "):
         config["enableSecret"] = command[len("enable secret "):].strip()
@@ -1179,18 +1497,23 @@ def show_command(device: NetworkDevice, lower: str) -> str:
     if lower in ("show running-config", "show run", "show running-config all", "show running-config brief"):
         return running_config(device)
     if lower == "show startup-config":
-        lines = cfg(device).get("startupConfig") or []
-        return "\n".join(lines) if lines else "% Startup config is not saved."
+        return startup_config_display(device)
     if lower == "show version":
-        return f"{device.get('model', 'Cisco IOS')} Software, Network Editor Python IOS\nDevice uptime is simulated\nSystem image file is \"python-ios:{device.get('modelId', 'generic')}\"\n{len(device.get('ports', []))} interfaces\n{'System returned to ROM by power-on' if device.get('powerOn', True) else 'System is powered off'}"
+        return show_version(device)
+    if lower == "show boot":
+        return boot_status(device)
     if lower == "show clock":
         return runtime(device).get("clock") or time.strftime("%Y-%m-%d %H:%M:%S KST", time.localtime())
     if lower == "show inventory":
         return f"NAME: \"{device.get('label', 'Device')}\", DESCR: \"{device.get('model', 'Cisco IOS')}\"\nPID: {device.get('modelId', 'generic')}, VID: PYIOS, SN: {device.get('id', 'unknown')}"
+    if lower in ("show platform", "show module"):
+        return platform_status(device)
+    if lower == "show environment":
+        return environment_status(device)
     if lower in ("show flash", "show flash:"):
         startup_bytes = len("\n".join(cfg(device).get("startupConfig", [])))
         image_bytes = 8192 + len(device.get("ports", [])) * 256
-        return f"Directory of flash:/\n\n    1  -rw-       {image_bytes:8d}  python-ios-{device.get('modelId', 'generic')}.bin\n    2  -rw-       {startup_bytes:8d}  startup-config\n64016384 bytes total (63901696 bytes free)"
+        return f"Directory of flash:/\n\n    1  -rw-       {image_bytes:8d}  {image_name(device)}\n    2  -rw-       {startup_bytes:8d}  startup-config\n64016384 bytes total (63901696 bytes free)"
     if lower == "show file systems":
         startup_bytes = len("\n".join(cfg(device).get("startupConfig", []))) or 1
         return f"File Systems:\n\n     Size(b)     Free(b)      Type  Flags  Prefixes\n*   64016384    63901696     flash     rw  flash:\n       {startup_bytes:6d}       0     nvram     rw  nvram:"
@@ -1296,18 +1619,39 @@ def show_command(device: NetworkDevice, lower: str) -> str:
         return line_status(device)
     if lower == "show terminal":
         return "Line 0, Location: local\nLength: 24 lines, Width: 80 columns\nHistory is enabled. Completion is enabled."
+    if lower == "show tech-support":
+        return tech_support(device)
     return "% Unsupported show command."
 
 
 def running_config(device: NetworkDevice) -> str:
+    lines = config_lines(device)
+    return "\n".join(["Building configuration...", "", f"Current configuration : {len(chr(10).join(lines))} bytes", *lines])
+
+
+def startup_config_display(device: NetworkDevice) -> str:
+    lines = cfg(device).get("startupConfig") or []
+    if not lines:
+        return "% Startup config is not saved."
+    return "\n".join([f"Using {len(chr(10).join(lines))} out of 65536 bytes", *lines])
+
+
+def config_lines(device: NetworkDevice) -> list[str]:
     config = cfg(device)
-    lines: list[str] = [f"hostname {config.get('hostname') or device.get('label') or 'Router'}"]
+    lines: list[str] = [
+        "!",
+        f"version {software_version(device)}",
+        "service timestamps debug datetime msec",
+        "service timestamps log datetime msec",
+        "service password-encryption" if config.get("passwordEncryption") else "no service password-encryption",
+        "!",
+        f"hostname {config.get('hostname') or device.get('label') or 'Router'}",
+        "!",
+    ]
     if config.get("enableSecret"):
         lines.append(f"enable secret {config['enableSecret']}")
     if config.get("enablePassword"):
         lines.append(f"enable password {config['enablePassword']}")
-    if config.get("passwordEncryption"):
-        lines.append("service password-encryption")
     log = config.get("logging") or {}
     if log.get("console") is False:
         lines.append("no logging console")
@@ -1331,12 +1675,13 @@ def running_config(device: NetworkDevice) -> str:
     if config.get("motdBanner"):
         lines.append(f"banner motd #{config['motdBanner']}#")
     lines.extend(user_config(user) for user in config.get("localUsers", []))
+    lines.append("!")
     for vlan in config.get("vlans", []):
-        lines.extend([f"vlan {vlan.get('id')}", f" name {vlan.get('name')}"])
+        lines.extend([f"vlan {vlan.get('id')}", f" name {vlan.get('name')}", "!"])
     for vlan in config.get("stpRootPrimaryVlans", []):
         lines.append(f"spanning-tree vlan {vlan} root primary")
     for port in device.get("ports", []):
-        lines.extend(interface_config(port))
+        lines.extend([*interface_config(port), "!"])
     lines.extend(f"ip route {r.get('network')} {r.get('mask')} {r.get('nextHop')}" for r in config.get("staticRoutes", []))
     lines.extend(f"ip host {record.get('name')} {record.get('value')}" for record in config.get("dnsRecords", []))
     for item in config.get("dhcpExcludedRanges", []):
@@ -1346,10 +1691,24 @@ def running_config(device: NetworkDevice) -> str:
     lines.extend(acl_config(config.get("accessRules", [])))
     lines.extend(f"ip nat inside source static {n.get('insideLocal')} {n.get('insideGlobal')}" for n in config.get("natRules", []))
     for line in config.get("lineConfigs", []):
-        lines.extend(line_config(line))
+        lines.extend([*line_config(line), "!"])
     for proto in config.get("routingProtocols", []):
-        lines.extend(routing_config(proto))
-    return "\n".join(lines)
+        lines.extend([*routing_config(proto), "!"])
+    lines.append("end")
+    return compact_config_lines(lines)
+
+
+def compact_config_lines(lines: list[str]) -> list[str]:
+    output: list[str] = []
+    for line in lines:
+        if not line:
+            continue
+        if line == "!" and output and output[-1] == "!":
+            continue
+        output.append(line)
+    if len(output) >= 2 and output[-2] == "!":
+        output.pop(-2)
+    return output
 
 
 def interface_config(port: dict[str, Any] | None) -> list[str]:
@@ -1416,31 +1775,11 @@ def routing_config(proto: dict[str, Any]) -> list[str]:
 
 def apply_startup_config(device: NetworkDevice) -> NetworkDevice:
     startup = list(cfg(device).get("startupConfig") or [])
-    if not startup:
-        runtime(device)["arpTable"] = []
-        runtime(device)["macTable"] = []
-        runtime(device)["dhcpLeases"] = []
-        return device
     preserved = copy.deepcopy(device)
-    preserved["config"] = {
-        **cfg(preserved),
-        "hostname": cfg(device).get("hostname") or device.get("label") or "Router",
-        "startupConfig": startup,
-        "staticRoutes": [],
-        "vlans": [{"id": 1, "name": "default"}],
-        "stpRootPrimaryVlans": [],
-        "dhcpPools": [],
-        "dhcpExcludedRanges": [],
-        "dnsRecords": [],
-        "nameServers": [],
-        "accessRules": [],
-        "natRules": [],
-        "localUsers": [],
-        "lineConfigs": [],
-        "routingProtocols": [],
-    }
+    preserved["powerOn"] = True
+    preserved["config"] = default_config_for_boot(device, startup)
     for port in preserved.get("ports", []):
-        reset_port(port)
+        reset_port(port, preserved.get("kind", "switch"))
     session = {"mode": "global"}
     for line in startup:
         stripped = line.strip()
@@ -1455,6 +1794,32 @@ def apply_startup_config(device: NetworkDevice) -> NetworkDevice:
     runtime(preserved)["macTable"] = []
     runtime(preserved)["dhcpLeases"] = []
     return preserved
+
+
+def default_config_for_boot(device: NetworkDevice, startup: list[str]) -> dict[str, Any]:
+    kind = device.get("kind", "router")
+    return {
+        "hostname": device.get("label") or "Router",
+        "startupConfig": startup,
+        "domainLookup": True,
+        "sshVersion": "2",
+        "rsaKeyGenerated": False,
+        "passwordEncryption": False,
+        "logging": {"console": True, "buffered": True, "hosts": [], "trap": "informational"},
+        "lineConfigs": [],
+        "routingProtocols": [],
+        "staticRoutes": [],
+        "vlans": [{"id": 1, "name": "default"}],
+        "stpRootPrimaryVlans": [],
+        "dhcpPools": [],
+        "dhcpExcludedRanges": [],
+        "dnsRecords": [],
+        "nameServers": [],
+        "accessRules": [],
+        "natRules": [],
+        "localUsers": [],
+        "services": {"http": kind == "server", "dhcp": False, "dns": kind == "server", "tftp": False, "syslog": False},
+    }
 
 
 def normalize_device(device: NetworkDevice) -> NetworkDevice:
@@ -1535,6 +1900,41 @@ def _finish_enable_password(device: NetworkDevice, session: IOSSession, command:
     if command == secret:
         return _result(device, {"mode": "privileged"}, "")
     return _result(device, {"mode": "exec"}, "% Access denied")
+
+
+def _finish_console_username(device: NetworkDevice, session: IOSSession, command: str) -> dict[str, Any]:
+    username = command.strip()
+    if not username:
+        return _result(device, session, "Username:")
+    return _result(device, {"mode": "exec", "pendingAction": "console-password", "authUsername": username}, "Password:")
+
+
+def _finish_console_password(device: NetworkDevice, session: IOSSession, command: str) -> dict[str, Any]:
+    line = console_line_auth(device)
+    if line and line.get("loginLocal"):
+        username = str(session.get("authUsername", "")).lower()
+        user = next((item for item in cfg(device).get("localUsers", []) if str(item.get("name", "")).lower() == username), None)
+        expected = (user or {}).get("secret") or (user or {}).get("password") or ""
+        if expected and command == expected:
+            return _result(device, {"mode": "exec"}, str(cfg(device).get("motdBanner") or ""))
+        return _result(device, {"mode": "exec", "pendingAction": "console-username"}, "% Login invalid\n\nUsername:")
+    expected = line.get("password", "") if line else ""
+    if expected and command == expected:
+        return _result(device, {"mode": "exec"}, str(cfg(device).get("motdBanner") or ""))
+    return _result(device, {"mode": "exec", "pendingAction": "console-password"}, "% Bad passwords\n\nPassword:")
+
+
+def _finish_initial_config_dialog(device: NetworkDevice, session: IOSSession, command: str) -> dict[str, Any]:
+    answer = command.strip().lower()
+    if answer in ("y", "yes"):
+        return _result(device, {"mode": "exec"}, "\n".join([
+            "At any point you may enter a question mark '?' for help.",
+            "% Initial configuration dialog is simulated here; use 'enable' and 'configure terminal' for manual setup.",
+            "Press RETURN to get started!",
+        ]))
+    if not answer or answer in ("n", "no"):
+        return _result(device, {"mode": "exec"}, "Press RETURN to get started!")
+    return _result(device, session, "Please answer 'yes' or 'no'.")
 
 
 def abbr(value: str | None, full: str, min_len: int = 1) -> bool:
@@ -1665,8 +2065,8 @@ def create_svi(device: NetworkDevice, vlan: int) -> dict[str, Any]:
     return port
 
 
-def reset_port(port: dict[str, Any]) -> None:
-    mode = "routed" if port.get("name", "").lower().startswith("vlan") or port.get("kind") in ("serial",) else "access"
+def reset_port(port: dict[str, Any], device_kind: str = "switch") -> None:
+    mode = "routed" if port.get("name", "").lower().startswith("vlan") or device_kind in ("router", "firewall") or port.get("kind") in ("serial",) else "access"
     port.update({"description": "", "ipAddress": "", "subnetMask": "", "gateway": "", "dnsServer": "", "mode": mode, "vlan": 1, "allowedVlans": [1], "nativeVlan": 1, "adminUp": True, "accessGroupIn": "", "accessGroupOut": "", "helperAddresses": [], "natRole": None, "switchportNonegotiate": False, "duplex": "auto", "speed": "auto", "mtu": 1500, "bandwidth": None})
 
 
@@ -2010,7 +2410,15 @@ def interfaces_description(device: NetworkDevice) -> str:
 
 
 def interfaces_status(device: NetworkDevice) -> str:
-    return "\n".join(["Port                  Status      Mode    VLAN  Type", *[f"{p.get('name','').ljust(22)}{('connected' if p.get('linkId') else 'notconnect').ljust(12)}{p.get('mode','').ljust(8)}{str(p.get('vlan',1)).ljust(6)}{p.get('kind','')}" for p in device.get("ports", [])]])
+    rows = ["Port                  Name               Status       Vlan  Duplex Speed Type"]
+    for port in device.get("ports", []):
+        if port.get("kind") == "console":
+            continue
+        status = "connected" if port.get("linkId") and device.get("powerOn", True) and port.get("adminUp", True) else ("notconnect" if port.get("adminUp", True) else "disabled")
+        mode = port.get("mode", "")
+        vlan = "trunk" if mode == "trunk" else ("routed" if mode == "routed" else str(port.get("vlan", 1)))
+        rows.append(f"{port.get('name','').ljust(22)}{str(port.get('description') or '')[:16].ljust(19)}{status.ljust(13)}{vlan.ljust(6)}{str(port.get('duplex', 'auto')).ljust(7)}{str(port.get('speed', 'auto')).ljust(6)}{port.get('kind','')}")
+    return "\n".join(rows)
 
 
 def interfaces_counters(device: NetworkDevice) -> str:
@@ -2211,6 +2619,22 @@ def logging_status(device: NetworkDevice) -> str:
     return "\n".join([f"Syslog logging: {'enabled' if log.get('console', True) or log.get('buffered', True) or log.get('hosts') else 'disabled'}", f"    Console logging: {'enabled' if log.get('console', True) else 'disabled'}", f"    Buffer logging: {'enabled' if log.get('buffered', True) else 'disabled'}", f"    Trap logging: level {log.get('trap','informational')}", f"    Logging to hosts: {', '.join(log.get('hosts', [])) or 'none'}", *runtime_lines])
 
 
+def debugging_status(session: IOSSession) -> str:
+    flags = session.get("debugFlags") or []
+    if not flags:
+        return "No debugging has been turned on"
+    return "\n".join(["Generic IP:", *[f"  {flag} debugging is on" for flag in flags]])
+
+
+def terminal_status(session: IOSSession) -> str:
+    return "\n".join([
+        "Line 0, Location: local",
+        f"Length: {session.get('terminalLength', 24)} lines, Width: {session.get('terminalWidth', 80)} columns",
+        f"Monitor logging: {'disabled' if session.get('terminalMonitor') is False else 'enabled'}",
+        "History is enabled. Completion is enabled."
+    ])
+
+
 def line_status(device: NetworkDevice) -> str:
     return "\n".join(["Tty Typ     Range     Login         Transport", *[f"{idx:<3} {line.get('kind','').upper().ljust(7)} {line.get('range','').ljust(9)} {'login local' if line.get('loginLocal') else 'login' if line.get('login') else 'nologin'}    {line.get('transportInput') or '-'}" for idx, line in enumerate(cfg(device).get("lineConfigs", []), 1)]])
 
@@ -2228,9 +2652,9 @@ def line_config(line: dict[str, Any]) -> list[str]:
 
 def help_text(mode: str) -> str:
     if mode == "exec":
-        return "enable, show version, show ip interface brief, show ip route, ping, traceroute, help"
+        return "enable, setup, show version, show boot, show platform, show tech-support, show ip interface brief, show ip route, ping, traceroute, help"
     if mode == "privileged":
-        return "configure terminal, show running-config, show ip route, clear ..., write memory, reload, write erase"
+        return "setup, configure terminal, show running-config, show version, show boot, show platform, show environment, show tech-support, show ip route, clear ..., write memory, reload, write erase"
     if mode == "global":
         return "hostname, interface, vlan, line, router, ip route, ip dhcp pool, access-list, username, service, end"
     if mode == "interface":
