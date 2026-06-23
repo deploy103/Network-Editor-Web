@@ -20,6 +20,7 @@
 - Added per-service log clearing buttons, CLI `clear logging`, and CLI `clear service logs <service>`.
 - Added Services tab log search and CSV export for HTTP, FTP, EMAIL, TFTP, and SYSLOG views.
 - Added Desktop command help plus `web`/`browser` HTTP aliases and `mail` EMAIL alias.
+- Added CLI `show service logs <service>` for filtered HTTP, FTP, EMAIL, TFTP, and SYSLOG runtime logs.
 
 ### TODO
 
