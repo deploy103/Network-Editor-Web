@@ -536,7 +536,7 @@ function expandShowCommand(rest: string[]): string {
   if (isAbbrev(first, "tech-support", 4) || (first === "tech" && isAbbrev(second, "support", 3))) return "show tech-support";
   if (isAbbrev(first, "protocols", 3)) return "show protocols";
   if (first === "route" || first === "ro") return "show ip route";
-  if (first === "arp") return "show arp";
+  if (first === "arp") return ["show arp", ...rest.slice(1)].join(" ").trim();
   if (first === "host" || first === "hosts") return "show hosts";
   if (first === "nat") return "show nat";
   if (isAbbrev(first, "vlan")) {
@@ -550,7 +550,7 @@ function expandShowCommand(rest: string[]): string {
     if (isAbbrev(second, "route", 2)) return ["show ip route", ...rest.slice(2)].join(" ");
     if (isAbbrev(second, "protocols", 3)) return "show ip protocols";
     if (isAbbrev(second, "ssh", 2)) return "show ip ssh";
-    if (isAbbrev(second, "arp")) return "show ip arp";
+    if (isAbbrev(second, "arp")) return ["show ip arp", ...rest.slice(2)].join(" ").trim();
     if (isAbbrev(second, "interface", 3)) {
       if (isAbbrev(lowerRest[2], "brief", 1)) return "show ip interface brief";
       if (rest.length > 2) return `show ip interface ${rest.slice(2).join(" ")}`;
@@ -1972,7 +1972,10 @@ function showCommand(device: NetworkDevice, lower: string, session?: CliSession)
   if (lower === "show vlan summary") return vlanSummary(device);
   if (lower.startsWith("show vlan ")) return vlanDetail(device, lower.slice("show vlan ".length).trim());
   if (lower === "show mac address-table" || lower.startsWith("show mac address-table ")) return macAddressTable(device, lower);
-  if (lower === "show arp" || lower === "show ip arp") return device.runtime.arpTable.length ? ["Protocol  Address         Hardware Addr       Interface", ...device.runtime.arpTable.map((entry) => `Internet  ${entry.ipAddress.padEnd(16)}${entry.macAddress.padEnd(20)}${entry.portName}`)].join("\n") : "No ARP entries.";
+  if (lower === "show arp" || lower.startsWith("show arp ") || lower === "show ip arp" || lower.startsWith("show ip arp ")) {
+    const filter = lower.startsWith("show ip arp") ? lower.slice("show ip arp".length).trim() : lower.slice("show arp".length).trim();
+    return arpTableStatus(device, filter);
+  }
   if (lower === "show ip route") return routeTable(device);
   if (lower === "show ip route summary") return routeSummary(device);
   if (lower.startsWith("show ip route ")) return routeTable(device, lower.slice("show ip route ".length).trim());
@@ -2564,6 +2567,22 @@ function vlanDetail(device: NetworkDevice, filter: string): string {
     `${String(vlan.id).padEnd(6)}${vlan.name.padEnd(33)}active    ${accessPorts.join(", ") || "-"}`,
     "",
     `Trunk ports allowing VLAN ${vlan.id}: ${trunkPorts.join(", ") || "none"}`
+  ].join("\n");
+}
+
+function arpTableStatus(device: NetworkDevice, filter = ""): string {
+  const query = filter.trim().toLowerCase();
+  const entries = query
+    ? device.runtime.arpTable.filter((entry) =>
+      entry.ipAddress === query ||
+      normalizeMacAddress(entry.macAddress) === normalizeMacAddress(query) ||
+      entry.portName.toLowerCase().includes(query)
+    )
+    : device.runtime.arpTable;
+  if (!entries.length) return query ? `% ARP entry ${filter} not found.` : "No ARP entries.";
+  return [
+    "Protocol  Address         Hardware Addr       Interface",
+    ...entries.map((entry) => `Internet  ${entry.ipAddress.padEnd(16)}${entry.macAddress.padEnd(20)}${entry.portName}`)
   ].join("\n");
 }
 
