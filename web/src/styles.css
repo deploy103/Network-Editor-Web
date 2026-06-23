@@ -1965,6 +1965,20 @@ small,
   font-size: 12px;
 }
 
+.capture-speed-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #40515d;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.capture-speed-control select {
+  min-height: 30px;
+  padding: 5px 8px;
+}
+
 .sim-status-strip {
   min-width: 0;
   display: flex;
