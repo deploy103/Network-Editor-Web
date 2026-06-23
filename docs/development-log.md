@@ -31,6 +31,7 @@
 - Added CLI `show interface <port> counters` for single-port counter inspection.
 - Added CLI `show ip dhcp pool <name>` filtering with missing-pool feedback and smoke coverage.
 - Added DNS record CSV export in the Services DNS panel.
+- Added Services DHCP/DNS duplicate-name validation before creating pools or records.
 
 ### TODO
 
