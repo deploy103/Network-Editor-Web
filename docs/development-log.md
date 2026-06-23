@@ -14,6 +14,7 @@
 - Improved Cisco-style remote access CLI status output for `show ip ssh`, `show line`, and `show users`.
 - Added FTP service support across device services, CLI `service ftp`, Desktop `ftp`, Complex PDU, Simulation filtering, and sample projects.
 - Added EMAIL service support across device services, CLI `service email`, Desktop `email`, Complex PDU, Simulation filtering, diagnostics, and smoke tests.
+- Added user-created packet protocol filtering, full OSI 1-7 PDU detail rows, and selected PDU CSV export.
 
 ### TODO
 
