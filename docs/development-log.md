@@ -29,6 +29,7 @@
 - Added CLI `show interface <port> switchport` for single-port switchport inspection.
 - Added CLI `show interface <port> status` for single-port status inspection.
 - Added CLI `show interface <port> counters` for single-port counter inspection.
+- Added CLI `show ip dhcp pool <name>` filtering with missing-pool feedback and smoke coverage.
 
 ### TODO
 
