@@ -2865,6 +2865,7 @@ function searchHelp(term: string): string {
     "show running-config | include <text>",
     "show running-config | begin <text>",
     "show running-config | exclude <text>",
+    "show running-config | count <text>",
     "show running-config interface <name>",
     "show running-config all",
     "clock set <hh:mm:ss> <month> <day> <year>",
@@ -2946,14 +2947,15 @@ function searchHelp(term: string): string {
 }
 
 function applyPipe(output: string, rawCommand: string): string {
-  const match = rawCommand.match(/\|\s*(i|inc|include|e|exc|exclude|b|beg|begin|s|sec|section)\s+(.+)$/i);
+  const match = rawCommand.match(/\|\s*(i|inc|include|e|exc|exclude|b|beg|begin|s|sec|section|c|cou|count)\s+(.+)$/i);
   if (!match) return output;
   const token = match[1].toLowerCase();
-  const mode = token.startsWith("i") ? "include" : token.startsWith("e") ? "exclude" : token.startsWith("s") ? "section" : "begin";
+  const mode = token.startsWith("i") ? "include" : token.startsWith("e") ? "exclude" : token.startsWith("s") ? "section" : token.startsWith("c") ? "count" : "begin";
   const term = match[2].trim().toLowerCase();
   const lines = output.split("\n");
   if (mode === "include") return lines.filter((line) => line.toLowerCase().includes(term)).join("\n") || "% No matching lines.";
   if (mode === "exclude") return lines.filter((line) => !line.toLowerCase().includes(term)).join("\n") || "% No lines remain.";
+  if (mode === "count") return `Number of lines which match regexp = ${lines.filter((line) => line.toLowerCase().includes(term)).length}`;
   if (mode === "section") return pipeSection(lines, term);
   const index = lines.findIndex((line) => line.toLowerCase().includes(term));
   return index >= 0 ? lines.slice(index).join("\n") : "% No matching start line.";
