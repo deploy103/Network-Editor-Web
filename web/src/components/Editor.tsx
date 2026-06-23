@@ -3606,7 +3606,7 @@ function transportAllows(transportInput: string, protocol: "ssh" | "telnet"): bo
   return tokens.includes("all") || tokens.includes(protocol);
 }
 
-const desktopQuickCommands = ["ipconfig /all", "ipconfig /renew", "ipconfig /release", "arp -a", "route print", "ping www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "http www.lab.local", "ftp www.lab.local", "email www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
+const desktopQuickCommands = ["help", "ipconfig /all", "ipconfig /renew", "ipconfig /release", "arp -a", "route print", "ping www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "http www.lab.local", "ftp www.lab.local", "email www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
 
 function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: NetworkDevice; project: NetworkProject; onProjectChange: (project: NetworkProject, message: string) => void; onUpdate: (device: NetworkDevice) => void }) {
   const dataPorts = device.ports.filter((port) => port.kind !== "console");
@@ -3727,6 +3727,16 @@ function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: Ne
 
 async function desktopCommand(project: NetworkProject, device: NetworkDevice, command: string, onProjectChange: (project: NetworkProject, message: string) => void): Promise<string> {
   const lower = command.toLowerCase();
+  if (lower === "help" || lower === "?") {
+    return [
+      "지원 명령:",
+      "  ipconfig /all | ipconfig /renew | ipconfig /release",
+      "  arp -a | route print",
+      "  ping <ip|이름> | tracert <ip|이름> | nslookup <이름>",
+      "  http <ip|이름> | ftp <ip|이름> [ls|get 파일] | email <서버> <받는사람> [메시지]",
+      "  ssh <ip|이름> | telnet <ip|이름> | tftp <ip|이름> | syslog <ip|이름> <메시지>"
+    ].join("\n");
+  }
   if (lower === "ipconfig" || lower === "ipconfig /all") {
     return device.ports
       .filter((port) => port.kind !== "console")
