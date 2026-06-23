@@ -558,7 +558,7 @@ function expandShowCommand(rest: string[]): string {
     }
     if (isAbbrev(second, "dhcp") && isAbbrev(lowerRest[2], "binding")) return "show ip dhcp binding";
     if (isAbbrev(second, "dhcp") && isAbbrev(lowerRest[2], "conflict", 4)) return "show ip dhcp conflict";
-    if (isAbbrev(second, "dhcp") && isAbbrev(lowerRest[2], "pool")) return "show ip dhcp pool";
+    if (isAbbrev(second, "dhcp") && isAbbrev(lowerRest[2], "pool")) return ["show ip dhcp pool", ...rest.slice(3)].join(" ").trim();
     if (isAbbrev(second, "dhcp") && isAbbrev(lowerRest[2], "server") && isAbbrev(lowerRest[3], "statistics", 3)) return "show ip dhcp server statistics";
     if (isAbbrev(second, "access-lists", 3) || isAbbrev(second, "access-list", 3)) return ["show access-list", ...rest.slice(2)].join(" ");
     if (isAbbrev(second, "ospf", 2)) return expandShowIpOspf(rest.slice(2));
@@ -1990,7 +1990,7 @@ function showCommand(device: NetworkDevice, lower: string, session?: CliSession)
   if (lower === "show ip nat statistics") return natStatistics(device);
   if (lower === "show ip dhcp binding") return dhcpBindingStatus(device);
   if (lower === "show ip dhcp conflict") return "No DHCP conflicts.";
-  if (lower === "show ip dhcp pool") return dhcpPoolStatus(device);
+  if (lower === "show ip dhcp pool" || lower.startsWith("show ip dhcp pool ")) return dhcpPoolStatus(device, lower.slice("show ip dhcp pool".length).trim());
   if (lower === "show ip dhcp server statistics") return dhcpServerStatistics(device);
   if (lower === "show hosts") return hostsStatus(device);
   if (lower === "show access-list" || lower === "show access-lists") return accessListStatus(device);
@@ -2231,9 +2231,12 @@ function dhcpServerStatistics(device: NetworkDevice): string {
   ].join("\n");
 }
 
-function dhcpPoolStatus(device: NetworkDevice): string {
+function dhcpPoolStatus(device: NetworkDevice, filter = ""): string {
   if (!device.config.dhcpPools.length) return "No DHCP pools.";
-  return device.config.dhcpPools.map((pool) => {
+  const query = filter.trim().toLowerCase();
+  const pools = query ? device.config.dhcpPools.filter((pool) => pool.name.toLowerCase() === query || pool.name.toLowerCase().includes(query)) : device.config.dhcpPools;
+  if (!pools.length) return `% DHCP pool ${filter} not found.`;
+  return pools.map((pool) => {
     const leases = device.runtime.dhcpLeases.filter((lease) => poolSubnetReady(pool) && ipInSubnet(lease.ipAddress, pool.network, pool.mask));
     const excluded = dhcpExcludedRanges(device).filter((range) => poolSubnetReady(pool) && ipInSubnet(range.startIp, pool.network, pool.mask)).length;
     return [
