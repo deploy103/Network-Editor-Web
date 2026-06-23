@@ -287,7 +287,12 @@ assert(eigrpNeighbors.includes("EIGRP-IPv4 Neighbors"), "show ip eigrp neighbors
 assert(run("sh ip eigrp").includes("2.2.2.2"), "show ip eigrp must use configured router-id");
 const ripDb = run("sh ip rip database");
 assert(ripDb.includes("RIP database"), "show ip rip database must be supported");
-assert(run("sh ip ssh").includes("SSH Enabled"), "show ip ssh must reflect domain name and local users");
+const sshStatus = run("sh ip ssh");
+assert(sshStatus.includes("SSH Enabled") && sshStatus.includes("RSA key: generated") && sshStatus.includes("VTY lines permitting SSH: vty 0 4"), "show ip ssh must reflect key, users, and SSH-capable VTY lines");
+const lineVty = run("show line vty");
+assert(lineVty.includes("vty 0 4") && lineVty.includes("login local") && lineVty.includes("ssh"), "show line vty must show VTY auth and transport");
+const usersAll = run("show users all");
+assert(usersAll.includes("con 0") && usersAll.includes("vty 0 4") && usersAll.includes("transport ssh"), "show users all must show console and configured VTY lines");
 const hosts = run("show hosts");
 assert(hosts.includes("8.8.8.8") && hosts.includes("1.1.1.1"), "show hosts must show configured name servers");
 const natTranslations = run("sh ip nat trans");
