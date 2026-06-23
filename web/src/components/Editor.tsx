@@ -4067,6 +4067,7 @@ function cleanHost(value: string): string {
 
 function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (device: NetworkDevice) => void }) {
   type ServiceName = keyof NetworkDevice["config"]["services"];
+  type RuntimeLog = NetworkDevice["runtime"]["logs"][number];
   const [poolDraft, setPoolDraft] = useState({
     name: "LAN",
     network: "192.168.1.0",
@@ -4080,12 +4081,32 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
   const [recordDraft, setRecordDraft] = useState({ name: "www.lab.local", value: "192.168.1.10" });
   const [servicePane, setServicePane] = useState<ServiceName>("dhcp");
   const [serviceNotice, setServiceNotice] = useState("");
+  const [serviceLogSearch, setServiceLogSearch] = useState("");
   const serviceOrder: ServiceName[] = ["dhcp", "dns", "http", "ftp", "email", "tftp", "syslog"];
   const serviceKeys = serviceOrder.filter((service) => service in device.config.services);
-  const httpLogs = device.runtime.logs.filter((log) => log.message.startsWith("HTTP"));
-  const ftpLogs = device.runtime.logs.filter((log) => log.message.startsWith("FTP"));
-  const emailLogs = device.runtime.logs.filter((log) => log.message.startsWith("EMAIL"));
-  const tftpLogs = device.runtime.logs.filter((log) => log.message.startsWith("TFTP"));
+  const serviceLogQuery = serviceLogSearch.trim().toLowerCase();
+  const rawHttpLogs = serviceLogs("HTTP");
+  const rawFtpLogs = serviceLogs("FTP");
+  const rawEmailLogs = serviceLogs("EMAIL");
+  const rawTftpLogs = serviceLogs("TFTP");
+  const httpLogs = filterLogs(rawHttpLogs);
+  const ftpLogs = filterLogs(rawFtpLogs);
+  const emailLogs = filterLogs(rawEmailLogs);
+  const tftpLogs = filterLogs(rawTftpLogs);
+  const syslogLogs = filterLogs(device.runtime.logs);
+
+  function serviceLogs(prefix: string) {
+    return device.runtime.logs.filter((log) => log.message.startsWith(prefix));
+  }
+
+  function filterLogs(logs: RuntimeLog[]) {
+    if (!serviceLogQuery) return logs;
+    return logs.filter((log) => [
+      log.level,
+      log.message,
+      new Date(log.createdAt).toLocaleString()
+    ].some((value) => value.toLowerCase().includes(serviceLogQuery)));
+  }
 
   function toggleService(service: ServiceName, enabled: boolean) {
     setServiceNotice(`${service.toUpperCase()} 서비스를 ${enabled ? "켰습니다" : "껐습니다"}.`);
@@ -4095,6 +4116,49 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
   function clearServiceLogs(prefix: string) {
     onUpdate({ ...device, runtime: { ...device.runtime, logs: device.runtime.logs.filter((log) => !log.message.startsWith(prefix)) } });
     setServiceNotice(`${prefix} 로그를 비웠습니다.`);
+  }
+
+  function exportServiceLogs(service: string, logs: RuntimeLog[]) {
+    if (!logs.length) {
+      setServiceNotice("내보낼 로그가 없습니다.");
+      return;
+    }
+    const headers = ["time", "service", "level", "message"];
+    const rows = logs.map((log) => [new Date(log.createdAt).toISOString(), service, log.level, log.message]);
+    const lines = [headers, ...rows].map((row) => row.map(csvCell).join(","));
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${device.label.replace(/[^a-zA-Z0-9_.-]/g, "_") || "device"}-${service.toLowerCase()}-logs.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
+    setServiceNotice(`${service} 로그 CSV를 내보냈습니다 (${logs.length}개).`);
+  }
+
+  function renderLogTools(service: string, logs: RuntimeLog[]) {
+    return (
+      <div className="service-log-toolbar">
+        <input aria-label={`${service} 로그 검색`} value={serviceLogSearch} onChange={(event) => setServiceLogSearch(event.target.value)} placeholder="로그 검색" />
+        <small>{serviceLogQuery ? `${logs.length}개 일치` : `${logs.length}개`}</small>
+        <button className="secondary-action" disabled={!logs.length} onClick={() => exportServiceLogs(service, logs)} type="button">CSV</button>
+        <button className="secondary-action" disabled={!serviceLogQuery} onClick={() => setServiceLogSearch("")} type="button">검색 해제</button>
+      </div>
+    );
+  }
+
+  function renderLogRows(logs: RuntimeLog[], emptyMessage: string, limit = 8) {
+    if (logs.length === 0) return <p className="empty-state">{serviceLogQuery ? "현재 검색과 일치하는 로그가 없습니다." : emptyMessage}</p>;
+    return logs.slice(-limit).reverse().map((log) => (
+      <div className={`diagnostic-row ${log.level}`} key={log.id}>
+        <strong>{new Date(log.createdAt).toLocaleTimeString()}</strong>
+        <span>{log.message}</span>
+      </div>
+    ));
   }
 
   function addPool() {
@@ -4289,64 +4353,44 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
           )}
           {servicePane === "http" && (
             <div className="config-group">
-              <header><strong>HTTP</strong><label className="toggle"><input checked={device.config.services.http} onChange={(event) => toggleService("http", event.target.checked)} type="checkbox" />서비스</label><button className="secondary-action" disabled={!httpLogs.length} onClick={() => clearServiceLogs("HTTP")} type="button">로그 비우기</button></header>
+              <header><strong>HTTP</strong><label className="toggle"><input checked={device.config.services.http} onChange={(event) => toggleService("http", event.target.checked)} type="checkbox" />서비스</label><button className="secondary-action" disabled={!rawHttpLogs.length} onClick={() => clearServiceLogs("HTTP")} type="button">로그 비우기</button></header>
               <div className="diagnostic-row info"><strong>{device.config.services.http ? "HTTP 켜짐" : "HTTP 꺼짐"}</strong><span>서버에 도달 가능할 때 웹 브라우저와 `http` 데스크톱 명령이 이 서비스를 사용합니다.</span></div>
-              {httpLogs.length === 0 ? <p className="empty-state">HTTP 요청 로그가 없습니다.</p> : httpLogs.slice(-8).reverse().map((log) => (
-                <div className="diagnostic-row info" key={log.id}>
-                  <strong>{new Date(log.createdAt).toLocaleTimeString()}</strong>
-                  <span>{log.message}</span>
-                </div>
-              ))}
+              {renderLogTools("HTTP", httpLogs)}
+              {renderLogRows(httpLogs, "HTTP 요청 로그가 없습니다.")}
             </div>
           )}
           {servicePane === "ftp" && (
             <div className="config-group">
-              <header><strong>FTP</strong><label className="toggle"><input checked={device.config.services.ftp} onChange={(event) => toggleService("ftp", event.target.checked)} type="checkbox" />서비스</label><button className="secondary-action" disabled={!ftpLogs.length} onClick={() => clearServiceLogs("FTP")} type="button">로그 비우기</button></header>
+              <header><strong>FTP</strong><label className="toggle"><input checked={device.config.services.ftp} onChange={(event) => toggleService("ftp", event.target.checked)} type="checkbox" />서비스</label><button className="secondary-action" disabled={!rawFtpLogs.length} onClick={() => clearServiceLogs("FTP")} type="button">로그 비우기</button></header>
               <div className="diagnostic-row info"><strong>{device.config.services.ftp ? "FTP 켜짐" : "FTP 꺼짐"}</strong><span>데스크톱 `ftp 서버` 명령과 FTP Complex PDU가 이 서비스를 검사합니다.</span></div>
               <div className="compact-row"><span>readme.txt / running-config.txt / network-backup.ptweb</span><small>가상 FTP 디렉터리</small></div>
-              {ftpLogs.length === 0 ? <p className="empty-state">FTP 전송 로그가 없습니다.</p> : ftpLogs.slice(-8).reverse().map((log) => (
-                <div className="diagnostic-row info" key={log.id}>
-                  <strong>{new Date(log.createdAt).toLocaleTimeString()}</strong>
-                  <span>{log.message}</span>
-                </div>
-              ))}
+              {renderLogTools("FTP", ftpLogs)}
+              {renderLogRows(ftpLogs, "FTP 전송 로그가 없습니다.")}
             </div>
           )}
           {servicePane === "email" && (
             <div className="config-group">
-              <header><strong>EMAIL</strong><label className="toggle"><input checked={device.config.services.email} onChange={(event) => toggleService("email", event.target.checked)} type="checkbox" />서비스</label><button className="secondary-action" disabled={!emailLogs.length} onClick={() => clearServiceLogs("EMAIL")} type="button">로그 비우기</button></header>
+              <header><strong>EMAIL</strong><label className="toggle"><input checked={device.config.services.email} onChange={(event) => toggleService("email", event.target.checked)} type="checkbox" />서비스</label><button className="secondary-action" disabled={!rawEmailLogs.length} onClick={() => clearServiceLogs("EMAIL")} type="button">로그 비우기</button></header>
               <div className="diagnostic-row info"><strong>{device.config.services.email ? "EMAIL 켜짐" : "EMAIL 꺼짐"}</strong><span>데스크톱 `email 서버 사용자 메시지` 명령과 EMAIL Complex PDU가 이 서비스를 검사합니다.</span></div>
               <div className="compact-row"><span>admin@lab.local / user@lab.local</span><small>가상 메일박스</small></div>
-              {emailLogs.length === 0 ? <p className="empty-state">수신된 EMAIL 메시지가 없습니다.</p> : emailLogs.slice(-8).reverse().map((log) => (
-                <div className="diagnostic-row info" key={log.id}>
-                  <strong>{new Date(log.createdAt).toLocaleTimeString()}</strong>
-                  <span>{log.message}</span>
-                </div>
-              ))}
+              {renderLogTools("EMAIL", emailLogs)}
+              {renderLogRows(emailLogs, "수신된 EMAIL 메시지가 없습니다.")}
             </div>
           )}
           {servicePane === "tftp" && (
             <div className="config-group">
-              <header><strong>TFTP</strong><label className="toggle"><input checked={device.config.services.tftp} onChange={(event) => toggleService("tftp", event.target.checked)} type="checkbox" />서비스</label><button className="secondary-action" disabled={!tftpLogs.length} onClick={() => clearServiceLogs("TFTP")} type="button">로그 비우기</button></header>
+              <header><strong>TFTP</strong><label className="toggle"><input checked={device.config.services.tftp} onChange={(event) => toggleService("tftp", event.target.checked)} type="checkbox" />서비스</label><button className="secondary-action" disabled={!rawTftpLogs.length} onClick={() => clearServiceLogs("TFTP")} type="button">로그 비우기</button></header>
               <div className="diagnostic-row info"><strong>{device.config.services.tftp ? "TFTP 켜짐" : "TFTP 꺼짐"}</strong><span>데스크톱 `tftp 서버` 명령이 도달성과 서비스 상태를 검사하고 이벤트에 기록합니다.</span></div>
-              {tftpLogs.length === 0 ? <p className="empty-state">TFTP 요청 로그가 없습니다.</p> : tftpLogs.slice(-8).reverse().map((log) => (
-                <div className="diagnostic-row info" key={log.id}>
-                  <strong>{new Date(log.createdAt).toLocaleTimeString()}</strong>
-                  <span>{log.message}</span>
-                </div>
-              ))}
+              {renderLogTools("TFTP", tftpLogs)}
+              {renderLogRows(tftpLogs, "TFTP 요청 로그가 없습니다.")}
             </div>
           )}
           {servicePane === "syslog" && (
             <div className="config-group">
               <header><strong>SYSLOG</strong><label className="toggle"><input checked={device.config.services.syslog} onChange={(event) => toggleService("syslog", event.target.checked)} type="checkbox" />서비스</label><button className="secondary-action" onClick={() => onUpdate({ ...device, runtime: { ...device.runtime, logs: [] } })} type="button">로그 비우기</button></header>
               <div className="diagnostic-row info"><strong>{device.config.services.syslog ? "SYSLOG 켜짐" : "SYSLOG 꺼짐"}</strong><span>데스크톱 `syslog 서버 메시지` 명령이 이 장비의 런타임 로그에 기록됩니다.</span></div>
-              {device.runtime.logs.length === 0 ? <p className="empty-state">수신된 SYSLOG 메시지가 없습니다.</p> : device.runtime.logs.slice(-12).reverse().map((log) => (
-                <div className={`diagnostic-row ${log.level}`} key={log.id}>
-                  <strong>{new Date(log.createdAt).toLocaleTimeString()}</strong>
-                  <span>{log.message}</span>
-                </div>
-              ))}
+              {renderLogTools("SYSLOG", syslogLogs)}
+              {renderLogRows(syslogLogs, "수신된 SYSLOG 메시지가 없습니다.", 12)}
             </div>
           )}
         </div>
