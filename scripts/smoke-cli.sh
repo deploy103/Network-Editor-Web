@@ -318,6 +318,9 @@ device = { ...device, runtime: { ...device.runtime, logs: [
   { id: "log_http_smoke", level: "info", message: "HTTP GET from PC0", createdAt: Date.now() },
   { id: "log_ftp_smoke", level: "info", message: "FTP LIST from PC0", createdAt: Date.now() }
 ] } };
+const ftpServiceLogs = run("show service logs ftp");
+assert(ftpServiceLogs.includes("Service log: FTP") && ftpServiceLogs.includes("FTP LIST from PC0"), "show service logs ftp must show filtered service logs");
+assert(!ftpServiceLogs.includes("HTTP GET from PC0"), "show service logs ftp must hide other service logs");
 run("clear service logs ftp");
 assert(run("show logging").includes("HTTP GET from PC0"), "clear service logs ftp must preserve other service logs");
 assert(!run("show logging").includes("FTP LIST from PC0"), "clear service logs ftp must remove FTP logs");
