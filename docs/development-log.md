@@ -21,6 +21,7 @@
 - Added Services tab log search and CSV export for HTTP, FTP, EMAIL, TFTP, and SYSLOG views.
 - Added Desktop command help plus `web`/`browser` HTTP aliases and `mail` EMAIL alias.
 - Added CLI `show service logs <service>` for filtered HTTP, FTP, EMAIL, TFTP, and SYSLOG runtime logs.
+- Expanded Desktop command prompt behavior with `ipconfig /displaydns`, DNS reverse lookup, and bounded `ping -n <count>` replies.
 
 ### TODO
 
