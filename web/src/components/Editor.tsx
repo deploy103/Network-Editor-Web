@@ -4038,7 +4038,7 @@ function resolveDns(project: NetworkProject, host: string): string {
 }
 
 function cleanHost(value: string): string {
-  return value.trim().replace(/^https?:\/\//i, "").split("/")[0].trim();
+  return value.trim().replace(/^(https?|ftp|tftp):\/\//i, "").split("/")[0].trim();
 }
 
 function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (device: NetworkDevice) => void }) {
