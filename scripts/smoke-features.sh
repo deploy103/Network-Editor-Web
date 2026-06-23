@@ -45,6 +45,7 @@ assert(server.config.services.dhcp, "sample server DHCP must be enabled");
 assert(server.config.services.dns, "sample server DNS must be enabled");
 assert(server.config.services.http, "sample server HTTP must be enabled");
 assert(server.config.services.ftp, "sample server FTP must be enabled");
+assert(server.config.services.email, "sample server EMAIL must be enabled");
 assert(server.config.services.tftp, "sample server TFTP must be enabled");
 assert(server.config.services.syslog, "sample server SYSLOG must be enabled");
 assert(router.ports.some((port) => (port.helperAddresses || []).includes("10.10.10.10")), "router must include DHCP helper-address");
@@ -61,7 +62,7 @@ const normalized = normalizeProject({
 });
 const normalizedServer = normalized.devices.find((device) => device.id === server.id);
 const normalizedRouter = normalized.devices.find((device) => device.id === router.id);
-assert(normalizedServer.config.services.ftp && normalizedServer.config.services.tftp && normalizedServer.config.services.syslog, "normalizeProject must preserve FTP, TFTP, and SYSLOG service flags");
+assert(normalizedServer.config.services.ftp && normalizedServer.config.services.email && normalizedServer.config.services.tftp && normalizedServer.config.services.syslog, "normalizeProject must preserve FTP, EMAIL, TFTP, and SYSLOG service flags");
 assert(normalizedServer.config.dhcpExcludedRanges.some((range) => range.startIp === "192.168.10.1"), "normalizeProject must preserve DHCP excluded ranges");
 assert(normalizedServer.runtime.logs.some((log) => log.message === "normalize syslog"), "normalizeProject must preserve runtime syslog logs");
 assert(normalizedRouter.ports.some((port) => (port.helperAddresses || []).includes("10.10.10.10")), "normalizeProject must preserve DHCP helper-addresses");

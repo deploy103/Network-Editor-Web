@@ -107,7 +107,7 @@ export const deviceCatalog: DeviceModel[] = [
     kind: "server",
     model: "Server-PT",
     labelPrefix: "Server",
-    description: "HTTP, FTP, DHCP, DNS, TFTP, SYSLOG 서비스를 제공하는 서버.",
+    description: "HTTP, FTP, EMAIL, DHCP, DNS, TFTP, SYSLOG 서비스를 제공하는 서버.",
     tabs: ["physical", "config", "desktop", "services"],
     ports: [{ name: "FastEthernet0", kind: "fast-ethernet", mode: "access", vlan: 1, ipCapable: true }],
     modules: []
@@ -263,7 +263,7 @@ export function defaultConfig(hostname: string, kind: DeviceKind): DeviceConfig 
     natRules: [],
     stpRootPrimaryVlans: [],
     localUsers: [],
-    services: { http: kind === "server", ftp: kind === "server", dhcp: false, dns: kind === "server", tftp: false, syslog: false },
+    services: { http: kind === "server", ftp: kind === "server", email: kind === "server", dhcp: false, dns: kind === "server", tftp: false, syslog: false },
     wireless: { ssid: kind === "wireless" ? "Lab-Wireless" : "", auth: "open", key: "", channel: 6, range: 180 }
   };
 }

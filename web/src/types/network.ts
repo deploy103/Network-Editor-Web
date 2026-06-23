@@ -159,6 +159,7 @@ export interface DeviceConfig {
   services: {
     http: boolean;
     ftp: boolean;
+    email: boolean;
     dhcp: boolean;
     dns: boolean;
     tftp: boolean;
