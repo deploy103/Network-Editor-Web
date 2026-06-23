@@ -1959,10 +1959,19 @@ small,
 }
 
 .simulation-dock .event-panel header select,
+.simulation-dock .event-panel header input,
 .simulation-dock .event-panel header button {
   min-height: 30px;
   padding: 5px 8px;
   font-size: 12px;
+}
+
+.simulation-dock .event-panel header input {
+  width: 120px;
+  min-width: 92px;
+  border: 1px solid #cfd8e0;
+  border-radius: 5px;
+  background: #ffffff;
 }
 
 .capture-speed-control {

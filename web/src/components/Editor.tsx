@@ -2304,12 +2304,26 @@ function osiFilterLabel(filter: string): string {
   return filter === "all" ? "전체" : filter.replace("Layer ", "L");
 }
 
-function eventPanelExportScope(eventFilter: string, osiFilter: string): string {
+function eventPanelExportScope(eventFilter: string, osiFilter: string, search: string): string {
   const parts = [
     eventFilter === "all" ? "" : eventFilter,
-    osiFilter === "all" ? "" : osiFilter.toLowerCase().replace(/\s+/g, "-")
+    osiFilter === "all" ? "" : osiFilter.toLowerCase().replace(/\s+/g, "-"),
+    search.trim() ? "search" : ""
   ].filter(Boolean);
   return parts.join("-") || "all";
+}
+
+function eventSearchText(project: NetworkProject, event: SimulationEvent): string {
+  return [
+    event.type,
+    event.status,
+    event.info,
+    event.osiLayers.join(" "),
+    eventDeviceLabel(project, event.lastDeviceId),
+    eventDeviceLabel(project, event.atDeviceId),
+    eventDeviceLabel(project, event.sourceDeviceId ?? ""),
+    eventDeviceLabel(project, event.targetDeviceId ?? "")
+  ].join(" ").toLowerCase();
 }
 
 function complexPduProtocolLabel(protocol: ComplexPduProtocol): string {
@@ -4221,12 +4235,15 @@ function EventPanel({
   };
   const [eventFilter, setEventFilter] = useState("all");
   const [osiFilter, setOsiFilter] = useState("all");
+  const [eventSearch, setEventSearch] = useState("");
   const [autoPlaying, setAutoPlaying] = useState(false);
   const [captureDelayMs, setCaptureDelayMs] = useState(450);
   const playTimer = useRef<number | null>(null);
+  const eventSearchQuery = eventSearch.trim().toLowerCase();
   const filteredEvents = project.simulationEvents.filter((event) =>
     (eventFilter === "all" || event.type.toLowerCase() === eventFilter || event.status === eventFilter) &&
-    (osiFilter === "all" || event.osiLayers.includes(osiFilter))
+    (osiFilter === "all" || event.osiLayers.includes(osiFilter)) &&
+    (!eventSearchQuery || eventSearchText(project, event).includes(eventSearchQuery))
   );
   const userPackets = userCreatedPacketRows(project);
   const activeEventId = focusedEventId ?? "";
@@ -4257,7 +4274,7 @@ function EventPanel({
   useEffect(() => () => stopAutoCapture(), []);
   useEffect(() => {
     stopAutoCapture();
-  }, [eventFilter, osiFilter, project.simulationEvents.length, captureDelayMs]);
+  }, [eventFilter, osiFilter, eventSearchQuery, project.simulationEvents.length, captureDelayMs]);
 
   function stopAutoCapture() {
     if (playTimer.current) {
@@ -4312,7 +4329,7 @@ function EventPanel({
     <section className={`event-panel ${mode}`}>
       {mode === "simulation" ? (
         <>
-          <header><strong>시뮬레이션 이벤트</strong><select value={eventFilter} onChange={(event) => setEventFilter(event.target.value)}><option value="all">전체</option><option value="icmp">ICMP</option><option value="arp">ARP</option><option value="switch">SWITCH</option><option value="hub">HUB</option><option value="dhcp">DHCP</option><option value="dns">DNS</option><option value="http">HTTP</option><option value="tftp">TFTP</option><option value="syslog">SYSLOG</option><option value="ssh">SSH</option><option value="telnet">TELNET</option><option value="delivered">전달됨</option><option value="forwarded">전송 중</option><option value="dropped">드롭됨</option></select><select aria-label="OSI 레이어 필터" value={osiFilter} onChange={(event) => setOsiFilter(event.target.value)}><option value="all">전체 OSI</option><option value="Layer 1">Layer 1</option><option value="Layer 2">Layer 2</option><option value="Layer 3">Layer 3</option><option value="Layer 4">Layer 4</option><option value="Layer 7">Layer 7</option></select><button disabled={eventFilter === "all" && osiFilter === "all"} onClick={() => { stopAutoCapture(); setEventFilter("all"); setOsiFilter("all"); }} type="button">필터 해제</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusEdge("first")} type="button">처음</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusRelative(-1)} type="button">이전</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={captureForward} type="button">캡처/전송</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={() => focusEdge("last")} type="button">끝</button><button className={autoPlaying ? "active" : ""} disabled={!onFocusEvent || filteredEvents.length === 0} onClick={autoCapturePlay} type="button">{autoPlaying ? "정지" : "자동 재생"}</button><label className="capture-speed-control">속도<select value={captureDelayMs} onChange={(event) => setCaptureDelayMs(Number(event.target.value))}><option value={900}>느림</option><option value={450}>보통</option><option value={180}>빠름</option></select></label><button disabled={!onExportEvents || filteredEvents.length === 0} onClick={() => onExportEvents?.(filteredEvents, eventPanelExportScope(eventFilter, osiFilter))} type="button">CSV</button><button onClick={() => { stopAutoCapture(); onClear(); }} type="button">비우기</button></header>
+          <header><strong>시뮬레이션 이벤트</strong><select value={eventFilter} onChange={(event) => setEventFilter(event.target.value)}><option value="all">전체</option><option value="icmp">ICMP</option><option value="arp">ARP</option><option value="switch">SWITCH</option><option value="hub">HUB</option><option value="dhcp">DHCP</option><option value="dns">DNS</option><option value="http">HTTP</option><option value="tftp">TFTP</option><option value="syslog">SYSLOG</option><option value="ssh">SSH</option><option value="telnet">TELNET</option><option value="delivered">전달됨</option><option value="forwarded">전송 중</option><option value="dropped">드롭됨</option></select><select aria-label="OSI 레이어 필터" value={osiFilter} onChange={(event) => setOsiFilter(event.target.value)}><option value="all">전체 OSI</option><option value="Layer 1">Layer 1</option><option value="Layer 2">Layer 2</option><option value="Layer 3">Layer 3</option><option value="Layer 4">Layer 4</option><option value="Layer 7">Layer 7</option></select><input aria-label="시뮬레이션 이벤트 검색" className="event-search-input" value={eventSearch} onChange={(event) => setEventSearch(event.target.value)} placeholder="검색" /><button disabled={eventFilter === "all" && osiFilter === "all" && !eventSearchQuery} onClick={() => { stopAutoCapture(); setEventFilter("all"); setOsiFilter("all"); setEventSearch(""); }} type="button">필터 해제</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusEdge("first")} type="button">처음</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusRelative(-1)} type="button">이전</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={captureForward} type="button">캡처/전송</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={() => focusEdge("last")} type="button">끝</button><button className={autoPlaying ? "active" : ""} disabled={!onFocusEvent || filteredEvents.length === 0} onClick={autoCapturePlay} type="button">{autoPlaying ? "정지" : "자동 재생"}</button><label className="capture-speed-control">속도<select value={captureDelayMs} onChange={(event) => setCaptureDelayMs(Number(event.target.value))}><option value={900}>느림</option><option value={450}>보통</option><option value={180}>빠름</option></select></label><button disabled={!onExportEvents || filteredEvents.length === 0} onClick={() => onExportEvents?.(filteredEvents, eventPanelExportScope(eventFilter, osiFilter, eventSearch))} type="button">CSV</button><button onClick={() => { stopAutoCapture(); onClear(); }} type="button">비우기</button></header>
           <div className="sim-status-strip">
             <span><strong>{eventStats.total}</strong> 이벤트</span>
             <span className="forwarded"><strong>{eventStats.forwarded}</strong> 전송 중</span>
@@ -4320,6 +4337,7 @@ function EventPanel({
             <span className="dropped"><strong>{eventStats.dropped}</strong> 드롭됨</span>
             <span><strong>{filteredEvents.length}</strong> 표시</span>
             <span><strong>{osiFilterLabel(osiFilter)}</strong> OSI</span>
+            <span><strong>{eventSearchQuery ? "적용" : "전체"}</strong> 검색</span>
             <span className="capture-position"><strong>{capturePositionLabel}</strong> 캡처 위치</span>
           </div>
           <div className="simulation-layout">
