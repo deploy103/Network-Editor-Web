@@ -25,6 +25,7 @@
 - Added DHCP binding CSV export and per-binding release controls in the Services DHCP panel.
 - Improved CLI `show ip dhcp binding` with IOS-style headers, lease expiration, binding type, and smoke coverage.
 - Added CLI `show ... | count <text>` pipe support and smoke coverage for include, exclude, begin, section, and count filters.
+- Added CLI `show vlan summary` plus smoke coverage for VLAN id/name detail lookups.
 
 ### TODO
 
