@@ -4203,6 +4203,44 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
     setServiceNotice(`${service} 로그 CSV를 내보냈습니다 (${logs.length}개).`);
   }
 
+  function exportDhcpLeases() {
+    if (!device.runtime.dhcpLeases.length) {
+      setServiceNotice("내보낼 DHCP 바인딩이 없습니다.");
+      return;
+    }
+    const headers = ["ipAddress", "macAddress", "deviceId", "expiresAt"];
+    const rows = device.runtime.dhcpLeases.map((lease) => [
+      lease.ipAddress,
+      lease.macAddress,
+      lease.deviceId,
+      new Date(lease.expiresAt).toISOString()
+    ]);
+    const lines = [headers, ...rows].map((row) => row.map(csvCell).join(","));
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${device.label.replace(/[^a-zA-Z0-9_.-]/g, "_") || "device"}-dhcp-bindings.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
+    setServiceNotice(`DHCP 바인딩 CSV를 내보냈습니다 (${device.runtime.dhcpLeases.length}개).`);
+  }
+
+  function clearDhcpLease(ipAddress: string, clientDeviceId: string) {
+    onUpdate({
+      ...device,
+      runtime: {
+        ...device.runtime,
+        dhcpLeases: device.runtime.dhcpLeases.filter((lease) => lease.ipAddress !== ipAddress || lease.deviceId !== clientDeviceId)
+      }
+    });
+    setServiceNotice(`${ipAddress} DHCP 바인딩을 해제했습니다.`);
+  }
+
   function renderLogTools(service: string, logs: RuntimeLog[]) {
     return (
       <div className="service-log-toolbar">
@@ -4354,7 +4392,7 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
           {serviceNotice && <strong className={isServiceNoticeError(serviceNotice) ? "form-error" : "module-notice"} role={isServiceNoticeError(serviceNotice) ? "alert" : "status"}>{serviceNotice}</strong>}
           {servicePane === "dhcp" && (
             <div className="config-group">
-              <header><strong>DHCP</strong><label className="toggle"><input checked={device.config.services.dhcp} onChange={(event) => toggleService("dhcp", event.target.checked)} type="checkbox" />서비스</label><button className="secondary-action" onClick={() => onUpdate({ ...device, runtime: { ...device.runtime, dhcpLeases: [] } })} type="button">바인딩 비우기</button></header>
+              <header><strong>DHCP</strong><label className="toggle"><input checked={device.config.services.dhcp} onChange={(event) => toggleService("dhcp", event.target.checked)} type="checkbox" />서비스</label><div className="service-header-actions"><button className="secondary-action" disabled={!device.runtime.dhcpLeases.length} onClick={exportDhcpLeases} type="button">CSV</button><button className="secondary-action" disabled={!device.runtime.dhcpLeases.length} onClick={() => onUpdate({ ...device, runtime: { ...device.runtime, dhcpLeases: [] } })} type="button">바인딩 비우기</button></div></header>
               <div className="service-draft-grid dhcp-draft">
                 <label>풀 이름<input value={poolDraft.name} onChange={(event) => setPoolDraft({ ...poolDraft, name: event.target.value })} placeholder="LAN" /></label>
                 <label>네트워크<input value={poolDraft.network} onChange={(event) => setPoolDraft({ ...poolDraft, network: event.target.value })} placeholder="192.168.1.0" /></label>
@@ -4389,10 +4427,12 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
                   <button className="secondary-action" onClick={() => onUpdate({ ...device, config: { ...device.config, dhcpExcludedRanges: (device.config.dhcpExcludedRanges ?? []).filter((item) => item.id !== range.id) } })} type="button">삭제</button>
                 </div>
               ))}
+              {device.runtime.dhcpLeases.length === 0 && <p className="empty-state">활성 DHCP 바인딩이 없습니다.</p>}
               {device.runtime.dhcpLeases.map((lease) => (
                 <div className="compact-row" key={`${lease.deviceId}-${lease.ipAddress}`}>
                   <span>{lease.ipAddress} {lease.macAddress}</span>
                   <small>{new Date(lease.expiresAt).toLocaleString()}</small>
+                  <button className="secondary-action" onClick={() => clearDhcpLease(lease.ipAddress, lease.deviceId)} type="button">해제</button>
                 </div>
               ))}
             </div>
