@@ -2170,7 +2170,13 @@ function runtimeLogLines(logs: NetworkDevice["runtime"]["logs"]): string[] {
 }
 
 function servicesStatus(device: NetworkDevice, filter = ""): string {
-  const services = Object.entries(device.config.services).filter(([name]) => !filter || name.toLowerCase().includes(filter.toLowerCase()));
+  const normalized = filter.trim().toLowerCase();
+  const services = Object.entries(device.config.services).filter(([name, enabled]) => {
+    if (!normalized) return true;
+    if (normalized === "enabled") return enabled;
+    if (normalized === "disabled") return !enabled;
+    return name.toLowerCase().includes(normalized);
+  });
   if (!services.length) return `% No service matches ${filter}.`;
   return [
     "Service          State      Detail",

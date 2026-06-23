@@ -148,6 +148,8 @@ assert(run("do show running-config | count service").includes("Number of lines w
 assert(services.includes("TFTP") && services.includes("enabled"), "show services must show enabled TFTP service");
 assert(services.includes("SYSLOG") && services.includes("enabled"), "show services must show enabled SYSLOG service");
 assert(run("do show services ftp").includes("FTP") && !run("do show services email").includes("FTP"), "show services <name> must filter service output");
+assert(run("do show services enabled").includes("enabled"), "show services enabled must filter enabled services");
+assert(run("do show services disabled").includes("disabled"), "show services disabled must filter disabled services");
 assert(run("ip route 10.20.0.0 255.0.255.0 192.168.10.1").includes("Invalid"), "static route command must reject non-contiguous masks");
 run("ip route 0.0.0.0 0.0.0.0 192.168.10.1");
 assert(run("do show ip route").includes("0.0.0.0/0"), "static default route must allow a /0 mask");
