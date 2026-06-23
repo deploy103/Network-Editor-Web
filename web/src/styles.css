@@ -2017,6 +2017,12 @@ small,
   color: #1f5f9f;
 }
 
+.sim-status-strip .capture-position {
+  border-color: #bac7d1;
+  background: #eef3f7;
+  color: #304352;
+}
+
 .sim-status-strip .warning {
   border-color: #f0d49a;
   background: #fff8e6;

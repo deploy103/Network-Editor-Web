@@ -3944,6 +3944,11 @@ function EventPanel({
     down: project.links.filter((link) => link.status === "down").length,
     blocked: project.links.filter((link) => link.status === "blocked").length
   };
+  const capturePositionLabel = filteredEvents.length === 0
+    ? "0/0"
+    : focusedIndex >= 0
+      ? `${focusedIndex + 1}/${filteredEvents.length}`
+      : `대기/${filteredEvents.length}`;
   useEffect(() => () => stopAutoCapture(), []);
   useEffect(() => {
     stopAutoCapture();
@@ -4009,6 +4014,7 @@ function EventPanel({
             <span className="delivered"><strong>{eventStats.delivered}</strong> 전달됨</span>
             <span className="dropped"><strong>{eventStats.dropped}</strong> 드롭됨</span>
             <span><strong>{filteredEvents.length}</strong> 표시</span>
+            <span className="capture-position"><strong>{capturePositionLabel}</strong> 캡처 위치</span>
           </div>
           <div className="simulation-layout">
             <div className="simulation-main">
