@@ -336,7 +336,7 @@ function inferAccessListType(name: string, protocol: unknown, destination: unkno
 }
 
 function normalizeAccessProtocol(value: unknown): DeviceConfig["accessRules"][number]["protocol"] {
-  return value === "icmp" || value === "tcp" || value === "udp" || value === "http" || value === "dns" || value === "dhcp" ? value : "ip";
+  return value === "icmp" || value === "tcp" || value === "udp" || value === "http" || value === "ftp" || value === "dns" || value === "dhcp" ? value : "ip";
 }
 
 function normalizeLineConfigs(lines: DeviceConfig["lineConfigs"] | undefined): DeviceConfig["lineConfigs"] {

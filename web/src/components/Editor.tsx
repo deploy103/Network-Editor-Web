@@ -20,6 +20,7 @@ const complexPduProtocols = [
   { value: "icmp", label: "ICMP Echo" },
   { value: "dns", label: "DNS Query" },
   { value: "http", label: "HTTP GET" },
+  { value: "ftp", label: "FTP LIST" },
   { value: "tftp", label: "TFTP Read" },
   { value: "syslog", label: "SYSLOG" }
 ] as const;
@@ -2353,6 +2354,7 @@ function complexPduServiceEnabled(device: NetworkDevice, protocol: ComplexPduPro
   if (protocol === "icmp") return true;
   if (protocol === "dns") return device.config.services.dns;
   if (protocol === "http") return device.config.services.http;
+  if (protocol === "ftp") return device.config.services.ftp;
   if (protocol === "tftp") return device.config.services.tftp;
   if (protocol === "syslog") return device.config.services.syslog;
   return false;
@@ -3161,7 +3163,7 @@ function ConfigTab({ device, onUpdate, onDhcp }: { device: NetworkDevice; onUpda
             <header><strong>접근 규칙</strong><small>{device.config.accessRules.length}</small></header>
             <div className="inline-grid services">
               <select value={aclDraft.action} onChange={(event) => setAclDraft({ ...aclDraft, action: event.target.value as AccessRule["action"] })}><option value="permit">permit</option><option value="deny">deny</option></select>
-              <select value={aclDraft.protocol} onChange={(event) => setAclDraft({ ...aclDraft, protocol: event.target.value as AccessRule["protocol"] })}><option value="ip">ip</option><option value="icmp">icmp</option><option value="tcp">tcp</option><option value="udp">udp</option><option value="http">http</option><option value="dns">dns</option><option value="dhcp">dhcp</option></select>
+              <select value={aclDraft.protocol} onChange={(event) => setAclDraft({ ...aclDraft, protocol: event.target.value as AccessRule["protocol"] })}><option value="ip">ip</option><option value="icmp">icmp</option><option value="tcp">tcp</option><option value="udp">udp</option><option value="http">http</option><option value="ftp">ftp</option><option value="dns">dns</option><option value="dhcp">dhcp</option></select>
               <input value={aclDraft.source} onChange={(event) => setAclDraft({ ...aclDraft, source: event.target.value })} placeholder="출발지" />
               <input value={aclDraft.destination} onChange={(event) => setAclDraft({ ...aclDraft, destination: event.target.value })} placeholder="목적지" />
               <input value={aclDraft.interfaceName} onChange={(event) => setAclDraft({ ...aclDraft, interfaceName: event.target.value })} placeholder="인터페이스" />
@@ -3170,7 +3172,7 @@ function ConfigTab({ device, onUpdate, onDhcp }: { device: NetworkDevice; onUpda
             {device.config.accessRules.map((rule) => (
               <div className="editable-acl-row" key={rule.id}>
                 <label>동작<select value={rule.action} onChange={(event) => updateAccessRule(rule.id, { action: event.target.value as AccessRule["action"] })}><option value="permit">permit</option><option value="deny">deny</option></select></label>
-                <label>프로토콜<select value={rule.protocol} onChange={(event) => updateAccessRule(rule.id, { protocol: event.target.value as AccessRule["protocol"] })}><option value="ip">ip</option><option value="icmp">icmp</option><option value="tcp">tcp</option><option value="udp">udp</option><option value="http">http</option><option value="dns">dns</option><option value="dhcp">dhcp</option></select></label>
+                <label>프로토콜<select value={rule.protocol} onChange={(event) => updateAccessRule(rule.id, { protocol: event.target.value as AccessRule["protocol"] })}><option value="ip">ip</option><option value="icmp">icmp</option><option value="tcp">tcp</option><option value="udp">udp</option><option value="http">http</option><option value="ftp">ftp</option><option value="dns">dns</option><option value="dhcp">dhcp</option></select></label>
                 <label>출발지<input value={rule.source} onChange={(event) => updateAccessRule(rule.id, { source: event.target.value.trim() })} /></label>
                 <label>목적지<input value={rule.destination} onChange={(event) => updateAccessRule(rule.id, { destination: event.target.value.trim() })} /></label>
                 <label>인터페이스<input value={rule.interfaceName} onChange={(event) => updateAccessRule(rule.id, { interfaceName: event.target.value.trim() })} /></label>
@@ -3588,7 +3590,7 @@ function transportAllows(transportInput: string, protocol: "ssh" | "telnet"): bo
   return tokens.includes("all") || tokens.includes(protocol);
 }
 
-const desktopQuickCommands = ["ipconfig /all", "ipconfig /renew", "arp -a", "route print", "ping www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "http www.lab.local", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
+const desktopQuickCommands = ["ipconfig /all", "ipconfig /renew", "arp -a", "route print", "ping www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "http www.lab.local", "ftp www.lab.local", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
 
 function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: NetworkDevice; project: NetworkProject; onProjectChange: (project: NetworkProject, message: string) => void; onUpdate: (device: NetworkDevice) => void }) {
   const dataPorts = device.ports.filter((port) => port.kind !== "console");
@@ -3691,7 +3693,7 @@ function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: Ne
             <span>{device.config.hostname || device.label}&gt;</span>
             <input value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handlePromptKeyDown} placeholder="ipconfig | ping 192.168.1.1 | tracert www.lab.local | http www.lab.local" />
           </form>
-          <small>프로젝트 장비 {project.devices.length}개 | ipconfig, arp -a, route print, ping, tracert, nslookup, http, ssh, telnet, tftp, syslog</small>
+          <small>프로젝트 장비 {project.devices.length}개 | ipconfig, arp -a, route print, ping, tracert, nslookup, http, ftp, ssh, telnet, tftp, syslog</small>
         </section>
       )}
       {activeApp === "browser" && (
@@ -3810,6 +3812,32 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     onProjectChange(appendDesktopEvent(result.project, device.id, target.id, "HTTP", `GET ${target.label} 요청이 200 OK를 반환했습니다.`, "delivered"), "HTTP 200 OK.");
     return `HTTP/1.1 200 OK\n서버: ${target.label}\n\n${target.label} 웹 서비스가 실행 중입니다.`;
   }
+  if (lower.startsWith("ftp ")) {
+    const [, targetText = "", ...actionParts] = command.split(/\s+/);
+    if (!targetText.trim()) return "사용법: ftp <ip|이름> [ls|get 파일]";
+    const action = actionParts.join(" ").trim() || "ls";
+    const resolved = await resolveDesktopNetworkTarget(project, device, targetText, onProjectChange);
+    if (!resolved.target) return resolved.error;
+    const { target, project: resolvedProject } = resolved;
+    const result = await simulatePing(resolvedProject, device.id, target.id);
+    if (!result.success) {
+      onProjectChange(appendDesktopEvent(result.project, device.id, target.id, "FTP", `FTP 연결 실패: ${result.message}`, "dropped"), result.message);
+      return `FTP 연결 실패: ${result.message}`;
+    }
+    if (!target.config.services.ftp) {
+      const nextProject = appendDesktopEvent(result.project, device.id, target.id, "FTP", `${target.label} FTP 서비스가 꺼져 있습니다.`, "dropped");
+      onProjectChange(nextProject, `${target.label} FTP 서비스가 꺼져 있습니다.`);
+      return `${target.label} FTP 서비스가 꺼져 있습니다.`;
+    }
+    const actionLower = action.toLowerCase();
+    const nextProject = appendDesktopEvent(result.project, device.id, target.id, "FTP", `${target.label} FTP ${actionLower.startsWith("get ") ? "파일 다운로드" : "디렉터리 조회"}를 완료했습니다.`, "delivered");
+    onProjectChange(nextProject, "FTP 세션 완료.");
+    if (actionLower.startsWith("get ")) {
+      const fileName = action.slice(4).trim() || "readme.txt";
+      return `Connected to ${target.label}.\n220 PTWeb FTP Service ready\nUser: anonymous\n230 User logged in\nftp> get ${fileName}\n150 Opening data connection for ${fileName}\n226 Transfer complete`;
+    }
+    return `Connected to ${target.label}.\n220 PTWeb FTP Service ready\nUser: anonymous\n230 User logged in\nftp> ${action}\n200 PORT command successful\n150 Opening ASCII mode data connection\n  readme.txt\n  running-config.txt\n  network-backup.ptweb\n226 Transfer complete`;
+  }
   if (lower.startsWith("ssh ") || lower.startsWith("telnet ")) {
     const protocol = lower.startsWith("ssh ") ? "ssh" : "telnet";
     const targetText = command.split(/\s+/).slice(1).join(" ");
@@ -3880,7 +3908,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     onProjectChange(appendDesktopEvent(loggedProject, device.id, target.id, "SYSLOG", `${target.label}에 SYSLOG 메시지를 기록했습니다.`, "delivered"), "SYSLOG 메시지를 기록했습니다.");
     return `SYSLOG sent to ${target.label}: ${logMessage}`;
   }
-  return "알 수 없는 데스크톱 명령입니다. ipconfig, arp -a, route print, ping <ip|이름>, tracert <ip|이름>, nslookup <이름>, http <ip|이름>, ssh <ip|이름>, telnet <ip|이름>, tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
+  return "알 수 없는 데스크톱 명령입니다. ipconfig, arp -a, route print, ping <ip|이름>, tracert <ip|이름>, nslookup <이름>, http <ip|이름>, ftp <ip|이름>, ssh <ip|이름>, telnet <ip|이름>, tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
 }
 
 function resolveDesktopTarget(project: NetworkProject, value: string): NetworkDevice | null {
@@ -4193,6 +4221,13 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
               <div className="diagnostic-row info"><strong>{device.config.services.http ? "HTTP 켜짐" : "HTTP 꺼짐"}</strong><span>서버에 도달 가능할 때 웹 브라우저와 `http` 데스크톱 명령이 이 서비스를 사용합니다.</span></div>
             </div>
           )}
+          {servicePane === "ftp" && (
+            <div className="config-group">
+              <header><strong>FTP</strong><label className="toggle"><input checked={device.config.services.ftp} onChange={(event) => toggleService("ftp", event.target.checked)} type="checkbox" />서비스</label></header>
+              <div className="diagnostic-row info"><strong>{device.config.services.ftp ? "FTP 켜짐" : "FTP 꺼짐"}</strong><span>데스크톱 `ftp 서버` 명령과 FTP Complex PDU가 이 서비스를 검사합니다.</span></div>
+              <div className="compact-row"><span>readme.txt / running-config.txt / network-backup.ptweb</span><small>가상 FTP 디렉터리</small></div>
+            </div>
+          )}
           {servicePane === "tftp" && (
             <div className="config-group">
               <header><strong>TFTP</strong><label className="toggle"><input checked={device.config.services.tftp} onChange={(event) => toggleService("tftp", event.target.checked)} type="checkbox" />서비스</label></header>
@@ -4363,7 +4398,7 @@ function EventPanel({
     <section className={`event-panel ${mode}`}>
       {mode === "simulation" ? (
         <>
-          <header><strong>시뮬레이션 이벤트</strong><select value={eventFilter} onChange={(event) => setEventFilter(event.target.value)}><option value="all">전체</option><option value="icmp">ICMP</option><option value="arp">ARP</option><option value="switch">SWITCH</option><option value="hub">HUB</option><option value="dhcp">DHCP</option><option value="dns">DNS</option><option value="http">HTTP</option><option value="tftp">TFTP</option><option value="syslog">SYSLOG</option><option value="ssh">SSH</option><option value="telnet">TELNET</option><option value="delivered">전달됨</option><option value="forwarded">전송 중</option><option value="dropped">드롭됨</option></select><select aria-label="OSI 레이어 필터" value={osiFilter} onChange={(event) => setOsiFilter(event.target.value)}><option value="all">전체 OSI</option><option value="Layer 1">Layer 1</option><option value="Layer 2">Layer 2</option><option value="Layer 3">Layer 3</option><option value="Layer 4">Layer 4</option><option value="Layer 7">Layer 7</option></select><input aria-label="시뮬레이션 이벤트 검색" className="event-search-input" value={eventSearch} onChange={(event) => setEventSearch(event.target.value)} placeholder="검색" /><button disabled={eventFilter === "all" && osiFilter === "all" && !eventSearchQuery} onClick={() => { stopAutoCapture(); setEventFilter("all"); setOsiFilter("all"); setEventSearch(""); }} type="button">필터 해제</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusEdge("first")} type="button">처음</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusRelative(-1)} type="button">이전</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={captureForward} type="button">캡처/전송</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={() => focusEdge("last")} type="button">끝</button><button className={autoPlaying ? "active" : ""} disabled={!onFocusEvent || filteredEvents.length === 0} onClick={autoCapturePlay} type="button">{autoPlaying ? "정지" : "자동 재생"}</button><label className="capture-speed-control">속도<select value={captureDelayMs} onChange={(event) => setCaptureDelayMs(Number(event.target.value))}><option value={900}>느림</option><option value={450}>보통</option><option value={180}>빠름</option></select></label><button disabled={!onExportEvents || filteredEvents.length === 0} onClick={() => onExportEvents?.(filteredEvents, eventPanelExportScope(eventFilter, osiFilter, eventSearch))} type="button">CSV</button><button onClick={() => { stopAutoCapture(); onClear(); }} type="button">비우기</button></header>
+          <header><strong>시뮬레이션 이벤트</strong><select value={eventFilter} onChange={(event) => setEventFilter(event.target.value)}><option value="all">전체</option><option value="icmp">ICMP</option><option value="arp">ARP</option><option value="switch">SWITCH</option><option value="hub">HUB</option><option value="dhcp">DHCP</option><option value="dns">DNS</option><option value="http">HTTP</option><option value="ftp">FTP</option><option value="tftp">TFTP</option><option value="syslog">SYSLOG</option><option value="ssh">SSH</option><option value="telnet">TELNET</option><option value="delivered">전달됨</option><option value="forwarded">전송 중</option><option value="dropped">드롭됨</option></select><select aria-label="OSI 레이어 필터" value={osiFilter} onChange={(event) => setOsiFilter(event.target.value)}><option value="all">전체 OSI</option><option value="Layer 1">Layer 1</option><option value="Layer 2">Layer 2</option><option value="Layer 3">Layer 3</option><option value="Layer 4">Layer 4</option><option value="Layer 7">Layer 7</option></select><input aria-label="시뮬레이션 이벤트 검색" className="event-search-input" value={eventSearch} onChange={(event) => setEventSearch(event.target.value)} placeholder="검색" /><button disabled={eventFilter === "all" && osiFilter === "all" && !eventSearchQuery} onClick={() => { stopAutoCapture(); setEventFilter("all"); setOsiFilter("all"); setEventSearch(""); }} type="button">필터 해제</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusEdge("first")} type="button">처음</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusRelative(-1)} type="button">이전</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={captureForward} type="button">캡처/전송</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={() => focusEdge("last")} type="button">끝</button><button className={autoPlaying ? "active" : ""} disabled={!onFocusEvent || filteredEvents.length === 0} onClick={autoCapturePlay} type="button">{autoPlaying ? "정지" : "자동 재생"}</button><label className="capture-speed-control">속도<select value={captureDelayMs} onChange={(event) => setCaptureDelayMs(Number(event.target.value))}><option value={900}>느림</option><option value={450}>보통</option><option value={180}>빠름</option></select></label><button disabled={!onExportEvents || filteredEvents.length === 0} onClick={() => onExportEvents?.(filteredEvents, eventPanelExportScope(eventFilter, osiFilter, eventSearch))} type="button">CSV</button><button onClick={() => { stopAutoCapture(); onClear(); }} type="button">비우기</button></header>
           <div className="sim-status-strip">
             <span><strong>{eventStats.total}</strong> 이벤트</span>
             <span className="forwarded"><strong>{eventStats.forwarded}</strong> 전송 중</span>
@@ -4650,7 +4685,7 @@ function PduMarker({ project, sourceId, targetId, status, type }: { project: Net
 }
 
 function userCreatedPacketRows(project: NetworkProject): Array<{ id: string; protocol: string; source: string; destination: string; status: SimulationEvent["status"]; count: number }> {
-  const protocols = new Set(["ICMP", "DHCP", "DNS", "HTTP", "TFTP", "SYSLOG", "SSH", "TELNET"]);
+  const protocols = new Set(["ICMP", "DHCP", "DNS", "HTTP", "FTP", "TFTP", "SYSLOG", "SSH", "TELNET"]);
   const seenPackets = new Set<string>();
   const packetCounts = new Map<string, number>();
   for (const event of project.simulationEvents.filter((event) => protocols.has(event.type.toUpperCase()))) {

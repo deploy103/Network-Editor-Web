@@ -20,7 +20,7 @@ export function createRoutedSampleProject(ownerId: string): NetworkProject {
     ...updatePortByName(server, "FastEthernet0", { ipAddress: "10.10.10.10", subnetMask: "255.255.255.0", gateway: "10.10.10.1", dnsServer: "10.10.10.10" }),
     config: {
       ...server.config,
-      services: { ...server.config.services, http: true, dhcp: true, dns: true, tftp: true, syslog: true },
+      services: { ...server.config.services, http: true, ftp: true, dhcp: true, dns: true, tftp: true, syslog: true },
       dhcpPools: [{
         id: createId("pool"),
         name: "USERS",
