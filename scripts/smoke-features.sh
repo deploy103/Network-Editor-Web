@@ -51,6 +51,7 @@ assert(router.ports.some((port) => (port.helperAddresses || []).includes("10.10.
 assert((server.config.dhcpExcludedRanges || []).some((range) => range.startIp === "192.168.10.1" && range.endIp === "192.168.10.20"), "sample server must include DHCP excluded range");
 assert(!diagnoseProject(project).some((issue) => issue.title.includes("DHCP helper")), "routed sample must not report DHCP helper diagnostics");
 assert(!diagnoseProject(project).some((issue) => issue.title.includes("DHCP 제외")), "routed sample must not report DHCP excluded range diagnostics");
+assert(!diagnoseProject(project).some((issue) => issue.title.includes("서비스에 접근 가능한 IP")), "routed sample services must have reachable server IPs");
 
 const normalized = normalizeProject({
   ...project,
@@ -91,6 +92,14 @@ const invalidPortMaskProject = {
     : device)
 };
 assert(diagnoseProject(invalidPortMaskProject).some((issue) => issue.severity === "error" && issue.title.includes("mask가 올바르지 않습니다")), "diagnostics must reject non-contiguous interface subnet masks");
+
+const serviceWithoutIpProject = {
+  ...project,
+  devices: project.devices.map((device) => device.id === server.id
+    ? { ...device, ports: device.ports.map((port) => port.kind !== "console" ? { ...port, ipAddress: "", subnetMask: "" } : port) }
+    : device)
+};
+assert(diagnoseProject(serviceWithoutIpProject).some((issue) => issue.severity === "warning" && issue.title.includes("서비스에 접근 가능한 IP") && issue.detail.includes("FTP")), "diagnostics must warn when enabled services have no reachable IPv4 interface");
 
 const invalidPoolMaskProject = {
   ...project,

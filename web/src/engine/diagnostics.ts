@@ -155,6 +155,10 @@ function diagnoseLinks(project: NetworkProject): NetworkIssue[] {
 function diagnoseServices(project: NetworkProject): NetworkIssue[] {
   const issues: NetworkIssue[] = [];
   for (const device of project.devices) {
+    const enabledReachableServices = reachableServiceNames(device);
+    if (enabledReachableServices.length > 0 && !device.ports.some((port) => port.adminUp && isIpv4(port.ipAddress))) {
+      issues.push(issue("warning", `${device.label} 서비스에 접근 가능한 IP가 없습니다`, `${enabledReachableServices.join(", ").toUpperCase()} 서비스가 켜져 있지만 활성 IPv4 인터페이스가 없습니다.`));
+    }
     if (device.config.services.dhcp && device.config.dhcpPools.length === 0) {
       issues.push(issue("warning", `${device.label} DHCP 풀이 없습니다`, "클라이언트가 주소를 갱신하기 전에 활성 DHCP 풀을 만드세요."));
     }
@@ -228,6 +232,11 @@ function diagnoseServices(project: NetworkProject): NetworkIssue[] {
     }
   }
   return issues;
+}
+
+function reachableServiceNames(device: NetworkDevice): Array<keyof NetworkDevice["config"]["services"]> {
+  return (["dns", "http", "ftp", "tftp", "syslog"] as Array<keyof NetworkDevice["config"]["services"]>)
+    .filter((service) => device.config.services[service]);
 }
 
 function explainDownLink(aDevice: NetworkDevice, aPort: NetworkPort, bDevice: NetworkDevice, bPort: NetworkPort, label: string): string {
