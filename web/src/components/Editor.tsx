@@ -2382,6 +2382,17 @@ function linkStatusDetail(project: NetworkProject, link: NetworkLink): string {
   return "링크가 정상 동작 중입니다.";
 }
 
+function linkSearchText(project: NetworkProject, link: NetworkLink): string {
+  return [
+    link.type,
+    shortCableLabel(link.type),
+    link.status,
+    linkStatusLabel(link.status),
+    linkLabel(project, link),
+    linkStatusDetail(project, link)
+  ].join(" ").toLowerCase();
+}
+
 function linkEndpointPair(project: NetworkProject, link: NetworkLink): { aDevice: NetworkDevice; aPort: NetworkPort; bDevice: NetworkDevice; bPort: NetworkPort } | null {
   const aDevice = project.devices.find((device) => device.id === link.endpointA.deviceId);
   const bDevice = project.devices.find((device) => device.id === link.endpointB.deviceId);
@@ -4207,6 +4218,7 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
 }
 
 type PduDetailTab = "osi" | "inbound" | "outbound";
+type LinkListFilter = "all" | NetworkLink["status"] | CableType;
 
 function EventPanel({
   project,
@@ -4237,10 +4249,17 @@ function EventPanel({
   };
   const [issueFilter, setIssueFilter] = useState<"all" | NetworkIssueSeverity>("all");
   const [issueSearch, setIssueSearch] = useState("");
+  const [linkFilter, setLinkFilter] = useState<LinkListFilter>("all");
+  const [linkSearch, setLinkSearch] = useState("");
   const issueSearchQuery = issueSearch.trim().toLowerCase();
+  const linkSearchQuery = linkSearch.trim().toLowerCase();
   const visibleIssues = issues.filter((item) =>
     (issueFilter === "all" || item.severity === issueFilter) &&
     (!issueSearchQuery || `${item.title} ${item.detail}`.toLowerCase().includes(issueSearchQuery))
+  );
+  const visibleLinks = project.links.filter((link) =>
+    (linkFilter === "all" || link.status === linkFilter || link.type === linkFilter) &&
+    (!linkSearchQuery || linkSearchText(project, link).includes(linkSearchQuery))
   );
   const [eventFilter, setEventFilter] = useState("all");
   const [osiFilter, setOsiFilter] = useState("all");
@@ -4507,8 +4526,9 @@ function EventPanel({
       {visibleIssues.length > 10 && <p className="event-empty-state">추가 이슈 {visibleIssues.length - 10}개가 더 있습니다. 진단 리포트에서 전체 목록을 확인하세요.</p>}
       {onRemoveLink && project.links.length > 0 && (
         <>
-          <header><strong>케이블</strong><small>링크 {project.links.length}개</small></header>
-          {project.links.map((link) => (
+          <header><strong>케이블</strong><small>링크 {project.links.length}개 / 표시 {visibleLinks.length}개</small><select aria-label="케이블 필터" value={linkFilter} onChange={(event) => setLinkFilter(event.target.value as LinkListFilter)}><option value="all">전체</option><option value="up">정상</option><option value="down">다운</option><option value="blocked">차단</option><option value="auto">자동</option><option value="copper-straight">구리 직결</option><option value="copper-cross">구리 크로스</option><option value="fiber">광케이블</option><option value="serial-dce">Serial DCE</option><option value="serial-dte">Serial DTE</option><option value="wireless">무선</option><option value="console">콘솔</option></select><input aria-label="케이블 검색" className="event-search-input" value={linkSearch} onChange={(event) => setLinkSearch(event.target.value)} placeholder="케이블 검색" />{(linkFilter !== "all" || linkSearchQuery) && <button onClick={() => { setLinkFilter("all"); setLinkSearch(""); }} type="button">필터 해제</button>}</header>
+          {visibleLinks.length === 0 && <p className="event-empty-state">현재 필터와 일치하는 케이블이 없습니다.</p>}
+          {visibleLinks.map((link) => (
             <div className={`event-row cable-row ${link.status}`} key={link.id}>
               <span className="cable-row-kind"><i className={`cable-swatch ${link.type}`} />{shortCableLabel(link.type)}</span>
               <span>{linkLabel(project, link)}</span>
