@@ -3606,7 +3606,7 @@ function transportAllows(transportInput: string, protocol: "ssh" | "telnet"): bo
   return tokens.includes("all") || tokens.includes(protocol);
 }
 
-const desktopQuickCommands = ["help", "ipconfig /all", "ipconfig /displaydns", "ipconfig /renew", "ipconfig /release", "arp -a", "route print", "ping -n 4 www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "web www.lab.local", "ftp www.lab.local", "mail www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
+const desktopQuickCommands = ["help", "ipconfig /all", "ipconfig /displaydns", "ipconfig /flushdns", "ipconfig /renew", "ipconfig /release", "arp -a", "route print", "netstat -r", "ping -n 4 www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "web www.lab.local", "ftp www.lab.local", "mail www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
 
 function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: NetworkDevice; project: NetworkProject; onProjectChange: (project: NetworkProject, message: string) => void; onUpdate: (device: NetworkDevice) => void }) {
   const dataPorts = device.ports.filter((port) => port.kind !== "console");
@@ -3730,8 +3730,8 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
   if (lower === "help" || lower === "?") {
     return [
       "지원 명령:",
-      "  ipconfig /all | ipconfig /displaydns | ipconfig /renew | ipconfig /release",
-      "  arp -a | route print",
+      "  ipconfig /all | ipconfig /displaydns | ipconfig /flushdns | ipconfig /renew | ipconfig /release",
+      "  arp -a | route print | netstat -r",
       "  ping [-n 횟수] <ip|이름> | tracert <ip|이름> | nslookup <이름|ip>",
       "  http|web|browser <ip|이름> | ftp <ip|이름> [ls|get 파일] | email|mail <서버> <받는사람> [메시지]",
       "  ssh <ip|이름> | telnet <ip|이름> | tftp <ip|이름> | syslog <ip|이름> <메시지>"
@@ -3768,6 +3768,9 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
       ]) : ["캐시된 DNS 레코드가 없습니다."])
     ].join("\n").trimEnd();
   }
+  if (lower === "ipconfig /flushdns") {
+    return "Windows IP Configuration\n\nSuccessfully flushed the DNS Resolver Cache.";
+  }
   if (lower === "ipconfig /renew") {
     const result = requestDhcp(project, device.id);
     onProjectChange(result.project, result.message);
@@ -3781,7 +3784,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
   if (lower === "arp -a") {
     return device.runtime.arpTable.map((entry) => `${entry.ipAddress.padEnd(16)}${entry.macAddress.padEnd(20)}${entry.portName}`).join("\n") || "ARP 항목이 없습니다.";
   }
-  if (lower === "route print") {
+  if (lower === "route print" || lower === "netstat -r") {
     const routes = device.ports
       .filter((port) => port.ipAddress && port.subnetMask && isIpv4(port.ipAddress) && isIpv4(port.subnetMask))
       .flatMap((port) => [
@@ -4023,7 +4026,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     onProjectChange(appendDesktopEvent(loggedProject, device.id, target.id, "SYSLOG", `${target.label}에 SYSLOG 메시지를 기록했습니다.`, "delivered"), "SYSLOG 메시지를 기록했습니다.");
     return `SYSLOG sent to ${target.label}: ${logMessage}`;
   }
-  return "알 수 없는 데스크톱 명령입니다. help, ipconfig, arp -a, route print, ping [-n 횟수] <ip|이름>, tracert <ip|이름>, nslookup <이름|ip>, http/web <ip|이름>, ftp <ip|이름>, email/mail <ip|이름> <받는사람>, ssh <ip|이름>, telnet <ip|이름>, tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
+  return "알 수 없는 데스크톱 명령입니다. help, ipconfig, arp -a, route print, netstat -r, ping [-n 횟수] <ip|이름>, tracert <ip|이름>, nslookup <이름|ip>, http/web <ip|이름>, ftp <ip|이름>, email/mail <ip|이름> <받는사람>, ssh <ip|이름>, telnet <ip|이름>, tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
 }
 
 function parseDesktopPingCommand(command: string): { count: number; targetText: string } {
