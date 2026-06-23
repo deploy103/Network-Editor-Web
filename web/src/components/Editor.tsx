@@ -3951,7 +3951,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
 
 function resolveDesktopTarget(project: NetworkProject, value: string): NetworkDevice | null {
   const host = cleanHost(value);
-  const ip = isIpv4(host) ? host : resolveDns(project, host);
+  const ip = isIpv4(host) ? host : "";
   if (ip) {
     const byIp = project.devices.find((device) => device.ports.some((port) => port.ipAddress === ip));
     if (byIp) return byIp;
@@ -4034,10 +4034,6 @@ async function resolveDesktopNetworkTarget(project: NetworkProject, device: Netw
   const nextProject = appendDesktopEvent(dnsReachability.project, device.id, server.id, "DNS", `${host}을(를) ${record.value}(으)로 확인했습니다.`, "delivered");
   onProjectChange(nextProject, `DNS가 ${host}을(를) 확인했습니다.`);
   return { target: resolveDesktopTarget(nextProject, record.value), project: nextProject, error: `DNS 레코드 ${record.value}와 일치하는 장비가 없습니다.` };
-}
-
-function resolveDns(project: NetworkProject, host: string): string {
-  return project.devices.find((device) => device.config.services.dns)?.config.dnsRecords.find((record) => record.name.toLowerCase() === host.toLowerCase())?.value ?? "";
 }
 
 function cleanHost(value: string): string {
