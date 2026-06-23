@@ -3734,8 +3734,8 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
   }
   if (lower === "ipconfig /release") {
     const released = releaseDhcp(project, device.id);
-    onProjectChange(released, "DHCP 임대를 해제했습니다.");
-    return "DHCP 임대를 해제했습니다.";
+    onProjectChange(released.project, released.message);
+    return released.message;
   }
   if (lower === "arp -a") {
     return device.runtime.arpTable.map((entry) => `${entry.ipAddress.padEnd(16)}${entry.macAddress.padEnd(20)}${entry.portName}`).join("\n") || "ARP 항목이 없습니다.";
@@ -3959,7 +3959,7 @@ function resolveDesktopTarget(project: NetworkProject, value: string): NetworkDe
   return project.devices.find((device) => device.label.toLowerCase() === host.toLowerCase() || device.config.hostname.toLowerCase() === host.toLowerCase()) ?? null;
 }
 
-function releaseDhcp(project: NetworkProject, deviceId: string): NetworkProject {
+function releaseDhcp(project: NetworkProject, deviceId: string): { project: NetworkProject; message: string } {
   const time = Date.now();
   const packetId = createId("packet");
   const releasedLeases = project.devices.flatMap((device) =>
@@ -3968,15 +3968,17 @@ function releaseDhcp(project: NetworkProject, deviceId: string): NetworkProject 
       .map((lease) => ({ serverId: device.id, ipAddress: lease.ipAddress }))
   );
   const targetId = releasedLeases[0]?.serverId ?? deviceId;
+  const hasLease = releasedLeases.length > 0;
+  const releaseStatus: SimulationEvent["status"] = hasLease ? "delivered" : "dropped";
   const releasedText = releasedLeases.map((lease) => lease.ipAddress).join(", ") || "client address";
-  return {
+  const nextProject = {
     ...project,
     devices: project.devices.map((device) => {
       const runtime = { ...device.runtime, dhcpLeases: device.runtime.dhcpLeases.filter((lease) => lease.deviceId !== deviceId) };
       if (device.id === deviceId) {
         return {
           ...device,
-          ports: device.ports.map((port) => port.kind !== "console" ? { ...port, ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" } : port),
+          ports: hasLease ? device.ports.map((port) => port.kind !== "console" ? { ...port, ipAddress: "", subnetMask: "", gateway: "", dnsServer: "" } : port) : device.ports,
           runtime
         };
       }
@@ -3984,9 +3986,10 @@ function releaseDhcp(project: NetworkProject, deviceId: string): NetworkProject 
     }),
     simulationEvents: [
       ...project.simulationEvents,
-      { id: createId("evt"), time, lastDeviceId: deviceId, atDeviceId: targetId, sourceDeviceId: deviceId, targetDeviceId: targetId, packetId, type: "DHCP", info: `DHCPRELEASE sent by client for ${releasedText}.`, status: "delivered", osiLayers: ["Layer 7", "Layer 3"] }
+      { id: createId("evt"), time, lastDeviceId: deviceId, atDeviceId: targetId, sourceDeviceId: deviceId, targetDeviceId: targetId, packetId, type: "DHCP", info: hasLease ? `DHCPRELEASE sent by client for ${releasedText}.` : "DHCPRELEASE skipped: no active DHCP lease.", status: releaseStatus, osiLayers: ["Layer 7", "Layer 3"] }
     ]
   };
+  return { project: nextProject, message: hasLease ? "DHCP 임대를 해제했습니다." : "활성 DHCP 임대가 없습니다." };
 }
 
 function appendDesktopEvent(project: NetworkProject, sourceId: string, targetId: string, type: string, info: string, status: "forwarded" | "delivered" | "dropped", packetId = createId("packet")): NetworkProject {
