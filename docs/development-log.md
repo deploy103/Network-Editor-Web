@@ -36,6 +36,7 @@
 - Added CLI `show mac address-table address <mac>` filtering with normalized MAC comparison.
 - Added CLI `show arp <ip|mac|interface>` and `show ip arp <ip|mac|interface>` filtering.
 - Added CLI `show hosts <name|address>` filtering with missing-host feedback.
+- Added Desktop command prompt `ipconfig /flushdns` and `netstat -r` route-table alias.
 
 ### TODO
 
