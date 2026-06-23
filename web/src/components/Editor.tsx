@@ -4483,7 +4483,7 @@ function PduMarker({ project, sourceId, targetId, status, type }: { project: Net
 }
 
 function userCreatedPacketRows(project: NetworkProject): Array<{ id: string; protocol: string; source: string; destination: string; status: SimulationEvent["status"]; count: number }> {
-  const protocols = new Set(["ICMP", "DHCP", "DNS", "HTTP", "TFTP", "SYSLOG"]);
+  const protocols = new Set(["ICMP", "DHCP", "DNS", "HTTP", "TFTP", "SYSLOG", "SSH", "TELNET"]);
   const seenPackets = new Set<string>();
   const packetCounts = new Map<string, number>();
   for (const event of project.simulationEvents.filter((event) => protocols.has(event.type.toUpperCase()))) {
