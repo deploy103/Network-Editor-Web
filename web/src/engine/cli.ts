@@ -2187,12 +2187,16 @@ function servicesStatus(device: NetworkDevice, filter = ""): string {
 function serviceDetail(device: NetworkDevice, service: string): string {
   if (service === "dhcp") return `${device.config.dhcpPools.filter((pool) => pool.enabled).length}/${device.config.dhcpPools.length} pools, ${dhcpExcludedRanges(device).length} excluded ranges`;
   if (service === "dns") return `${device.config.dnsRecords.length} host records, ${(device.config.nameServers ?? []).length} name servers`;
-  if (service === "http") return `${device.ports.filter((port) => port.adminUp && port.ipAddress).length} listening interfaces`;
-  if (service === "ftp") return "anonymous read-only, readme.txt, running-config.txt, network-backup.ptweb";
-  if (service === "email") return "SMTP/POP3 mailboxes: admin, user";
+  if (service === "http") return `${device.ports.filter((port) => port.adminUp && port.ipAddress).length} listening interfaces, ${serviceLogCount(device, "HTTP")} logs`;
+  if (service === "ftp") return `anonymous read-only, readme.txt, running-config.txt, network-backup.ptweb, ${serviceLogCount(device, "FTP")} logs`;
+  if (service === "email") return `SMTP/POP3 mailboxes: admin, user, ${serviceLogCount(device, "EMAIL")} logs`;
   if (service === "syslog") return `${device.runtime.logs.length} buffered messages`;
-  if (service === "tftp") return "running-config.txt, startup-config, network-backup.ptweb";
+  if (service === "tftp") return `running-config.txt, startup-config, network-backup.ptweb, ${serviceLogCount(device, "TFTP")} logs`;
   return "";
+}
+
+function serviceLogCount(device: NetworkDevice, prefix: string): number {
+  return device.runtime.logs.filter((log) => log.message.startsWith(prefix)).length;
 }
 
 function dhcpBindingStatus(device: NetworkDevice, filter = ""): string {
