@@ -3594,7 +3594,7 @@ function transportAllows(transportInput: string, protocol: "ssh" | "telnet"): bo
   return tokens.includes("all") || tokens.includes(protocol);
 }
 
-const desktopQuickCommands = ["ipconfig /all", "ipconfig /renew", "arp -a", "route print", "ping www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "http www.lab.local", "ftp www.lab.local", "email www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
+const desktopQuickCommands = ["ipconfig /all", "ipconfig /renew", "ipconfig /release", "arp -a", "route print", "ping www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "http www.lab.local", "ftp www.lab.local", "email www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
 
 function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: NetworkDevice; project: NetworkProject; onProjectChange: (project: NetworkProject, message: string) => void; onUpdate: (device: NetworkDevice) => void }) {
   const dataPorts = device.ports.filter((port) => port.kind !== "console");
