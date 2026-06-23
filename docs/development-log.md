@@ -38,6 +38,7 @@
 - Added CLI `show hosts <name|address>` filtering with missing-host feedback.
 - Added Desktop command prompt `ipconfig /flushdns` and `netstat -r` route-table alias.
 - Added CLI `show protocols <interface>` filtering for single-interface protocol status.
+- Added CLI `show ip route interface <interface>` filtering with compact interface-name matching.
 
 ### TODO
 
