@@ -3395,7 +3395,27 @@ function endpointLabel(project: NetworkProject, deviceId: string, portId: string
   return project.devices.find((device) => device.id === deviceId)?.ports.find((port) => port.id === portId)?.name ?? portId;
 }
 
-const desktopQuickCommands = ["ipconfig /all", "ipconfig /renew", "arp -a", "route print", "ping www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "http www.lab.local", "tftp www.lab.local", "syslog www.lab.local link-check"];
+function remoteAccessState(device: NetworkDevice, protocol: "ssh" | "telnet"): { enabled: boolean; reason: string } {
+  if (!device.powerOn) return { enabled: false, reason: "대상 장비 전원이 꺼져 있습니다." };
+  const vtyLines = (device.config.lineConfigs ?? []).filter((line) => line.kind === "vty");
+  if (!vtyLines.length) return { enabled: false, reason: "VTY line이 설정되지 않았습니다." };
+  if (protocol === "ssh") {
+    if (!device.config.domainName) return { enabled: false, reason: "ip domain-name이 설정되지 않았습니다." };
+    if (!device.config.rsaKeyGenerated) return { enabled: false, reason: "RSA 키가 생성되지 않았습니다." };
+    if (!(device.config.localUsers ?? []).length) return { enabled: false, reason: "로컬 사용자 계정이 없습니다." };
+    if (!vtyLines.some((line) => line.loginLocal && transportAllows(line.transportInput, "ssh"))) return { enabled: false, reason: "VTY login local 또는 transport input ssh가 없습니다." };
+    return { enabled: true, reason: "SSH 사용 가능" };
+  }
+  if (!vtyLines.some((line) => (line.login || line.loginLocal) && transportAllows(line.transportInput, "telnet"))) return { enabled: false, reason: "VTY login 또는 transport input telnet이 없습니다." };
+  return { enabled: true, reason: "Telnet 사용 가능" };
+}
+
+function transportAllows(transportInput: string, protocol: "ssh" | "telnet"): boolean {
+  const tokens = transportInput.toLowerCase().split(/[,\s]+/).filter(Boolean);
+  return tokens.includes("all") || tokens.includes(protocol);
+}
+
+const desktopQuickCommands = ["ipconfig /all", "ipconfig /renew", "arp -a", "route print", "ping www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "http www.lab.local", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
 
 function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: NetworkDevice; project: NetworkProject; onProjectChange: (project: NetworkProject, message: string) => void; onUpdate: (device: NetworkDevice) => void }) {
   const dataPorts = device.ports.filter((port) => port.kind !== "console");
@@ -3498,7 +3518,7 @@ function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: Ne
             <span>{device.config.hostname || device.label}&gt;</span>
             <input value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handlePromptKeyDown} placeholder="ipconfig | ping 192.168.1.1 | tracert www.lab.local | http www.lab.local" />
           </form>
-          <small>프로젝트 장비 {project.devices.length}개 | ipconfig, arp -a, route print, ping, tracert, nslookup, http, tftp, syslog</small>
+          <small>프로젝트 장비 {project.devices.length}개 | ipconfig, arp -a, route print, ping, tracert, nslookup, http, ssh, telnet, tftp, syslog</small>
         </section>
       )}
       {activeApp === "browser" && (
@@ -3617,6 +3637,36 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     onProjectChange(appendDesktopEvent(result.project, device.id, target.id, "HTTP", `GET ${target.label} 요청이 200 OK를 반환했습니다.`, "delivered"), "HTTP 200 OK.");
     return `HTTP/1.1 200 OK\n서버: ${target.label}\n\n${target.label} 웹 서비스가 실행 중입니다.`;
   }
+  if (lower.startsWith("ssh ") || lower.startsWith("telnet ")) {
+    const protocol = lower.startsWith("ssh ") ? "ssh" : "telnet";
+    const targetText = command.split(/\s+/).slice(1).join(" ");
+    if (!targetText.trim()) return `사용법: ${protocol} <ip|이름>`;
+    const resolved = await resolveDesktopNetworkTarget(project, device, targetText, onProjectChange);
+    if (!resolved.target) return resolved.error;
+    const { target, project: resolvedProject } = resolved;
+    const result = await simulatePing(resolvedProject, device.id, target.id);
+    if (!result.success) {
+      onProjectChange(appendDesktopEvent(result.project, device.id, target.id, protocol.toUpperCase(), `${protocol.toUpperCase()} 연결 실패: ${result.message}`, "dropped"), result.message);
+      return `${protocol.toUpperCase()} 연결 실패: ${result.message}`;
+    }
+    const access = remoteAccessState(target, protocol);
+    if (!access.enabled) {
+      const nextProject = appendDesktopEvent(result.project, device.id, target.id, protocol.toUpperCase(), `${target.label} ${protocol.toUpperCase()} 접속 거부: ${access.reason}`, "dropped");
+      onProjectChange(nextProject, `${target.label} ${protocol.toUpperCase()} 접속이 거부되었습니다.`);
+      return `Connecting to ${target.label}...\n% ${access.reason}`;
+    }
+    onProjectChange(appendDesktopEvent(result.project, device.id, target.id, protocol.toUpperCase(), `${device.label}에서 ${target.label}(으)로 ${protocol.toUpperCase()} 세션을 열었습니다.`, "delivered"), `${protocol.toUpperCase()} 세션이 열렸습니다.`);
+    return [
+      `Connecting to ${target.label} (${primaryDeviceIp(target) || targetText})...`,
+      protocol === "ssh" ? `SSH-${target.config.sshVersion ?? "2"}.0-PTWEB` : "Trying 23 ... Open",
+      "User Access Verification",
+      "",
+      "Username: admin",
+      "Password:",
+      `${target.config.hostname || target.label}#`,
+      `${protocol.toUpperCase()} session established.`
+    ].join("\n");
+  }
   if (lower.startsWith("tftp ")) {
     const targetText = command.split(/\s+/)[1] ?? "";
     if (!targetText.trim()) return "사용법: tftp <ip|이름>";
@@ -3657,7 +3707,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     onProjectChange(appendDesktopEvent(loggedProject, device.id, target.id, "SYSLOG", `${target.label}에 SYSLOG 메시지를 기록했습니다.`, "delivered"), "SYSLOG 메시지를 기록했습니다.");
     return `SYSLOG sent to ${target.label}: ${logMessage}`;
   }
-  return "알 수 없는 데스크톱 명령입니다. ipconfig, arp -a, route print, ping <ip|이름>, tracert <ip|이름>, nslookup <이름>, http <ip|이름>, tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
+  return "알 수 없는 데스크톱 명령입니다. ipconfig, arp -a, route print, ping <ip|이름>, tracert <ip|이름>, nslookup <이름>, http <ip|이름>, ssh <ip|이름>, telnet <ip|이름>, tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
 }
 
 function resolveDesktopTarget(project: NetworkProject, value: string): NetworkDevice | null {
@@ -4114,7 +4164,7 @@ function EventPanel({
     <section className={`event-panel ${mode}`}>
       {mode === "simulation" ? (
         <>
-          <header><strong>시뮬레이션 이벤트</strong><select value={eventFilter} onChange={(event) => setEventFilter(event.target.value)}><option value="all">전체</option><option value="icmp">ICMP</option><option value="arp">ARP</option><option value="switch">SWITCH</option><option value="hub">HUB</option><option value="dhcp">DHCP</option><option value="dns">DNS</option><option value="http">HTTP</option><option value="tftp">TFTP</option><option value="syslog">SYSLOG</option><option value="delivered">전달됨</option><option value="forwarded">전송 중</option><option value="dropped">드롭됨</option></select><select aria-label="OSI 레이어 필터" value={osiFilter} onChange={(event) => setOsiFilter(event.target.value)}><option value="all">전체 OSI</option><option value="Layer 1">Layer 1</option><option value="Layer 2">Layer 2</option><option value="Layer 3">Layer 3</option><option value="Layer 4">Layer 4</option><option value="Layer 7">Layer 7</option></select><button disabled={eventFilter === "all" && osiFilter === "all"} onClick={() => { stopAutoCapture(); setEventFilter("all"); setOsiFilter("all"); }} type="button">필터 해제</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusEdge("first")} type="button">처음</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusRelative(-1)} type="button">이전</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={captureForward} type="button">캡처/전송</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={() => focusEdge("last")} type="button">끝</button><button className={autoPlaying ? "active" : ""} disabled={!onFocusEvent || filteredEvents.length === 0} onClick={autoCapturePlay} type="button">{autoPlaying ? "정지" : "자동 재생"}</button><label className="capture-speed-control">속도<select value={captureDelayMs} onChange={(event) => setCaptureDelayMs(Number(event.target.value))}><option value={900}>느림</option><option value={450}>보통</option><option value={180}>빠름</option></select></label><button disabled={!onExportEvents || filteredEvents.length === 0} onClick={() => onExportEvents?.(filteredEvents, eventPanelExportScope(eventFilter, osiFilter))} type="button">CSV</button><button onClick={() => { stopAutoCapture(); onClear(); }} type="button">비우기</button></header>
+          <header><strong>시뮬레이션 이벤트</strong><select value={eventFilter} onChange={(event) => setEventFilter(event.target.value)}><option value="all">전체</option><option value="icmp">ICMP</option><option value="arp">ARP</option><option value="switch">SWITCH</option><option value="hub">HUB</option><option value="dhcp">DHCP</option><option value="dns">DNS</option><option value="http">HTTP</option><option value="tftp">TFTP</option><option value="syslog">SYSLOG</option><option value="ssh">SSH</option><option value="telnet">TELNET</option><option value="delivered">전달됨</option><option value="forwarded">전송 중</option><option value="dropped">드롭됨</option></select><select aria-label="OSI 레이어 필터" value={osiFilter} onChange={(event) => setOsiFilter(event.target.value)}><option value="all">전체 OSI</option><option value="Layer 1">Layer 1</option><option value="Layer 2">Layer 2</option><option value="Layer 3">Layer 3</option><option value="Layer 4">Layer 4</option><option value="Layer 7">Layer 7</option></select><button disabled={eventFilter === "all" && osiFilter === "all"} onClick={() => { stopAutoCapture(); setEventFilter("all"); setOsiFilter("all"); }} type="button">필터 해제</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusEdge("first")} type="button">처음</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusRelative(-1)} type="button">이전</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={captureForward} type="button">캡처/전송</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={() => focusEdge("last")} type="button">끝</button><button className={autoPlaying ? "active" : ""} disabled={!onFocusEvent || filteredEvents.length === 0} onClick={autoCapturePlay} type="button">{autoPlaying ? "정지" : "자동 재생"}</button><label className="capture-speed-control">속도<select value={captureDelayMs} onChange={(event) => setCaptureDelayMs(Number(event.target.value))}><option value={900}>느림</option><option value={450}>보통</option><option value={180}>빠름</option></select></label><button disabled={!onExportEvents || filteredEvents.length === 0} onClick={() => onExportEvents?.(filteredEvents, eventPanelExportScope(eventFilter, osiFilter))} type="button">CSV</button><button onClick={() => { stopAutoCapture(); onClear(); }} type="button">비우기</button></header>
           <div className="sim-status-strip">
             <span><strong>{eventStats.total}</strong> 이벤트</span>
             <span className="forwarded"><strong>{eventStats.forwarded}</strong> 전송 중</span>
