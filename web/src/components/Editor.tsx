@@ -388,6 +388,9 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
       if (complexPduProtocol === "ftp" && status === "delivered") {
         nextProject = appendServerLog(nextProject, targetId, "info", `FTP Complex PDU from ${source.label} repeat ${index + 1}/${repeatCount} TTL ${ttl}`);
       }
+      if (complexPduProtocol === "http" && status === "delivered") {
+        nextProject = appendServerLog(nextProject, targetId, "info", `HTTP Complex PDU GET from ${source.label} repeat ${index + 1}/${repeatCount} TTL ${ttl}`);
+      }
       if (status === "delivered") delivered += 1;
       else dropped += 1;
       if (intervalMs > 0 && index < repeatCount - 1) await waitForInterval(intervalMs);
@@ -3819,7 +3822,8 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
       onProjectChange(nextProject, `${target.label}이(가) HTTP 연결을 거부했습니다.`);
       return `${target.label}이(가) HTTP 연결을 거부했습니다.`;
     }
-    onProjectChange(appendDesktopEvent(result.project, device.id, target.id, "HTTP", `GET ${target.label} 요청이 200 OK를 반환했습니다.`, "delivered"), "HTTP 200 OK.");
+    const loggedProject = appendServerLog(result.project, target.id, "info", `HTTP GET from ${device.label}`);
+    onProjectChange(appendDesktopEvent(loggedProject, device.id, target.id, "HTTP", `GET ${target.label} 요청이 200 OK를 반환했습니다.`, "delivered"), "HTTP 200 OK.");
     return `HTTP/1.1 200 OK\n서버: ${target.label}\n\n${target.label} 웹 서비스가 실행 중입니다.`;
   }
   if (lower.startsWith("ftp ")) {
@@ -4064,6 +4068,7 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
   const [serviceNotice, setServiceNotice] = useState("");
   const serviceOrder: ServiceName[] = ["dhcp", "dns", "http", "ftp", "email", "tftp", "syslog"];
   const serviceKeys = serviceOrder.filter((service) => service in device.config.services);
+  const httpLogs = device.runtime.logs.filter((log) => log.message.startsWith("HTTP"));
   const ftpLogs = device.runtime.logs.filter((log) => log.message.startsWith("FTP"));
   const emailLogs = device.runtime.logs.filter((log) => log.message.startsWith("EMAIL"));
 
@@ -4266,6 +4271,12 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
             <div className="config-group">
               <header><strong>HTTP</strong><label className="toggle"><input checked={device.config.services.http} onChange={(event) => toggleService("http", event.target.checked)} type="checkbox" />서비스</label></header>
               <div className="diagnostic-row info"><strong>{device.config.services.http ? "HTTP 켜짐" : "HTTP 꺼짐"}</strong><span>서버에 도달 가능할 때 웹 브라우저와 `http` 데스크톱 명령이 이 서비스를 사용합니다.</span></div>
+              {httpLogs.length === 0 ? <p className="empty-state">HTTP 요청 로그가 없습니다.</p> : httpLogs.slice(-8).reverse().map((log) => (
+                <div className="diagnostic-row info" key={log.id}>
+                  <strong>{new Date(log.createdAt).toLocaleTimeString()}</strong>
+                  <span>{log.message}</span>
+                </div>
+              ))}
             </div>
           )}
           {servicePane === "ftp" && (
