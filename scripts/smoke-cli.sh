@@ -278,6 +278,9 @@ assert(filteredDhcpBinding.includes("192.168.10.50") && !filteredDhcpBinding.inc
 assert(run("show ip dhcp binding 192.168.10.99").includes("not found"), "show ip dhcp binding <ip> must report missing bindings");
 const macByAddress = run("show mac address-table address 02:aa:aa:aa:aa:20");
 assert(macByAddress.includes("02:aa:aa:aa:aa:20") && !macByAddress.includes("02:aa:aa:aa:aa:99"), "show mac address-table address <mac> must filter MAC entries");
+const arpByIp = run("show arp 192.168.10.2");
+assert(arpByIp.includes("192.168.10.2") && !arpByIp.includes("192.168.10.3"), "show arp <ip> must filter ARP entries");
+assert(run("show ip arp 192.168.10.99").includes("not found"), "show ip arp <ip> must report missing ARP entries");
 run(`clear mac address-table dynamic interface ${sparePort}`);
 assert(!device.runtime.macTable.some((entry) => entry.type === "dynamic" && entry.portName === sparePort), "clear mac address-table dynamic interface must remove matching dynamic entries only");
 assert(device.runtime.macTable.some((entry) => entry.type === "static" && entry.portName === sparePort), "clear mac address-table dynamic interface must keep static entries");
