@@ -548,7 +548,7 @@ function expandShowCommand(rest: string[]): string {
   if (first === "cdp" && isAbbrev(second, "neighbors", 3)) return lowerRest[2]?.startsWith("det") ? "show cdp neighbors detail" : "show cdp neighbors";
   if (first === "ip") {
     if (isAbbrev(second, "route", 2)) return ["show ip route", ...rest.slice(2)].join(" ");
-    if (isAbbrev(second, "protocols", 3)) return "show ip protocols";
+    if (isAbbrev(second, "protocols", 3)) return ["show ip protocols", ...rest.slice(2)].join(" ").trim();
     if (isAbbrev(second, "ssh", 2)) return "show ip ssh";
     if (isAbbrev(second, "arp")) return ["show ip arp", ...rest.slice(2)].join(" ").trim();
     if (isAbbrev(second, "interface", 3)) {
@@ -1979,7 +1979,7 @@ function showCommand(device: NetworkDevice, lower: string, session?: CliSession)
   if (lower === "show ip route") return routeTable(device);
   if (lower === "show ip route summary") return routeSummary(device);
   if (lower.startsWith("show ip route ")) return routeTable(device, lower.slice("show ip route ".length).trim());
-  if (lower === "show ip protocols") return ipProtocols(device);
+  if (lower === "show ip protocols" || lower.startsWith("show ip protocols ")) return ipProtocols(device, lower.slice("show ip protocols".length).trim());
   if (lower === "show ip ssh") return ipSshStatus(device);
   if (lower === "show ip ospf") return ospfProcessStatus(device);
   if (lower === "show ip ospf neighbor") return ospfNeighbors(device);
@@ -2763,14 +2763,14 @@ function filterRouteLines(lines: string[], filter: string): string[] {
   return lines.filter((line) => line.toLowerCase().includes(filter.toLowerCase()));
 }
 
-function ipProtocols(device: NetworkDevice): string {
+function ipProtocols(device: NetworkDevice, filter = ""): string {
   const protocols = routingProtocols(device);
-  const lines: string[] = [];
+  const blocks: string[][] = [];
   if (device.config.staticRoutes.length) {
-    lines.push(`Routing Protocol is "static"`, `  Static routes configured: ${device.config.staticRoutes.length}`, ...device.config.staticRoutes.map((route) => `  ${route.network} ${route.mask} via ${route.nextHop}`));
+    blocks.push([`Routing Protocol is "static"`, `  Static routes configured: ${device.config.staticRoutes.length}`, ...device.config.staticRoutes.map((route) => `  ${route.network} ${route.mask} via ${route.nextHop}`)]);
   }
   for (const protocol of protocols) {
-    lines.push(
+    blocks.push([
       `Routing Protocol is "${protocol.protocol}${protocol.processId ? ` ${protocol.processId}` : ""}"`,
       `  Outgoing update filter list for all interfaces is not set`,
       `  Incoming update filter list for all interfaces is not set`,
@@ -2782,9 +2782,12 @@ function ipProtocols(device: NetworkDevice): string {
       ...((protocol.passiveInterfaceExceptions ?? []).length ? ["  Non-passive Interface(s):", ...(protocol.passiveInterfaceExceptions ?? []).map((name) => `    ${name}`)] : []),
       ...(protocol.redistributeStatic ? ["  Redistributing: static"] : []),
       ...(protocol.defaultInformationOriginate ? [`  Default information originate${protocol.defaultInformationAlways ? " always" : ""}`] : [])
-    );
+    ]);
   }
-  return lines.length ? lines.join("\n") : "No routing protocols configured.";
+  const query = filter.trim().toLowerCase();
+  const selected = query ? blocks.filter((block) => block[0].toLowerCase().includes(query)) : blocks;
+  if (query && !selected.length) return `% Routing protocol ${filter} not found.`;
+  return selected.length ? selected.map((block) => block.join("\n")).join("\n\n") : "No routing protocols configured.";
 }
 
 function ipSshStatus(device: NetworkDevice): string {
