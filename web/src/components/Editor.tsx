@@ -4060,6 +4060,7 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
   const [serviceNotice, setServiceNotice] = useState("");
   const serviceOrder: ServiceName[] = ["dhcp", "dns", "http", "ftp", "email", "tftp", "syslog"];
   const serviceKeys = serviceOrder.filter((service) => service in device.config.services);
+  const emailLogs = device.runtime.logs.filter((log) => log.message.startsWith("EMAIL"));
 
   function toggleService(service: ServiceName, enabled: boolean) {
     setServiceNotice(`${service.toUpperCase()} 서비스를 ${enabled ? "켰습니다" : "껐습니다"}.`);
@@ -4274,6 +4275,12 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
               <header><strong>EMAIL</strong><label className="toggle"><input checked={device.config.services.email} onChange={(event) => toggleService("email", event.target.checked)} type="checkbox" />서비스</label></header>
               <div className="diagnostic-row info"><strong>{device.config.services.email ? "EMAIL 켜짐" : "EMAIL 꺼짐"}</strong><span>데스크톱 `email 서버 사용자 메시지` 명령과 EMAIL Complex PDU가 이 서비스를 검사합니다.</span></div>
               <div className="compact-row"><span>admin@lab.local / user@lab.local</span><small>가상 메일박스</small></div>
+              {emailLogs.length === 0 ? <p className="empty-state">수신된 EMAIL 메시지가 없습니다.</p> : emailLogs.slice(-8).reverse().map((log) => (
+                <div className="diagnostic-row info" key={log.id}>
+                  <strong>{new Date(log.createdAt).toLocaleTimeString()}</strong>
+                  <span>{log.message}</span>
+                </div>
+              ))}
             </div>
           )}
           {servicePane === "tftp" && (
