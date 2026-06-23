@@ -43,6 +43,7 @@
 - Updated README implemented surface summary for service exports, Desktop aliases, and CLI filters.
 - Added CLI `show ip route local` filtering for local `/32` routes.
 - Added CLI `show ip route gateway <ip>` / `show ip route via <ip>` filtering for static next hops.
+- Added CLI `show services enabled|disabled` state filtering.
 
 ### TODO
 
