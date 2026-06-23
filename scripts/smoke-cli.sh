@@ -319,6 +319,9 @@ assert(ospfNeighbors.includes("Neighbor ID"), "show ip ospf neighbor must render
 assert(run("sh ip ospf").includes("1.1.1.1"), "show ip ospf must use configured router-id");
 const protocols = run("sh ip protocols");
 assert(protocols.includes("Passive Interface(s)") && protocols.includes("Non-passive Interface(s)") && protocols.includes("Default information originate always"), "show ip protocols must show passive defaults and default-information originate");
+const ospfProtocols = run("show ip protocols ospf");
+assert(ospfProtocols.includes("ospf") && !ospfProtocols.includes("eigrp"), "show ip protocols <protocol> must filter routing protocol output");
+assert(run("show ip protocols bgp").includes("not found"), "show ip protocols <protocol> must report missing protocols");
 const eigrpNeighbors = run("sh ip eigrp nei");
 assert(eigrpNeighbors.includes("EIGRP-IPv4 Neighbors"), "show ip eigrp neighbors must render IOS-style header");
 assert(run("sh ip eigrp").includes("2.2.2.2"), "show ip eigrp must use configured router-id");
