@@ -6,12 +6,14 @@ import { ProjectHome } from "./components/ProjectHome";
 import { createRoutedSampleProject } from "./data/sampleProject";
 import { createBlankProject, currentUser, deleteProject, importProject, loadProjects, logout, saveProject } from "./storage/repository";
 import type { NetworkProject, User } from "./types/network";
+import { createId } from "./utils/id";
 
 type AppRoute =
   | { name: "home" }
   | { name: "auth"; mode: "login" | "signup" }
   | { name: "projects" }
   | { name: "editor"; projectId: string };
+type SaveStatus = "saved" | "pending" | "saving" | "error";
 
 function readRoute(): AppRoute {
   const path = window.location.pathname.replace(/\/+$/, "") || "/";
@@ -31,6 +33,8 @@ export function App() {
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [homeError, setHomeError] = useState("");
   const [saveError, setSaveError] = useState("");
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
+  const [lastSavedAt, setLastSavedAt] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const saveSeq = useRef(0);
   const saveTimer = useRef<number | null>(null);
@@ -79,9 +83,12 @@ export function App() {
         if (route.name === "editor") {
           const selected = items.find((item) => item.id === route.projectId) ?? null;
           setProject(selected);
+          setSaveStatus("saved");
+          setLastSavedAt(selected ? new Date(selected.updatedAt).toLocaleTimeString() : "");
           setHomeError(selected ? "" : "프로젝트를 찾을 수 없습니다.");
         } else {
           setProject(null);
+          setSaveStatus("saved");
           setHomeError("");
         }
       })
@@ -102,10 +109,19 @@ export function App() {
 
   useEffect(() => {
     function flushBeforeUnload() {
-      if (pendingSave.current) void saveProject(pendingSave.current);
+      flushPendingSave();
+    }
+    function flushWhenHidden() {
+      if (document.visibilityState === "hidden") flushPendingSave();
     }
     window.addEventListener("beforeunload", flushBeforeUnload);
-    return () => window.removeEventListener("beforeunload", flushBeforeUnload);
+    window.addEventListener("pagehide", flushBeforeUnload);
+    document.addEventListener("visibilitychange", flushWhenHidden);
+    return () => {
+      window.removeEventListener("beforeunload", flushBeforeUnload);
+      window.removeEventListener("pagehide", flushBeforeUnload);
+      document.removeEventListener("visibilitychange", flushWhenHidden);
+    };
   }, []);
 
   async function createProject() {
@@ -117,6 +133,8 @@ export function App() {
     try {
       const saved = await saveProject(createBlankProject(user.id));
       setProject(saved);
+      setSaveStatus("saved");
+      setLastSavedAt(new Date(saved.updatedAt).toLocaleTimeString());
       setRefreshKey((value) => value + 1);
       navigate(`/projects/${encodeURIComponent(saved.id)}`);
     } catch (error) {
@@ -133,6 +151,8 @@ export function App() {
     try {
       const saved = await saveProject(createRoutedSampleProject(user.id));
       setProject(saved);
+      setSaveStatus("saved");
+      setLastSavedAt(new Date(saved.updatedAt).toLocaleTimeString());
       setRefreshKey((value) => value + 1);
       navigate(`/projects/${encodeURIComponent(saved.id)}`);
     } catch (error) {
@@ -148,6 +168,31 @@ export function App() {
       setProjects((items) => items.filter((item) => item.id !== projectId));
     } catch (error) {
       setHomeError(error instanceof Error ? error.message : "프로젝트를 삭제하지 못했습니다.");
+      throw error;
+    }
+  }
+
+  async function duplicateProject(projectId: string) {
+    if (!user) {
+      navigate("/login");
+      return;
+    }
+    const source = projects.find((item) => item.id === projectId);
+    if (!source) {
+      setHomeError("복제할 프로젝트를 찾을 수 없습니다.");
+      return;
+    }
+    setHomeError("");
+    const now = new Date().toISOString();
+    try {
+      const saved = await saveProject(cloneProjectForDuplicate(source, user.id, copyProjectName(source.name, projects.map((item) => item.name)), now));
+      setProject(saved);
+      setSaveStatus("saved");
+      setLastSavedAt(new Date(saved.updatedAt).toLocaleTimeString());
+      setRefreshKey((value) => value + 1);
+      navigate(`/projects/${encodeURIComponent(saved.id)}`);
+    } catch (error) {
+      setHomeError(error instanceof Error ? error.message : "프로젝트를 복제하지 못했습니다.");
     }
   }
 
@@ -160,6 +205,8 @@ export function App() {
     try {
       const imported = await importProject(raw, user.id);
       setProject(imported);
+      setSaveStatus("saved");
+      setLastSavedAt(new Date(imported.updatedAt).toLocaleTimeString());
       setRefreshKey((value) => value + 1);
       navigate(`/projects/${encodeURIComponent(imported.id)}`);
     } catch (error) {
@@ -169,6 +216,7 @@ export function App() {
 
   function persistProject(next: NetworkProject) {
     setSaveError("");
+    setSaveStatus("pending");
     setProject(next);
     pendingSave.current = next;
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
@@ -183,12 +231,21 @@ export function App() {
   function runSave(next: NetworkProject) {
     const seq = saveSeq.current + 1;
     saveSeq.current = seq;
+    setSaveStatus("saving");
     void saveProject(next)
       .then((saved) => {
-        setSaveError("");
-        if (saveSeq.current === seq) setProject((current) => current && current.id === saved.id ? saved : current);
+        if (saveSeq.current === seq) {
+          setSaveError("");
+          setProject((current) => current && current.id === saved.id ? saved : current);
+          setSaveStatus("saved");
+          setLastSavedAt(new Date(saved.updatedAt).toLocaleTimeString());
+        }
       })
-      .catch((error) => setSaveError(error instanceof Error ? error.message : "프로젝트 저장에 실패했습니다."));
+      .catch((error) => {
+        if (saveSeq.current !== seq) return;
+        setSaveStatus("error");
+        setSaveError(error instanceof Error ? error.message : "프로젝트 저장에 실패했습니다.");
+      });
   }
 
   function flushPendingSave() {
@@ -203,6 +260,7 @@ export function App() {
 
   function saveProjectNow(next: NetworkProject) {
     setSaveError("");
+    setSaveStatus("saving");
     if (saveTimer.current) {
       window.clearTimeout(saveTimer.current);
       saveTimer.current = null;
@@ -213,6 +271,7 @@ export function App() {
   }
 
   function signOut() {
+    flushPendingSave();
     logout();
     setUser(null);
     setProject(null);
@@ -254,6 +313,7 @@ export function App() {
         }}
         onCreate={createProject}
         onCreateSample={createSampleProject}
+        onDuplicate={duplicateProject}
         onImport={importProjectFile}
         onDelete={removeProject}
         onLogout={signOut}
@@ -274,6 +334,7 @@ export function App() {
         }}
         onCreate={createProject}
         onCreateSample={createSampleProject}
+        onDuplicate={duplicateProject}
         onImport={importProjectFile}
         onDelete={removeProject}
         onLogout={signOut}
@@ -285,6 +346,8 @@ export function App() {
     <Editor
       project={project}
       saveError={saveError}
+      saveStatus={saveStatus}
+      lastSavedAt={lastSavedAt}
       onBack={() => {
         flushPendingSave();
         setProject(null);
@@ -296,4 +359,69 @@ export function App() {
       user={user}
     />
   );
+}
+
+function copyProjectName(name: string, existingNames: string[]): string {
+  const base = `${name || "제목 없는 네트워크"} 복사본`.slice(0, 90);
+  const used = new Set(existingNames.map((item) => item.toLowerCase()));
+  let candidate = base;
+  let index = 2;
+  while (used.has(candidate.toLowerCase())) {
+    candidate = `${base} ${index}`.slice(0, 100);
+    index += 1;
+  }
+  return candidate;
+}
+
+function cloneProjectForDuplicate(source: NetworkProject, ownerId: string, name: string, now: string): NetworkProject {
+  const deviceIdMap = new Map<string, string>();
+  const portIdMap = new Map<string, string>();
+  const linkIdMap = new Map<string, string>();
+  const devices = source.devices.map((device) => {
+    const nextDeviceId = createId("dev");
+    deviceIdMap.set(device.id, nextDeviceId);
+    return {
+      ...structuredClone(device),
+      id: nextDeviceId,
+      ports: device.ports.map((port) => {
+        const nextPortId = createId("port");
+        portIdMap.set(`${device.id}:${port.id}`, nextPortId);
+        return { ...port, id: nextPortId, linkId: undefined };
+      }),
+      runtime: { arpTable: [], macTable: [], dhcpLeases: [], logs: [] }
+    };
+  });
+  const links = source.links.flatMap((link) => {
+    const endpointADeviceId = deviceIdMap.get(link.endpointA.deviceId);
+    const endpointBDeviceId = deviceIdMap.get(link.endpointB.deviceId);
+    const endpointAPortId = portIdMap.get(`${link.endpointA.deviceId}:${link.endpointA.portId}`);
+    const endpointBPortId = portIdMap.get(`${link.endpointB.deviceId}:${link.endpointB.portId}`);
+    if (!endpointADeviceId || !endpointBDeviceId || !endpointAPortId || !endpointBPortId) return [];
+    const nextLinkId = createId("link");
+    linkIdMap.set(link.id, nextLinkId);
+    return [{
+      ...link,
+      id: nextLinkId,
+      endpointA: { deviceId: endpointADeviceId, portId: endpointAPortId },
+      endpointB: { deviceId: endpointBDeviceId, portId: endpointBPortId },
+      createdAt: Date.now()
+    }];
+  });
+  return {
+    ...source,
+    id: createId("project"),
+    ownerId,
+    name,
+    devices: devices.map((device, index) => ({
+      ...device,
+      ports: device.ports.map((port, portIndex) => {
+        const oldPort = source.devices[index]?.ports[portIndex];
+        return { ...port, linkId: oldPort?.linkId ? linkIdMap.get(oldPort.linkId) : undefined };
+      })
+    })),
+    links,
+    simulationEvents: [],
+    createdAt: now,
+    updatedAt: now
+  };
 }

@@ -1,4 +1,5 @@
 import { defaultConfig } from "../data/deviceCatalog";
+import { isIpv4 } from "../engine/ip";
 import { recalc } from "../engine/topology";
 import { createId } from "../utils/id";
 import type { CableType, DeviceConfig, DeviceKind, LinkStatus, NetworkDevice, NetworkLink, NetworkPort, NetworkProject, PortKind, PortMode, RuntimeState, SimulationEvent } from "../types/network";
@@ -211,8 +212,10 @@ function normalizeConfig(config: DeviceConfig | undefined, hostname: string, kin
     dhcpPools: normalizeDhcpPools(config?.dhcpPools),
     dhcpExcludedRanges: normalizeDhcpExcludedRanges(config?.dhcpExcludedRanges),
     dnsRecords: normalizeDnsRecords(config?.dnsRecords, base.dnsRecords),
+    nameServers: normalizeNameServers(config?.nameServers),
     accessRules: normalizeAccessRules(config?.accessRules ?? legacy?.firewallRules),
     natRules: Array.isArray(config?.natRules) ? config.natRules : [],
+    stpRootPrimaryVlans: normalizeVlanList(config?.stpRootPrimaryVlans),
     localUsers: normalizeLocalUsers(config?.localUsers),
     lineConfigs: normalizeLineConfigs(config?.lineConfigs),
     routingProtocols: normalizeRoutingProtocols(config?.routingProtocols),
@@ -297,9 +300,19 @@ function normalizeDnsRecords(records: DeviceConfig["dnsRecords"] | undefined, fa
   });
 }
 
+function normalizeNameServers(servers: DeviceConfig["nameServers"] | undefined): DeviceConfig["nameServers"] {
+  if (!Array.isArray(servers)) return [];
+  return servers.filter(isIpv4).filter((server, index, list) => list.indexOf(server) === index);
+}
+
+function normalizeVlanList(vlans: number[] | undefined): number[] {
+  if (!Array.isArray(vlans)) return [];
+  return vlans.filter((vlan) => Number.isInteger(vlan) && vlan >= 1 && vlan <= 4094).filter((vlan, index, list) => list.indexOf(vlan) === index);
+}
+
 function normalizeAccessRules(rules: DeviceConfig["accessRules"] | Array<{ id?: string; action?: string; protocol?: string; source?: string; destination?: string; listId?: string }> | undefined): DeviceConfig["accessRules"] {
   if (!Array.isArray(rules)) return [];
-  return rules.map((rule) => {
+  return rules.map((rule): DeviceConfig["accessRules"][number] => {
     const legacy = rule as DeviceConfig["accessRules"][number] & { listId?: string };
     return {
       id: rule.id || createId("acl"),
@@ -356,7 +369,11 @@ function normalizeRoutingProtocols(protocols: DeviceConfig["routingProtocols"] |
       routerId: protocol.routerId,
       autoSummary: protocol.autoSummary === true,
       passiveInterfaces: Array.isArray(protocol.passiveInterfaces) ? protocol.passiveInterfaces.filter(Boolean) : [],
-      redistributeStatic: protocol.redistributeStatic === true
+      passiveInterfaceDefault: protocol.passiveInterfaceDefault === true,
+      passiveInterfaceExceptions: Array.isArray(protocol.passiveInterfaceExceptions) ? protocol.passiveInterfaceExceptions.filter(Boolean) : [],
+      redistributeStatic: protocol.redistributeStatic === true,
+      defaultInformationOriginate: protocol.defaultInformationOriginate === true,
+      defaultInformationAlways: protocol.defaultInformationAlways === true
     }));
 }
 
@@ -389,7 +406,8 @@ function normalizeRuntime(runtime: RuntimeState | undefined): RuntimeState {
     arpTable: Array.isArray(runtime?.arpTable) ? runtime.arpTable : Object.entries(legacy?.arp ?? {}).map(([ipAddress, macAddress]) => ({ ipAddress, macAddress, portName: "" })),
     macTable: Array.isArray(runtime?.macTable) ? runtime.macTable : Object.entries(legacy?.mac ?? {}).map(([macAddress, entry]) => ({ vlan: entry.vlan ?? 1, macAddress, portName: entry.portId ?? "", type: "dynamic" as const })),
     dhcpLeases: Array.isArray(runtime?.dhcpLeases) ? runtime.dhcpLeases : Object.entries(legacyDhcpLeases).map(([deviceId, ipAddress]) => ({ ipAddress, macAddress: "", deviceId, expiresAt: Date.now() + 86_400_000 })),
-    logs: Array.isArray(runtime?.logs) ? runtime.logs : []
+    logs: Array.isArray(runtime?.logs) ? runtime.logs : [],
+    clock: typeof runtime?.clock === "string" ? runtime.clock : undefined
   };
 }
 

@@ -1,6 +1,6 @@
-import { ipInSubnet, ipToNumber, isIpv4 } from "./ip";
+import { ipInSubnet, ipToNumber, isIpv4, isSubnetMask } from "./ip";
 import { endpoint } from "./topology";
-import type { NetworkDevice, NetworkPort, NetworkProject, SimulationEvent } from "../types/network";
+import type { DhcpPool, NetworkDevice, NetworkPort, NetworkProject, SimulationEvent } from "../types/network";
 
 export function fallbackPing(project: NetworkProject, sourceId: string, targetId: string): { project: NetworkProject; success: boolean; message: string } {
   const source = project.devices.find((device) => device.id === sourceId && device.powerOn);
@@ -32,24 +32,27 @@ export function fallbackPing(project: NetworkProject, sourceId: string, targetId
 export function requestDhcp(project: NetworkProject, clientId: string): { project: NetworkProject; message: string } {
   const client = project.devices.find((device) => device.id === clientId);
   const clientPort = client?.ports.find((port) => port.adminUp && port.kind !== "console");
-  const server = client && clientPort ? project.devices.find((device) =>
-    device.powerOn &&
-    device.config.services.dhcp &&
-    device.config.dhcpPools.some((pool) => pool.enabled) &&
-    hasLayer2Path(project, client.id, device.id, portVlan(clientPort)).reachable
-  ) : undefined;
-  const pool = server?.config.dhcpPools.find((item) => item.enabled);
+  const serverMatch = client && clientPort ? findDhcpServer(project, client, clientPort) : null;
+  const server = serverMatch?.server;
+  const pool = server && clientPort ? selectDhcpPool(server, serverMatch, clientPort) : undefined;
   if (!client || !clientPort || !server || !pool) return { project, message: "도달 가능한 DHCP 서버 또는 활성 풀이 없습니다." };
-  if (!isIpv4(pool.network) || !isIpv4(pool.mask) || !isIpv4(pool.startIp)) return { project, message: "DHCP 풀의 네트워크, 마스크 또는 시작 IP가 올바르지 않습니다." };
+  if (!isIpv4(pool.network) || !isSubnetMask(pool.mask) || ipToNumber(pool.mask) === 0 || !isIpv4(pool.startIp)) return { project, message: "DHCP 풀의 네트워크, 마스크 또는 시작 IP가 올바르지 않습니다." };
+  if (!ipInSubnet(pool.startIp, pool.network, pool.mask)) return { project, message: "DHCP 풀 시작 IP가 풀 네트워크 밖에 있습니다." };
   if (pool.defaultGateway && !ipInSubnet(pool.defaultGateway, pool.network, pool.mask)) return { project, message: "DHCP 풀 기본 게이트웨이가 풀 네트워크 밖에 있습니다." };
   const now = Date.now();
-  const existingLease = server.runtime.dhcpLeases.find((lease) => lease.deviceId === client.id && lease.expiresAt > now);
+  const existingLease = server.runtime.dhcpLeases.find((lease) =>
+    lease.deviceId === client.id &&
+    lease.expiresAt > now &&
+    ipInSubnet(lease.ipAddress, pool.network, pool.mask) &&
+    !isDhcpExcluded(server, lease.ipAddress)
+  );
   const active = new Set(server.runtime.dhcpLeases.filter((lease) => lease.deviceId !== client.id && lease.expiresAt > now).map((lease) => lease.ipAddress));
+  const reserved = new Set(project.devices.flatMap((device) => device.ports.map((port) => port.ipAddress).filter(Boolean)));
   let leasedIp = existingLease?.ipAddress ?? "";
   for (let index = 0; index < pool.maxLeases; index += 1) {
     if (leasedIp) break;
     const candidate = increment(pool.startIp, index);
-    if (!active.has(candidate) && !isDhcpExcluded(server, candidate)) {
+    if (ipInSubnet(candidate, pool.network, pool.mask) && !active.has(candidate) && !reserved.has(candidate) && !isDhcpExcluded(server, candidate)) {
       leasedIp = candidate;
       break;
     }
@@ -71,12 +74,53 @@ export function requestDhcp(project: NetworkProject, clientId: string): { projec
     simulationEvents: [
       ...project.simulationEvents,
       event(client.id, server.id, "DHCP", "클라이언트가 DHCPDISCOVER 브로드캐스트를 보냈습니다.", "forwarded", now, ["Layer 7", "Layer 3", "Layer 2"], { sourceId: client.id, targetId: server.id, packetId }),
+      ...(serverMatch?.relay ? [event(serverMatch.relay.id, server.id, "DHCP", `${serverMatch.relay.label}이(가) helper-address로 DHCP 요청을 릴레이했습니다.`, "forwarded" as const, now + 0.5, ["Layer 7", "Layer 3"], { sourceId: client.id, targetId: server.id, packetId })] : []),
       event(server.id, client.id, "DHCP", `${pool.name} 풀에서 DHCPOFFER ${leasedIp}을(를) 준비했습니다.`, "forwarded", now + 1, ["Layer 7", "Layer 3", "Layer 2"], { sourceId: client.id, targetId: server.id, packetId }),
       event(client.id, server.id, "DHCP", `${server.label}에 DHCPREQUEST ${leasedIp}을(를) 보냈습니다.`, "forwarded", now + 2, ["Layer 7", "Layer 3", "Layer 2"], { sourceId: client.id, targetId: server.id, packetId }),
       event(server.id, client.id, "DHCP", `DHCPACK으로 ${leasedIp}을(를) 할당했습니다.`, "delivered", now + 3, ["Layer 7", "Layer 3", "Layer 2"], { sourceId: client.id, targetId: server.id, packetId })
     ]
   };
   return { project: nextProject, message: `DHCP가 ${leasedIp}을(를) 할당했습니다.` };
+}
+
+function findDhcpServer(project: NetworkProject, client: NetworkDevice, clientPort: NetworkPort): { server: NetworkDevice; relay?: NetworkDevice; relayPort?: NetworkPort } | null {
+  const direct = project.devices.find((device) =>
+    device.powerOn &&
+    device.config.services.dhcp &&
+    device.config.dhcpPools.some((pool) => pool.enabled) &&
+    hasLayer2Path(project, client.id, device.id, portVlan(clientPort)).reachable
+  );
+  if (direct) return { server: direct };
+
+  for (const relay of project.devices.filter((device) => device.powerOn && isRoutingDevice(device))) {
+    for (const relayPort of relay.ports.filter((port) => port.adminUp && port.helperAddresses?.length)) {
+      const clientToRelay = hasLayer2Path(project, client.id, relay.id, portVlan(clientPort));
+      if (!clientToRelay.reachable) continue;
+      for (const helperAddress of relayPort.helperAddresses ?? []) {
+        const helper = findInterfaceByIp(project, helperAddress);
+        if (!helper?.device.config.services.dhcp || !helper.device.config.dhcpPools.some((pool) => pool.enabled)) continue;
+        const routed = routeFromDevice(project, relay, helper.device, helper.port, new Set([relay.id]), [relay.id]);
+        if (routed.reachable) return { server: helper.device, relay, relayPort };
+      }
+    }
+  }
+  return null;
+}
+
+function selectDhcpPool(server: NetworkDevice, serverMatch: { relay?: NetworkDevice; relayPort?: NetworkPort } | null, clientPort: NetworkPort): DhcpPool | undefined {
+  const pools = server.config.dhcpPools.filter((item) => item.enabled);
+  const clientSubnetPort = serverMatch?.relayPort ?? (clientPort.ipAddress ? clientPort : undefined);
+  if (clientSubnetPort?.ipAddress) {
+    const matchingClientSubnet = pools.find((pool) => ipInSubnet(clientSubnetPort.ipAddress, pool.network, pool.mask));
+    if (matchingClientSubnet) return matchingClientSubnet;
+  }
+  if (!serverMatch?.relayPort) {
+    const matchingServerSubnet = pools.find((pool) =>
+      server.ports.some((port) => port.adminUp && port.ipAddress && ipInSubnet(port.ipAddress, pool.network, pool.mask))
+    );
+    if (matchingServerSubnet) return matchingServerSubnet;
+  }
+  return pools[0];
 }
 
 interface RouteResult {

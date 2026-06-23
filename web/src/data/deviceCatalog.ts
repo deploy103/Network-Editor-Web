@@ -107,7 +107,7 @@ export const deviceCatalog: DeviceModel[] = [
     kind: "server",
     model: "Server-PT",
     labelPrefix: "Server",
-    description: "HTTP, DHCP, DNS, TFTP 서비스를 제공하는 서버.",
+    description: "HTTP, DHCP, DNS, TFTP, SYSLOG 서비스를 제공하는 서버.",
     tabs: ["physical", "config", "desktop", "services"],
     ports: [{ name: "FastEthernet0", kind: "fast-ethernet", mode: "access", vlan: 1, ipCapable: true }],
     modules: []
@@ -233,7 +233,11 @@ export function createPort(template: PortTemplate, index: number, moduleMeta?: {
     accessGroupOut: "",
     natRole: undefined,
     moduleSlotId: moduleMeta?.slotId,
-    moduleId: moduleMeta?.moduleId
+    moduleId: moduleMeta?.moduleId,
+    duplex: "auto",
+    speed: "auto",
+    mtu: 1500,
+    bandwidth: undefined
   };
 }
 
@@ -254,8 +258,10 @@ export function defaultConfig(hostname: string, kind: DeviceKind): DeviceConfig 
     dhcpPools: [],
     dhcpExcludedRanges: [],
     dnsRecords: kind === "server" ? [{ id: createId("dns"), name: "www.lab.local", value: "192.168.1.10" }] : [],
+    nameServers: [],
     accessRules: [],
     natRules: [],
+    stpRootPrimaryVlans: [],
     localUsers: [],
     services: { http: kind === "server", dhcp: false, dns: kind === "server", tftp: false, syslog: false },
     wireless: { ssid: kind === "wireless" ? "Lab-Wireless" : "", auth: "open", key: "", channel: 6, range: 180 }

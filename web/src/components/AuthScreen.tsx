@@ -36,7 +36,14 @@ export function AuthScreen({
     setError("");
     setPending(true);
     try {
-      const user = mode === "login" ? await login(form.username, form.password) : await signup(form);
+      const normalizedForm = {
+        ...form,
+        name: form.name.trim(),
+        username: form.username.trim(),
+        email: form.email.trim(),
+        birthDate: form.birthDate.trim()
+      };
+      const user = mode === "login" ? await login(normalizedForm.username, normalizedForm.password) : await signup(normalizedForm);
       onAuthenticated(user);
     } catch (err) {
       setError(err instanceof Error ? err.message : "인증에 실패했습니다.");

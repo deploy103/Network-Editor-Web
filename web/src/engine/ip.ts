@@ -16,7 +16,7 @@ export function networkAddress(ip: string, mask: string): string {
 }
 
 export function ipInSubnet(ip: string, base: string, mask: string): boolean {
-  return isIpv4(ip) && isIpv4(base) && isIpv4(mask) && networkAddress(ip, mask) === networkAddress(base, mask);
+  return isIpv4(ip) && isIpv4(base) && isSubnetMask(mask) && networkAddress(ip, mask) === networkAddress(base, mask);
 }
 
 export function nextIp(ip: string, offset: number): string {
@@ -25,4 +25,10 @@ export function nextIp(ip: string, offset: number): string {
 
 export function maskToPrefix(mask: string): number {
   return ipToNumber(mask).toString(2).split("1").length - 1;
+}
+
+export function isSubnetMask(mask: string): boolean {
+  if (!isIpv4(mask)) return false;
+  const inverted = (~ipToNumber(mask)) >>> 0;
+  return (inverted & (inverted + 1)) === 0;
 }

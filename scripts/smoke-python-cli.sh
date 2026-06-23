@@ -8,6 +8,7 @@ python3 -m py_compile cli-engine-python/ios_engine.py cli-engine-python/server.p
 
 python3 - <<'PY'
 import sys
+import copy
 
 sys.path.insert(0, "cli-engine-python")
 from ios_engine import cli_completions, prompt, run_cli_command
@@ -48,12 +49,56 @@ def run(command):
     return result.get("output") or ""
 
 
+blank = copy.deepcopy(device)
+blank["id"] = "blank"
+blank["powerOn"] = False
+blank["config"]["startupConfig"] = []
+blank_boot = run_cli_command(blank, {"mode": "exec"}, "power on")
+assert_true("initial configuration dialog" in blank_boot["output"], "blank Python device boot must ask for initial configuration dialog")
+assert_true(blank_boot["session"].get("pendingAction") == "initial-config", "blank Python device boot must wait for setup answer")
+blank_boot = run_cli_command(blank_boot["device"], blank_boot["session"], "no")
+assert_true("Press RETURN" in blank_boot["output"] and not blank_boot["session"].get("pendingAction"), "setup no answer must continue to EXEC")
+
+auth_device = copy.deepcopy(device)
+auth_device["id"] = "auth"
+auth_session = {"mode": "exec"}
+
+
+def run_auth(command):
+    global auth_device, auth_session
+    result = run_cli_command(auth_device, auth_session, command)
+    auth_device = result["device"]
+    auth_session = result["session"]
+    return result.get("output") or ""
+
+
+run_auth("enable")
+run_auth("configure terminal")
+run_auth("username admin secret cisco")
+run_auth("line console 0")
+run_auth("login local")
+run_auth("exit")
+run_auth("end")
+run_auth("write memory")
+run_auth("reload")
+auth_boot = run_auth("")
+assert_true("User Access Verification" in auth_boot and auth_session.get("pendingAction") == "console-username", "console login local must prompt for username after reload")
+assert_true("Password" in run_auth("admin"), "console login local must prompt for password after username")
+assert_true("Login invalid" in run_auth("wrong") and auth_session.get("pendingAction") == "console-username", "wrong console local password must restart login")
+run_auth("admin")
+run_auth("cisco")
+assert_true(not auth_session.get("pendingAction") and prompt(auth_device, auth_session).endswith(">"), "valid console local login must enter user EXEC")
+
 assert_true(session["mode"] == "exec", "initial mode must be exec")
 assert_true(prompt(device, session).endswith(">"), "Python prompt must render exec mode")
 assert_true("privileged EXEC" in run("conf t"), "configure terminal from exec must require enable")
 run("enable")
 assert_true(session["mode"] == "privileged", "enable must enter privileged mode")
 assert_true("show ip route" in cli_completions(device, session, "sh ip r"), "Python completions must expand abbreviated show route")
+assert_true("debugging is on" in run("debug ip icmp"), "Python debug ip icmp must enable session debug")
+assert_true("ip icmp" in run("show debugging"), "Python show debugging must list enabled flags")
+assert_true("turned off" in run("undebug all"), "Python undebug all must clear debug flags")
+assert_true("No debugging" in run("show debugging"), "Python show debugging must report empty debug state")
 assert_true(run("conf t").startswith("Enter configuration"), "conf t must enter global config")
 assert_true(session["mode"] == "global", "configure terminal must set global mode")
 run("enable secret cisco")
@@ -107,16 +152,35 @@ run("no passive-interface vlan 1")
 run("default-information originate always")
 run("end")
 run("clock set 12:34:56 Jun 19 2026")
+run("terminal length 0")
+run("terminal width 120")
+run("terminal no monitor")
+terminal = run("show terminal")
+assert_true("Length: 0 lines, Width: 120 columns" in terminal and "Monitor logging: disabled" in terminal, "terminal settings must affect show terminal")
 
+tech = run("show tech-support")
+assert_true("show running-config" in tech and "show ip route" in tech, "show tech-support must include core diagnostic sections")
+assert_true("initial configuration dialog" in run("setup"), "setup must open the initial configuration dialog")
+assert_true(session.get("pendingAction") == "initial-config", "setup must wait for initial configuration answer")
+run("no")
+run("enable")
+run("cisco")
+running_header = run("show running-config")
+assert_true("Building configuration" in running_header and "Current configuration" in running_header and "end" in running_header, "show running-config must render IOS-style wrapper")
 assert_true("192.168.10.0/24" in run("sh route"), "sh route must show connected route")
 assert_true("12:34:56 Jun 19 2026" in run("show clock"), "clock set must affect show clock")
 assert_true("192.168.10.254" in run("sh ip int vlan 1"), "show ip interface must show helper address")
 assert_true("Off" in run("sh interfaces switchport"), "show switchport must show nonegotiate off")
 physical = run("show interface fa0/1")
 assert_true("MTU 1600" in physical and "full" in physical and "100" in physical, "show interface must render physical link settings")
+physical_table = run("show interfaces status")
+assert_true("trunk" in physical_table and "full" in physical_table and "100" in physical_table, "show interfaces status must render physical link settings")
 assert_true("InOctets" in run("show interfaces counters"), "show interfaces counters must be supported")
-assert_true("python-ios" in run("show flash"), "show flash must render Python IOS image")
+assert_true("c2960-lanbasek9" in run("show flash"), "show flash must render the boot IOS image")
 assert_true("PID:" in run("show inventory"), "show inventory must render device identity")
+assert_true("BOOT path-list" in run("show boot"), "show boot must render boot image and startup state")
+assert_true("Chassis type" in run("show platform"), "show platform must render chassis details")
+assert_true("SYSTEM POWER" in run("show environment"), "show environment must render power diagnostics")
 assert_true("Line" in run("show users"), "show users must be supported")
 assert_true("ip helper-address 192.168.10.254" in run("show running-config | include helper-address"), "show run pipe include must filter output")
 assert_true("router ospf 1" in run("show running-config | section router"), "show run pipe section must include router section")
@@ -154,6 +218,8 @@ run("default interface fa0/2")
 run("end")
 assert_true("temp-reset-check" not in run("show running-config interface fa0/2"), "default interface must reset interface-specific config")
 run("wr")
+startup = run("show startup-config")
+assert_true("Using " in startup and "hostname Switch0" in startup, "show startup-config must render NVRAM usage and saved config")
 run("reload")
 run("")
 assert_true(session["mode"] == "exec", "reload confirm must return to exec")
@@ -177,7 +243,8 @@ assert_true("default-information originate always" in config, "default route ori
 assert_true("Power is off" in run("power off"), "power off must halt the device")
 assert_true(device["powerOn"] is False, "power off must update device state")
 assert_true("powered off" in run("show version"), "show version must reflect powered-off state")
-assert_true("Power restored" in run("power on"), "power on must boot the device")
+power_on_output = run("power on")
+assert_true("Power restored" in power_on_output and "Self decompressing the image" in power_on_output and "POST: CPU self-test passed" in power_on_output, "power on must boot the device with diagnostics")
 assert_true(device["powerOn"] is True, "power on must update device state")
 run("enable")
 run("cisco")

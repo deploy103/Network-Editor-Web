@@ -59,7 +59,22 @@ assert result["session"]["mode"] == "privileged"
 device = result["device"]
 session = result["session"]
 result = post("/run", {"device": device, "session": session, "command": "show version"})
-assert "Python IOS" in result["output"]
+assert "Software" in result["output"] and "Configuration register is 0x2102" in result["output"]
+result = post("/run", {"device": device, "session": session, "command": "clock set 12:34:56 Jun 19 2026"})
+device = result["device"]
+session = result["session"]
+result = post("/run", {"device": device, "session": session, "command": "show clock"})
+assert "12:34:56 Jun 19 2026" in result["output"]
+result = post("/run", {"device": device, "session": session, "command": "terminal length 0"})
+session = result["session"]
+result = post("/run", {"device": device, "session": session, "command": "terminal width 120"})
+session = result["session"]
+result = post("/run", {"device": device, "session": session, "command": "terminal no monitor"})
+session = result["session"]
+result = post("/run", {"device": device, "session": session, "command": "show terminal"})
+assert "Length: 0 lines, Width: 120 columns" in result["output"] and "Monitor logging: disabled" in result["output"]
+result = post("/run", {"device": device, "session": session, "command": "show tech-support"})
+assert "show running-config" in result["output"] and "show ip route" in result["output"]
 complete = post("/complete", {"device": device, "session": session, "input": "show int c"})
 assert "show interfaces counters" in complete["items"]
 prompt = post("/prompt", {"device": device, "session": session})
