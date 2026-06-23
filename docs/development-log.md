@@ -16,6 +16,7 @@
 - Added EMAIL service support across device services, CLI `service email`, Desktop `email`, Complex PDU, Simulation filtering, diagnostics, and smoke tests.
 - Added user-created packet protocol filtering, full OSI 1-7 PDU detail rows, and selected PDU CSV export.
 - Added link endpoint Config shortcuts, `show services <name>` filtering, URL-scheme-aware Desktop service targets, DHCP release shortcut, and safer DHCP release behavior.
+- Added HTTP, FTP, EMAIL, and TFTP service request logs in the Services tab.
 
 ### TODO
 
