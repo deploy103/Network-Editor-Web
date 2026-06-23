@@ -528,8 +528,8 @@ function expandShowCommand(rest: string[]): string {
   if (isAbbrev(first, "memory", 3)) return "show memory";
   if (isAbbrev(first, "controllers", 4)) return rest.length > 1 ? `show controllers ${rest.slice(1).join(" ")}` : "show controllers";
   if (isAbbrev(first, "spanning-tree", 2)) return ["show spanning-tree", ...rest.slice(1)].join(" ").trim();
-  if (isAbbrev(first, "users", 2)) return "show users";
-  if (isAbbrev(first, "line", 2)) return "show line";
+  if (isAbbrev(first, "users", 2)) return ["show users", ...rest.slice(1)].join(" ").trim();
+  if (isAbbrev(first, "line", 2)) return ["show line", ...rest.slice(1)].join(" ").trim();
   if (isAbbrev(first, "terminal", 4)) return "show terminal";
   if (isAbbrev(first, "tech-support", 4) || (first === "tech" && isAbbrev(second, "support", 3))) return "show tech-support";
   if (isAbbrev(first, "protocols", 3)) return "show protocols";
@@ -1904,8 +1904,8 @@ function showCommand(device: NetworkDevice, lower: string, session?: CliSession)
   if (lower === "show processes cpu") return "CPU utilization for five seconds: 1%/0%; one minute: 1%; five minutes: 1%";
   if (lower === "show memory") return "Processor Pool Total: 262144 Used: 98304 Free: 163840\nI/O Pool Total: 65536 Used: 8192 Free: 57344";
   if (lower === "show controllers" || lower.startsWith("show controllers ")) return controllersStatus(device, lower.slice("show controllers".length).trim());
-  if (lower === "show users") return ["Line       User       Host(s)              Idle       Location", "* 0 con 0  console    idle                 00:00:00   local"].join("\n");
-  if (lower === "show line") return lineStatus(device);
+  if (lower === "show users" || lower === "show users all") return showUsers(device, session);
+  if (lower === "show line" || lower.startsWith("show line ")) return lineStatus(device, lower.slice("show line".length).trim());
   if (lower === "show terminal") return [
     "Line 0, Location: local",
     `Length: ${session?.terminalLength ?? 24} lines, Width: ${session?.terminalWidth ?? 80} columns`,
@@ -2502,13 +2502,54 @@ function trunkStatus(device: NetworkDevice): string {
   ].join("\n");
 }
 
-function lineStatus(device: NetworkDevice): string {
-  const lines = lineConfigs(device);
+function showUsers(device: NetworkDevice, session?: CliSession): string {
+  const vtyLines = lineConfigs(device).filter((line) => line.kind === "vty");
   return [
-    "Tty Typ     Tx/Rx     A Modem  Roty AccO AccI  Uses Noise Overruns Int",
-    "0   CTY     -/-       - -      -    -    -     0    0     0/0      -",
-    ...lines.map((line, index) => `${String(index + 1).padEnd(3)} ${line.kind.toUpperCase().padEnd(7)} ${line.range.padEnd(9)} - ${line.loginLocal ? "login local" : line.login ? "login" : "nologin"} transport ${line.transportInput || "-"}`)
+    "Line       User       Host(s)              Idle       Location",
+    `* 0 con 0  ${(session?.authUsername ?? "console").padEnd(10)}idle                 00:00:00   local`,
+    ...vtyLines.map((line, index) => {
+      const user = line.loginLocal ? "<local>" : line.login ? "<password>" : "-";
+      return `  ${String(index + 1).padStart(1)} vty ${line.range.padEnd(5)}${user.padEnd(11)}not connected        -          transport ${line.transportInput || "none"}`;
+    })
   ].join("\n");
+}
+
+function lineStatus(device: NetworkDevice, filter = ""): string {
+  const configuredLines = lineConfigs(device);
+  const consoleLine = configuredLines.find((line) => line.kind === "console" && line.range === "0") ?? defaultLineConfig("console", "0");
+  const configs = [
+    consoleLine,
+    ...configuredLines.filter((line) => !(line.kind === consoleLine.kind && line.range === consoleLine.range))
+  ].filter((line, index, lines) => lines.findIndex((item) => item.kind === line.kind && item.range === line.range) === index)
+    .filter((line) => lineMatchesFilter(line, filter));
+  if (!configs.length) return "% No matching line configuration.";
+  return [
+    "Line(s)                 Type     Login        Transport       Exec-timeout   Logging",
+    ...configs.map((line) => [
+      lineDisplayName(line).padEnd(24),
+      (line.kind === "console" ? "CTY" : "VTY").padEnd(9),
+      lineAuthMode(line).padEnd(13),
+      (line.transportInput || "none").padEnd(16),
+      (line.execTimeout || "10 0").padEnd(14),
+      line.loggingSynchronous ? "synchronous" : "standard"
+    ].join(""))
+  ].join("\n");
+}
+
+function lineMatchesFilter(line: LineConfig, filter: string): boolean {
+  if (!filter) return true;
+  const normalized = filter.toLowerCase();
+  return line.kind.includes(normalized) || lineDisplayName(line).toLowerCase().includes(normalized) || line.range.toLowerCase().includes(normalized);
+}
+
+function lineDisplayName(line: LineConfig): string {
+  return `${line.kind} ${line.range}`;
+}
+
+function lineAuthMode(line: LineConfig): string {
+  if (line.loginLocal) return "login local";
+  if (line.login) return "login";
+  return "no login";
 }
 
 function protocolsStatus(device: NetworkDevice): string {
@@ -2614,16 +2655,26 @@ function ipProtocols(device: NetworkDevice): string {
 }
 
 function ipSshStatus(device: NetworkDevice): string {
-  const enabled = Boolean(device.config.domainName && device.config.rsaKeyGenerated && localUsers(device).length && lineConfigs(device).some((line) => line.loginLocal && (line.transportInput.includes("ssh") || line.transportInput.includes("all"))));
+  const users = localUsers(device);
+  const sshLines = lineConfigs(device).filter((line) => line.kind === "vty" && line.loginLocal && lineAllowsTransport(line, "ssh"));
+  const enabled = Boolean(device.config.domainName && device.config.rsaKeyGenerated && users.length && sshLines.length);
   return [
     `SSH ${enabled ? "Enabled" : "Disabled"} - version ${device.config.sshVersion ?? "2"}.0`,
-    `Authentication methods: ${localUsers(device).length ? "publickey,keyboard-interactive,password" : "none configured"}`,
+    `Authentication methods: ${users.length ? "publickey,keyboard-interactive,password" : "none configured"}`,
     `Authentication Publickey Algorithms: ssh-rsa`,
     `Hostkey Algorithms: ssh-rsa`,
     `Authentication timeout: 120 secs; Authentication retries: 3`,
     `Minimum expected Diffie Hellman key size: 1024 bits`,
-    `Domain name: ${device.config.domainName || "not set"}`
+    `Domain name: ${device.config.domainName || "not set"}`,
+    `RSA key: ${device.config.rsaKeyGenerated ? "generated" : "not generated"}`,
+    `Local usernames: ${users.length ? users.map((user) => `${user.name}(priv ${user.privilege ?? 1})`).join(", ") : "none"}`,
+    `VTY lines permitting SSH: ${sshLines.length ? sshLines.map(lineDisplayName).join(", ") : "none"}`
   ].join("\n");
+}
+
+function lineAllowsTransport(line: LineConfig, protocol: "ssh" | "telnet"): boolean {
+  const tokens = line.transportInput.toLowerCase().split(/[,\s]+/).filter(Boolean);
+  return tokens.includes("all") || tokens.includes(protocol);
 }
 
 function ospfProcessStatus(device: NetworkDevice): string {
