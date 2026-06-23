@@ -391,6 +391,9 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
       if (complexPduProtocol === "http" && status === "delivered") {
         nextProject = appendServerLog(nextProject, targetId, "info", `HTTP Complex PDU GET from ${source.label} repeat ${index + 1}/${repeatCount} TTL ${ttl}`);
       }
+      if (complexPduProtocol === "tftp" && status === "delivered") {
+        nextProject = appendServerLog(nextProject, targetId, "info", `TFTP Complex PDU read from ${source.label} repeat ${index + 1}/${repeatCount} TTL ${ttl}`);
+      }
       if (status === "delivered") delivered += 1;
       else dropped += 1;
       if (intervalMs > 0 && index < repeatCount - 1) await waitForInterval(intervalMs);
@@ -3933,7 +3936,8 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
       onProjectChange(nextProject, `${target.label} TFTP 서비스가 꺼져 있습니다.`);
       return `${target.label} TFTP 서비스가 꺼져 있습니다.`;
     }
-    onProjectChange(appendDesktopEvent(result.project, device.id, target.id, "TFTP", `${target.label} TFTP 디렉터리를 조회했습니다.`, "delivered"), "TFTP 조회 완료.");
+    const loggedProject = appendServerLog(result.project, target.id, "info", `TFTP directory read from ${device.label}`);
+    onProjectChange(appendDesktopEvent(loggedProject, device.id, target.id, "TFTP", `${target.label} TFTP 디렉터리를 조회했습니다.`, "delivered"), "TFTP 조회 완료.");
     return `TFTP ${target.label}\nDirectory of tftp:///${target.label}\n  running-config.txt\n  startup-config.txt\n  network-backup.ptweb`;
   }
   if (lower.startsWith("syslog ")) {
@@ -4071,6 +4075,7 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
   const httpLogs = device.runtime.logs.filter((log) => log.message.startsWith("HTTP"));
   const ftpLogs = device.runtime.logs.filter((log) => log.message.startsWith("FTP"));
   const emailLogs = device.runtime.logs.filter((log) => log.message.startsWith("EMAIL"));
+  const tftpLogs = device.runtime.logs.filter((log) => log.message.startsWith("TFTP"));
 
   function toggleService(service: ServiceName, enabled: boolean) {
     setServiceNotice(`${service.toUpperCase()} 서비스를 ${enabled ? "켰습니다" : "껐습니다"}.`);
@@ -4309,6 +4314,12 @@ function ServicesTab({ device, onUpdate }: { device: NetworkDevice; onUpdate: (d
             <div className="config-group">
               <header><strong>TFTP</strong><label className="toggle"><input checked={device.config.services.tftp} onChange={(event) => toggleService("tftp", event.target.checked)} type="checkbox" />서비스</label></header>
               <div className="diagnostic-row info"><strong>{device.config.services.tftp ? "TFTP 켜짐" : "TFTP 꺼짐"}</strong><span>데스크톱 `tftp 서버` 명령이 도달성과 서비스 상태를 검사하고 이벤트에 기록합니다.</span></div>
+              {tftpLogs.length === 0 ? <p className="empty-state">TFTP 요청 로그가 없습니다.</p> : tftpLogs.slice(-8).reverse().map((log) => (
+                <div className="diagnostic-row info" key={log.id}>
+                  <strong>{new Date(log.createdAt).toLocaleTimeString()}</strong>
+                  <span>{log.message}</span>
+                </div>
+              ))}
             </div>
           )}
           {servicePane === "syslog" && (
