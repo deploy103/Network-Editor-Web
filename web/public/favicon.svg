@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Network Editor Web">
+  <defs>
+    <linearGradient id="panel" x1="8" x2="56" y1="6" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#10243a"/>
+      <stop offset="1" stop-color="#0b5f58"/>
+    </linearGradient>
+    <linearGradient id="port" x1="17" x2="48" y1="15" y2="50" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7dd3fc"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="12" fill="url(#panel)"/>
+  <path d="M17 21h30a5 5 0 0 1 5 5v12a5 5 0 0 1-5 5H17a5 5 0 0 1-5-5V26a5 5 0 0 1 5-5Z" fill="#f8fafc"/>
+  <path d="M18 27h28v10H18z" fill="#1f2937"/>
+  <path d="M22 32h6m5 0h6m5 0h2" stroke="url(#port)" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="17" cy="47" r="5" fill="#34d399"/>
+  <circle cx="47" cy="47" r="5" fill="#7dd3fc"/>
+  <circle cx="32" cy="13" r="5" fill="#fde68a"/>
+  <path d="M22 45 29 36m13 9-7-9M32 18v8" fill="none" stroke="#dbeafe" stroke-width="3" stroke-linecap="round"/>
+  <path d="M13 53h38" stroke="#062b33" stroke-width="3" stroke-linecap="round" opacity=".45"/>
+</svg>

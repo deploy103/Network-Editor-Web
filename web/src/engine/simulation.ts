@@ -411,7 +411,41 @@ function append(project: NetworkProject, success: boolean, message: string, sour
 }
 
 function event(lastDeviceId: string, atDeviceId: string, type: string, info: string, status: SimulationEvent["status"], time = Date.now(), osiLayers = ["Layer 2", "Layer 3"], packet?: { sourceId: string; targetId: string; packetId?: string }): SimulationEvent {
-  return { id: `evt_${time}_${Math.random().toString(36).slice(2)}`, time, lastDeviceId, atDeviceId, sourceDeviceId: packet?.sourceId, targetDeviceId: packet?.targetId, packetId: packet?.packetId, type, info, status, osiLayers };
+  return { id: `evt_${time}_${Math.random().toString(36).slice(2)}`, time, lastDeviceId, atDeviceId, sourceDeviceId: packet?.sourceId, targetDeviceId: packet?.targetId, packetId: packet?.packetId, type, info, status, osiLayers, headers: pduHeaders(type, status, packet) };
+}
+
+function pduHeaders(type: string, status: SimulationEvent["status"], packet?: { sourceId: string; targetId: string; packetId?: string }): SimulationEvent["headers"] {
+  const protocol = type.toUpperCase();
+  const source = packet?.sourceId ?? "unknown";
+  const target = packet?.targetId ?? "unknown";
+  const base = [
+    { layer: "Layer 3", field: "Source", value: source },
+    { layer: "Layer 3", field: "Destination", value: target },
+    { layer: "Layer 3", field: "Disposition", value: status }
+  ];
+  if (protocol === "ARP" || protocol === "SWITCH" || protocol === "HUB") {
+    return [
+      { layer: "Layer 2", field: "Frame type", value: protocol },
+      { layer: "Layer 2", field: "Source", value: source },
+      { layer: "Layer 2", field: "Destination", value: target },
+      { layer: "Layer 2", field: "Action", value: status }
+    ];
+  }
+  if (protocol === "DHCP") {
+    return [
+      { layer: "Layer 2", field: "EtherType", value: "IPv4 / broadcast-capable" },
+      ...base,
+      { layer: "Layer 4", field: "Protocol", value: "UDP" },
+      { layer: "Layer 4", field: "Ports", value: "67/68" },
+      { layer: "Layer 7", field: "Application", value: "DHCP" }
+    ];
+  }
+  return [
+    { layer: "Layer 2", field: "EtherType", value: "IPv4" },
+    ...base,
+    { layer: "Layer 3", field: "Protocol", value: protocol === "ICMP" ? "ICMP" : "IP" },
+    { layer: "Layer 7", field: "Application", value: protocol }
+  ];
 }
 
 function increment(ip: string, offset: number): string {

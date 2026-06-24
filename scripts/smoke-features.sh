@@ -14,6 +14,7 @@ trap 'rm -rf "$TMPDIR"' EXIT
   --outDir "$TMPDIR" \
   "$ROOT/web/src/data/sampleProject.ts" \
   "$ROOT/web/src/data/deviceCatalog.ts" \
+  "$ROOT/web/src/engine/desktopTerminal.ts" \
   "$ROOT/web/src/engine/diagnostics.ts" \
   "$ROOT/web/src/engine/simulation.ts" \
   "$ROOT/web/src/engine/topology.ts" \
@@ -26,6 +27,7 @@ node - "$TMPDIR" <<'NODE'
 const path = require("path");
 const tmpdir = process.argv[2];
 const { createRoutedSampleProject } = require(path.join(tmpdir, "data/sampleProject.js"));
+const { desktopConsoleTargets } = require(path.join(tmpdir, "engine/desktopTerminal.js"));
 const { diagnoseProject } = require(path.join(tmpdir, "engine/diagnostics.js"));
 const { requestDhcp } = require(path.join(tmpdir, "engine/simulation.js"));
 const { normalizeProject } = require(path.join(tmpdir, "storage/normalizeProject.js"));
@@ -48,6 +50,8 @@ assert(server.config.services.ftp, "sample server FTP must be enabled");
 assert(server.config.services.email, "sample server EMAIL must be enabled");
 assert(server.config.services.tftp, "sample server TFTP must be enabled");
 assert(server.config.services.syslog, "sample server SYSLOG must be enabled");
+assert(project.activity && project.activity.requirements.some((requirement) => requirement.kind === "device-count" && requirement.target === 4), "sample project must include Activity Wizard requirements");
+assert(project.activity.requirements.some((requirement) => requirement.kind === "tdr-normal-count" && requirement.target === 3), "sample project must include Activity Wizard TDR requirements");
 assert(router.ports.some((port) => (port.helperAddresses || []).includes("10.10.10.10")), "router must include DHCP helper-address");
 assert((server.config.dhcpExcludedRanges || []).some((range) => range.startIp === "192.168.10.1" && range.endIp === "192.168.10.20"), "sample server must include DHCP excluded range");
 assert(!diagnoseProject(project).some((issue) => issue.title.includes("DHCP helper")), "routed sample must not report DHCP helper diagnostics");
@@ -56,6 +60,28 @@ assert(!diagnoseProject(project).some((issue) => issue.title.includes("서비스
 
 const normalized = normalizeProject({
   ...project,
+  notes: [{ id: "note_smoke", text: "Smoke note", position: { x: 42, y: 84 }, color: "green" }],
+  drawings: [
+    { id: "draw_smoke", kind: "ellipse", label: "Smoke zone", position: { x: 140, y: 180 }, width: 260, height: 120, color: "blue", strokeStyle: "dashed", fill: true },
+    { id: "draw_freehand_smoke", kind: "freehand", label: "Smoke freehand", position: { x: 220, y: 240 }, width: 180, height: 90, points: [{ x: 0, y: 20 }, { x: 70, y: 8 }, { x: 180, y: 82 }], color: "rose", strokeStyle: "solid", fill: false }
+  ],
+  simulationEvents: [{ id: "evt_header_smoke", time: Date.now(), lastDeviceId: pc.id, atDeviceId: server.id, sourceDeviceId: pc.id, targetDeviceId: server.id, packetId: "packet_header_smoke", type: "HTTP", info: "HTTP header smoke", status: "delivered", osiLayers: ["Layer 7", "Layer 4", "Layer 3"], headers: [{ layer: "Layer 4", field: "Ports", value: "80" }, { layer: "Layer 7", field: "Application", value: "HTTP" }] }],
+  activity: {
+    ...project.activity,
+    commandRules: [{ id: "act_cmd_smoke", label: "Hostname saved", deviceId: router.id, command: "hostname", points: 5 }],
+    commandSequences: [{ id: "act_seq_smoke", label: "Interface sequence", deviceId: router.id, commands: ["interface", "ip address"], points: 10 }],
+    commandOutputAssertions: [{ id: "act_out_smoke", label: "Show version register", deviceId: router.id, commands: ["show version"], expectedText: "Configuration register", points: 10 }],
+    interfaceExpectations: [{ id: "act_int_smoke", label: "PC IP", deviceId: pc.id, portId: pc.ports.find((port) => port.kind !== "console").id, ipAddress: "192.168.10.10", subnetMask: "255.255.255.0", mode: "access", vlan: 1, points: 5 }],
+    headerAssertions: [{ id: "act_hdr_smoke", label: "HTTP port", protocol: "HTTP", field: "Ports", value: "80", points: 5 }],
+    answerSnapshot: {
+      capturedAt: new Date().toISOString(),
+      devices: project.devices.map((device) => ({ id: device.id, label: device.label, kind: device.kind, model: device.model })),
+      links: project.links.map((link) => ({ id: link.id, type: link.type, endpointADeviceId: link.endpointA.deviceId, endpointBDeviceId: link.endpointB.deviceId })),
+      annotationCount: 2,
+      serviceDeviceIds: [server.id],
+      startupConfigDeviceIds: []
+    }
+  },
   devices: project.devices.map((device) => device.id === server.id
     ? { ...device, runtime: { ...device.runtime, logs: [{ id: "log_normalize", level: "info", message: "normalize syslog", createdAt: Date.now() }] } }
     : device)
@@ -66,6 +92,55 @@ assert(normalizedServer.config.services.ftp && normalizedServer.config.services.
 assert(normalizedServer.config.dhcpExcludedRanges.some((range) => range.startIp === "192.168.10.1"), "normalizeProject must preserve DHCP excluded ranges");
 assert(normalizedServer.runtime.logs.some((log) => log.message === "normalize syslog"), "normalizeProject must preserve runtime syslog logs");
 assert(normalizedRouter.ports.some((port) => (port.helperAddresses || []).includes("10.10.10.10")), "normalizeProject must preserve DHCP helper-addresses");
+assert(normalized.notes.some((note) => note.text === "Smoke note" && note.color === "green" && note.position.x === 42), "normalizeProject must preserve workspace notes");
+assert(normalized.drawings.some((drawing) => drawing.label === "Smoke zone" && drawing.kind === "ellipse" && drawing.color === "blue"), "normalizeProject must preserve workspace drawings");
+assert(normalized.drawings.some((drawing) => drawing.label === "Smoke freehand" && drawing.kind === "freehand" && drawing.points.length === 3 && drawing.fill === false), "normalizeProject must preserve freehand workspace drawings");
+assert(normalized.simulationEvents.some((event) => event.headers?.some((header) => header.field === "Ports" && header.value === "80")), "normalizeProject must preserve PDU header fields");
+assert(normalized.activity.requirements.some((requirement) => requirement.kind === "service-count" && requirement.points === 5), "normalizeProject must preserve Activity Wizard requirements");
+assert(normalized.activity.requirements.some((requirement) => requirement.kind === "tdr-normal-count" && requirement.target === 3), "normalizeProject must preserve Activity Wizard TDR requirements");
+assert(normalized.activity.answerSnapshot && normalized.activity.answerSnapshot.devices.length === project.devices.length && normalized.activity.answerSnapshot.serviceDeviceIds.includes(server.id), "normalizeProject must preserve Activity Wizard answer snapshots");
+assert(normalized.activity.commandRules.some((rule) => rule.deviceId === router.id && rule.command === "hostname"), "normalizeProject must preserve Activity Wizard command scoring rules");
+assert(normalized.activity.commandSequences.some((sequence) => sequence.deviceId === router.id && sequence.commands.length === 2), "normalizeProject must preserve Activity Wizard command sequence rules");
+assert(normalized.activity.commandOutputAssertions.some((assertion) => assertion.deviceId === router.id && assertion.expectedText === "Configuration register"), "normalizeProject must preserve Activity Wizard command output assertions");
+assert(normalized.activity.interfaceExpectations.some((expectation) => expectation.deviceId === pc.id && expectation.ipAddress === "192.168.10.10"), "normalizeProject must preserve Activity Wizard interface expectations");
+assert(normalized.activity.headerAssertions.some((assertion) => assertion.protocol === "HTTP" && assertion.field === "Ports"), "normalizeProject must preserve Activity Wizard header assertions");
+
+assert(desktopConsoleTargets(project, pc).length === 0, "Desktop Terminal must ignore data links without a console cable");
+const pcConsole = pc.ports.find((port) => port.kind === "console");
+const routerConsole = router.ports.find((port) => port.kind === "console");
+const pcDataPort = pc.ports.find((port) => port.kind !== "console");
+assert(pcConsole && routerConsole && pcDataPort, "sample devices must expose console and data ports for Terminal smoke");
+const consoleProject = {
+  ...project,
+  links: [
+    ...project.links,
+    {
+      id: "link_console_smoke",
+      type: "console",
+      endpointA: { deviceId: pc.id, portId: pcConsole.id },
+      endpointB: { deviceId: router.id, portId: routerConsole.id },
+      status: "up",
+      createdAt: Date.now()
+    }
+  ]
+};
+assert(desktopConsoleTargets(consoleProject, pc).some((target) => target.id === router.id), "Desktop Terminal must discover router console targets from a PC RS232 console cable");
+assert(desktopConsoleTargets(consoleProject, router).some((target) => target.id === pc.id), "Desktop Terminal console target discovery must work in both endpoint directions");
+const invalidConsoleProject = {
+  ...project,
+  links: [
+    ...project.links,
+    {
+      id: "link_bad_console_smoke",
+      type: "console",
+      endpointA: { deviceId: pc.id, portId: pcDataPort.id },
+      endpointB: { deviceId: router.id, portId: routerConsole.id },
+      status: "up",
+      createdAt: Date.now()
+    }
+  ]
+};
+assert(desktopConsoleTargets(invalidConsoleProject, pc).length === 0, "Desktop Terminal must require console-kind ports on both console cable endpoints");
 
 const jsonPreview = readImportPreview(`\uFEFF  ${JSON.stringify(project)}`, "sample.json");
 assert(jsonPreview.name === project.name && jsonPreview.devices === project.devices.length && jsonPreview.links === project.links.length, "JSON import preview must handle BOM and leading spaces");

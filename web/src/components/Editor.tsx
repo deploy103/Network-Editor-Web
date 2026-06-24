@@ -1,8 +1,9 @@
 import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Cable, CircleDot, CircleHelp, Copy, Cpu, Download, Edit3, FileJson, Info, Mail, Maximize2, Minimize2, Monitor, MousePointer2, Network, Plus, Power, Router, RotateCcw, Save, Server, Settings, Shield, Terminal, Trash2, Wifi, Wrench, X, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowLeft, Cable, CircleDot, CircleHelp, Copy, Cpu, Download, Edit3, FileJson, Info, Mail, Maximize2, Minimize2, Minus, Monitor, MousePointer2, Network, PenLine, Plus, Power, Router, RotateCcw, Save, Search, Server, Settings, Shield, Square, Terminal, Trash2, Wifi, Wrench, X, ZoomIn, ZoomOut } from "lucide-react";
 import { cableCatalog, canPortUseCable, createDevice, deviceCatalog, displayKind, getDeviceModel, getModuleSpec, installModule, removeModule } from "../data/deviceCatalog";
-import { bootBanner, bootDevice, initialConsoleSession, type CliSession } from "../engine/cli";
+import { bootBanner, bootDevice, initialCliSession, initialConsoleSession, runCliCommand, type CliSession } from "../engine/cli";
 import { cliEngine } from "../engine/cliEngine";
+import { desktopConsoleTargets } from "../engine/desktopTerminal";
 import { diagnoseProject, type NetworkIssueSeverity } from "../engine/diagnostics";
 import { ipInSubnet, ipToNumber, isIpv4, isSubnetMask, maskToPrefix, networkAddress } from "../engine/ip";
 import { downloadProject } from "../exporters/packetTracerExport";
@@ -10,7 +11,7 @@ import { requestDhcp } from "../engine/simulation";
 import { addLink, linkLabel, recalc, removeLink, validateConnection } from "../engine/topology";
 import { createId } from "../utils/id";
 import { engineLabel, simulatePing } from "../wasm/engine";
-import type { AccessRule, CableType, DeviceKind, DeviceTab, ModuleSpec, NatRule, NetworkDevice, NetworkLink, NetworkPort, NetworkProject, SimulationEvent, User } from "../types/network";
+import type { AccessRule, ActivityRequirementKind, CableType, DeviceKind, DeviceTab, ModuleSpec, NatRule, NetworkDevice, NetworkLink, NetworkPort, NetworkProject, SimulationEvent, User, WorkspaceDrawing, WorkspaceDrawingKind, WorkspaceNote } from "../types/network";
 
 const CANVAS_WIDTH = 2400;
 const CANVAS_HEIGHT = 1600;
@@ -25,6 +26,15 @@ const complexPduProtocols = [
   { value: "tftp", label: "TFTP Read" },
   { value: "syslog", label: "SYSLOG" }
 ] as const;
+const activityRequirementCatalog: Array<{ kind: ActivityRequirementKind; label: string; detail: string; defaultTarget: number; defaultPoints: number }> = [
+  { kind: "device-count", label: "장비 수", detail: "배치된 전체 장비 수", defaultTarget: 4, defaultPoints: 10 },
+  { kind: "link-count", label: "링크 수", detail: "생성된 전체 케이블/무선 링크 수", defaultTarget: 3, defaultPoints: 10 },
+  { kind: "annotation-count", label: "주석 수", detail: "메모와 도형 주석 수", defaultTarget: 2, defaultPoints: 5 },
+  { kind: "delivered-pdu-count", label: "전달 PDU 수", detail: "delivered 상태의 PDU 이벤트 수", defaultTarget: 1, defaultPoints: 10 },
+  { kind: "saved-config-count", label: "저장된 설정 수", detail: "startup-config가 있는 네트워크 장비 수", defaultTarget: 1, defaultPoints: 5 },
+  { kind: "service-count", label: "서비스 장비 수", detail: "하나 이상 서비스가 켜진 장비 수", defaultTarget: 1, defaultPoints: 5 },
+  { kind: "tdr-normal-count", label: "정상 TDR 링크", detail: "양 끝점이 정상으로 진단되는 구리 링크 수", defaultTarget: 1, defaultPoints: 5 }
+];
 
 type ComplexPduProtocol = typeof complexPduProtocols[number]["value"];
 type PacketMenuName = typeof packetMenuLabels[number];
@@ -32,17 +42,42 @@ type PacketMenuItem = { label: string; action: () => void; disabled?: boolean; d
 type WorkspaceMenuState = { x: number; y: number; canvasX: number; canvasY: number };
 type CanvasViewport = { x: number; y: number; width: number; height: number };
 type SaveStatus = "saved" | "pending" | "saving" | "error";
+type WorkspaceSearchResult = { id: string; kind: "device" | "link" | "note" | "drawing"; label: string; detail: string; point: { x: number; y: number } };
+type DrawingResizeHandle = "nw" | "ne" | "se" | "sw";
+type DrawingResizeDrag = {
+  id: string;
+  kind: WorkspaceDrawingKind;
+  handle: DrawingResizeHandle;
+  startX: number;
+  startY: number;
+  startPosition: { x: number; y: number };
+  startWidth: number;
+  startHeight: number;
+  moved: boolean;
+};
 
-function activateRowOnKeyboard(event: ReactKeyboardEvent<HTMLElement>, action: () => void) {
+function activateRowOnKeyboard(event: ReactKeyboardEvent<Element>, action: () => void) {
   if (event.key !== "Enter" && event.key !== " ") return;
   event.preventDefault();
   action();
+}
+
+function keyboardNudgeDelta(key: string, step: number): { x: number; y: number } | null {
+  if (key === "ArrowLeft") return { x: -step, y: 0 };
+  if (key === "ArrowRight") return { x: step, y: 0 };
+  if (key === "ArrowUp") return { x: 0, y: -step };
+  if (key === "ArrowDown") return { x: 0, y: step };
+  return null;
 }
 
 export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBack, onChange, onSave }: { project: NetworkProject; user: User; saveError: string; saveStatus: SaveStatus; lastSavedAt: string; onBack: () => void; onChange: (project: NetworkProject) => void; onSave: (project: NetworkProject) => void }) {
   const workspaceRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ id: string; offsetX: number; offsetY: number; startX: number; startY: number; moved: boolean } | null>(null);
+  const noteDragRef = useRef<{ id: string; offsetX: number; offsetY: number; startX: number; startY: number; moved: boolean } | null>(null);
+  const drawingDragRef = useRef<{ id: string; offsetX: number; offsetY: number; startX: number; startY: number; moved: boolean } | null>(null);
+  const drawingResizeRef = useRef<DrawingResizeDrag | null>(null);
+  const freehandDraftRef = useRef<{ pointerId: number; points: Array<{ x: number; y: number }> } | null>(null);
   const panRef = useRef<{ pointerId: number; startX: number; startY: number; scrollLeft: number; scrollTop: number; moved: boolean } | null>(null);
   const suppressClickRef = useRef(false);
   const suppressWorkspaceClickRef = useRef(false);
@@ -50,6 +85,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
   const [selectedCable, setSelectedCable] = useState<CableType | "">("");
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
   const [selectedLinkId, setSelectedLinkId] = useState<string>("");
+  const [selectedNoteId, setSelectedNoteId] = useState<string>("");
+  const [selectedDrawingId, setSelectedDrawingId] = useState<string>("");
   const [deviceWindowId, setDeviceWindowId] = useState<string>("");
   const [deviceWindowTab, setDeviceWindowTab] = useState<DeviceTab | undefined>();
   const [pendingDeviceId, setPendingDeviceId] = useState<string>("");
@@ -60,6 +97,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
   const [topMenu, setTopMenu] = useState<{ name: PacketMenuName; x: number; y: number } | null>(null);
   const [renameDraft, setRenameDraft] = useState<{ deviceId: string; value: string } | null>(null);
   const [message, setMessage] = useState("");
+  const [workspaceSearch, setWorkspaceSearch] = useState("");
   const [isPanning, setIsPanning] = useState(false);
   const [viewport, setViewport] = useState<CanvasViewport>({ x: 0, y: 0, width: 0, height: 0 });
   const [zoom, setZoom] = useState(1);
@@ -74,15 +112,21 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
   const [complexPduCount, setComplexPduCount] = useState(1);
   const [complexPduTtl, setComplexPduTtl] = useState(128);
   const [complexPduIntervalMs, setComplexPduIntervalMs] = useState(0);
+  const [noteMode, setNoteMode] = useState(false);
+  const [drawingMode, setDrawingMode] = useState<WorkspaceDrawingKind | "">("");
+  const [freehandPreview, setFreehandPreview] = useState<Array<{ x: number; y: number }>>([]);
   const [engineName, setEngineName] = useState("엔진 로딩 중");
   const [focusedEventId, setFocusedEventId] = useState("");
+  const [activityWindowOpen, setActivityWindowOpen] = useState(false);
   const deviceWindow = project.devices.find((device) => device.id === deviceWindowId) ?? null;
   const selectedDevice = project.devices.find((device) => device.id === selectedDeviceId) ?? null;
   const selectedLink = project.links.find((link) => link.id === selectedLinkId) ?? null;
+  const selectedDrawing = (project.drawings ?? []).find((drawing) => drawing.id === selectedDrawingId) ?? null;
   const pduSource = project.devices.find((device) => device.id === pduSourceId) ?? null;
   const complexPduSource = project.devices.find((device) => device.id === complexPduSourceId) ?? null;
   const selectedModelInfo = useMemo(() => selectedModel ? deviceCatalog.find((model) => model.id === selectedModel) ?? null : null, [selectedModel]);
   const focusedEvent = useMemo(() => project.simulationEvents.find((event) => event.id === focusedEventId) ?? null, [focusedEventId, project.simulationEvents]);
+  const workspaceSearchResults = useMemo(() => workspaceSearchResultsFor(project, workspaceSearch), [project, workspaceSearch]);
   const latestEvent = focusedEvent ?? project.simulationEvents.at(-1);
 
   useEffect(() => {
@@ -122,6 +166,12 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     if (selectedLinkId && !project.links.some((link) => link.id === selectedLinkId)) {
       setSelectedLinkId("");
     }
+    if (selectedNoteId && !(project.notes ?? []).some((note) => note.id === selectedNoteId)) {
+      setSelectedNoteId("");
+    }
+    if (selectedDrawingId && !(project.drawings ?? []).some((drawing) => drawing.id === selectedDrawingId)) {
+      setSelectedDrawingId("");
+    }
     if (pduSourceId && !project.devices.some((device) => device.id === pduSourceId)) {
       setPduSourceId("");
       setPduMode(false);
@@ -130,7 +180,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
       setComplexPduSourceId("");
       setComplexPduMode(false);
     }
-  }, [deviceWindowId, selectedDeviceId, selectedLinkId, pduSourceId, complexPduSourceId, project.devices, project.links]);
+  }, [deviceWindowId, selectedDeviceId, selectedLinkId, selectedNoteId, selectedDrawingId, pduSourceId, complexPduSourceId, project.devices, project.links, project.notes, project.drawings]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -151,15 +201,25 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
         setPduSourceId("");
         setComplexPduMode(false);
         setComplexPduSourceId("");
+        setNoteMode(false);
+        setDrawingMode("");
         setSelectedDeviceId("");
         setSelectedLinkId("");
+        setSelectedNoteId("");
+        setSelectedDrawingId("");
         setDeviceWindowId("");
         setDeviceWindowTab(undefined);
+        setActivityWindowOpen(false);
         setContextMenu(null);
         setLinkMenu(null);
         setWorkspaceMenu(null);
         setTopMenu(null);
         setMessage("선택을 해제했습니다.");
+      }
+      const nudgeDelta = keyboardNudgeDelta(event.key, event.shiftKey ? 10 : 1);
+      if (nudgeDelta && nudgeSelected(nudgeDelta.x, nudgeDelta.y)) {
+        event.preventDefault();
+        return;
       }
       if (event.key === "Delete" || event.key === "Backspace") {
         if (pduMode) {
@@ -172,7 +232,13 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
           setMessage("삭제하기 전에 Escape 또는 선택 도구로 Complex PDU를 취소하세요.");
           return;
         }
-        if (selectedDeviceId) {
+        if (selectedNoteId) {
+          event.preventDefault();
+          deleteWorkspaceNote(selectedNoteId);
+        } else if (selectedDrawingId) {
+          event.preventDefault();
+          deleteWorkspaceDrawing(selectedDrawingId);
+        } else if (selectedDeviceId) {
           event.preventDefault();
           deleteDevice(selectedDeviceId);
         } else if (selectedLinkId) {
@@ -186,12 +252,14 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedDeviceId, selectedLinkId, pduMode, complexPduMode, project, onSave]);
+  }, [selectedDeviceId, selectedLinkId, selectedNoteId, selectedDrawingId, pduMode, complexPduMode, selectedModel, selectedCable, noteMode, drawingMode, deviceWindowId, activityWindowOpen, connectionDraft, project, onSave, onChange]);
 
   function placeDevice(modelId: string, position?: { x: number; y: number }) {
     const next = createDevice(modelId, position ?? { x: 160 + project.devices.length * 28, y: 140 + project.devices.length * 22 }, project.devices);
     onChange({ ...project, devices: [...project.devices, next] });
     setSelectedDeviceId(next.id);
+    setSelectedNoteId("");
+    setSelectedDrawingId("");
     setSelectedModel("");
     setMessage(`${next.label} 장비를 배치했습니다.`);
   }
@@ -210,6 +278,18 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
       placeDevice(selectedModel, placementPosition(selectedModel, point));
       return;
     }
+    if (noteMode) {
+      addWorkspaceNote(canvasPoint(event));
+      return;
+    }
+    if (drawingMode) {
+      if (drawingMode === "freehand") {
+        setMessage("자유선은 작업공간에서 드래그해서 그립니다.");
+        return;
+      }
+      addWorkspaceDrawing(drawingMode, canvasPoint(event));
+      return;
+    }
     if (pendingDeviceId) {
       setPendingDeviceId("");
       setMessage("연결을 취소했습니다.");
@@ -225,6 +305,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     }
     setSelectedDeviceId("");
     setSelectedLinkId("");
+    setSelectedNoteId("");
+    setSelectedDrawingId("");
   }
 
   function dropDevice(event: React.DragEvent<HTMLElement>) {
@@ -239,6 +321,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
   async function clickDevice(device: NetworkDevice) {
     closeFloatingMenus();
     setSelectedLinkId("");
+    setSelectedNoteId("");
+    setSelectedDrawingId("");
     if (pduMode) {
       if (!pduSourceId) {
         setPduSourceId(device.id);
@@ -305,6 +389,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
   function openDeviceWindow(deviceId: string, tab?: DeviceTab) {
     setSelectedDeviceId(deviceId);
     setSelectedLinkId("");
+    setSelectedNoteId("");
+    setSelectedDrawingId("");
     setDeviceWindowId(deviceId);
     setDeviceWindowTab(tab);
     closeFloatingMenus();
@@ -460,6 +546,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     onChange(recalc({ ...project, devices: [...project.devices, next] }));
     setSelectedDeviceId(next.id);
     setSelectedLinkId("");
+    setSelectedNoteId("");
+    setSelectedDrawingId("");
     setDeviceWindowId("");
     setDeviceWindowTab(undefined);
     setMessage(`${device.label} 장비를 ${next.label}(으)로 설정 포함 복제했습니다.`);
@@ -474,12 +562,16 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setConnectionDraft(null);
     setSelectedDeviceId(deviceId);
     setSelectedLinkId("");
+    setSelectedNoteId("");
+    setSelectedDrawingId("");
     setDeviceWindowId("");
     setDeviceWindowTab(undefined);
     setPduMode(true);
     setPduSourceId(deviceId);
     setComplexPduMode(false);
     setComplexPduSourceId("");
+    setNoteMode(false);
+    setDrawingMode("");
     setMessage(`Simple PDU 출발지: ${device.label}. 목적지 장비를 선택하세요.`);
   }
 
@@ -492,12 +584,16 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setConnectionDraft(null);
     setSelectedDeviceId(deviceId);
     setSelectedLinkId("");
+    setSelectedNoteId("");
+    setSelectedDrawingId("");
     setDeviceWindowId("");
     setDeviceWindowTab(undefined);
     setComplexPduMode(true);
     setComplexPduSourceId(deviceId);
     setPduMode(false);
     setPduSourceId("");
+    setNoteMode(false);
+    setDrawingMode("");
     setMessage(`Complex PDU 출발지: ${device.label}. 프로토콜과 횟수를 확인하고 목적지 장비를 선택하세요.`);
   }
 
@@ -510,13 +606,316 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setConnectionDraft(null);
     setSelectedDeviceId(deviceId);
     setSelectedLinkId("");
+    setSelectedNoteId("");
+    setSelectedDrawingId("");
     setDeviceWindowId("");
     setDeviceWindowTab(undefined);
     setPduMode(false);
     setPduSourceId("");
     setComplexPduMode(false);
     setComplexPduSourceId("");
+    setNoteMode(false);
+    setDrawingMode("");
     setMessage(`${device.label}에서 자동 케이블 연결을 시작했습니다. 연결할 장비를 선택하세요.`);
+  }
+
+  function startNoteTool() {
+    setSelectedModel("");
+    setSelectedCable("");
+    setPendingDeviceId("");
+    setConnectionDraft(null);
+    setPduMode(false);
+    setPduSourceId("");
+    setComplexPduMode(false);
+    setComplexPduSourceId("");
+    setSelectedDeviceId("");
+    setSelectedLinkId("");
+    setSelectedNoteId("");
+    setSelectedDrawingId("");
+    setDeviceWindowId("");
+    setDeviceWindowTab(undefined);
+    setNoteMode(true);
+    setDrawingMode("");
+    closeFloatingMenus();
+    setMessage("메모를 놓을 위치를 선택하세요.");
+  }
+
+  function addWorkspaceNote(point: { x: number; y: number }) {
+    const text = promptWorkspaceNote("새 메모");
+    if (!text) {
+      setNoteMode(false);
+      setMessage("메모 추가를 취소했습니다.");
+      return;
+    }
+    const note: WorkspaceNote = {
+      id: createId("note"),
+      text,
+      position: notePlacementPosition(point),
+      color: "yellow"
+    };
+    onChange({ ...project, notes: [...(project.notes ?? []), note] });
+    setSelectedNoteId(note.id);
+    setSelectedDrawingId("");
+    setSelectedDeviceId("");
+    setSelectedLinkId("");
+    setNoteMode(false);
+    setMessage("작업공간 메모를 추가했습니다.");
+  }
+
+  function addWorkspaceNoteFromMenu(point: { x: number; y: number }) {
+    addWorkspaceNote(point);
+    setWorkspaceMenu(null);
+  }
+
+  function editWorkspaceNote(noteId: string) {
+    const note = (project.notes ?? []).find((item) => item.id === noteId);
+    if (!note) return;
+    const text = promptWorkspaceNote("메모 수정", note.text);
+    if (text === null) return;
+    if (!text) {
+      deleteWorkspaceNote(noteId);
+      return;
+    }
+    onChange({ ...project, notes: (project.notes ?? []).map((item) => item.id === noteId ? { ...item, text } : item) });
+    setSelectedNoteId(noteId);
+    setMessage("메모를 수정했습니다.");
+  }
+
+  function cycleWorkspaceNoteColor(noteId: string) {
+    onChange({
+      ...project,
+      notes: (project.notes ?? []).map((note) => note.id === noteId ? { ...note, color: nextWorkspaceNoteColor(note.color) } : note)
+    });
+    setSelectedNoteId(noteId);
+    setMessage("메모 색상을 변경했습니다.");
+  }
+
+  function deleteWorkspaceNote(noteId: string) {
+    const note = (project.notes ?? []).find((item) => item.id === noteId);
+    onChange({ ...project, notes: (project.notes ?? []).filter((item) => item.id !== noteId) });
+    if (selectedNoteId === noteId) setSelectedNoteId("");
+    setMessage(note ? "메모를 삭제했습니다." : "삭제할 메모가 없습니다.");
+  }
+
+  function startDrawingTool(kind: WorkspaceDrawingKind) {
+    setSelectedModel("");
+    setSelectedCable("");
+    setPendingDeviceId("");
+    setConnectionDraft(null);
+    setPduMode(false);
+    setPduSourceId("");
+    setComplexPduMode(false);
+    setComplexPduSourceId("");
+    setNoteMode(false);
+    setDrawingMode(kind);
+    setSelectedDeviceId("");
+    setSelectedLinkId("");
+    setSelectedNoteId("");
+    setSelectedDrawingId("");
+    setDeviceWindowId("");
+    setDeviceWindowTab(undefined);
+    setFreehandPreview([]);
+    closeFloatingMenus();
+    setMessage(kind === "freehand" ? "자유선을 그릴 작업공간에서 드래그하세요." : `${workspaceDrawingKindLabel(kind)} 도형을 놓을 위치를 선택하세요.`);
+  }
+
+  function addWorkspaceDrawing(kind: WorkspaceDrawingKind, point: { x: number; y: number }) {
+    const label = promptWorkspaceDrawingLabel(kind);
+    if (label === null) {
+      setDrawingMode("");
+      setMessage("도형 추가를 취소했습니다.");
+      return;
+    }
+    const placement = drawingPlacement(kind, point);
+    const drawing: WorkspaceDrawing = {
+      id: createId("draw"),
+      kind,
+      label,
+      ...placement,
+      points: kind === "freehand" ? defaultFreehandPoints(placement.width, placement.height) : undefined,
+      color: kind === "line" || kind === "freehand" ? "blue" : "amber",
+      strokeStyle: kind === "line" || kind === "freehand" ? "solid" : "dashed",
+      fill: kind !== "line" && kind !== "freehand"
+    };
+    onChange({ ...project, drawings: [...(project.drawings ?? []), drawing] });
+    setSelectedDrawingId(drawing.id);
+    setSelectedDeviceId("");
+    setSelectedLinkId("");
+    setSelectedNoteId("");
+    setDrawingMode("");
+    setMessage(`${workspaceDrawingKindLabel(kind)} 도형을 추가했습니다.`);
+  }
+
+  function addWorkspaceDrawingFromMenu(kind: WorkspaceDrawingKind, point: { x: number; y: number }) {
+    addWorkspaceDrawing(kind, point);
+    setWorkspaceMenu(null);
+  }
+
+  function editWorkspaceDrawingLabel(drawingId: string) {
+    const drawing = (project.drawings ?? []).find((item) => item.id === drawingId);
+    if (!drawing) return;
+    const label = promptWorkspaceDrawingLabel(drawing.kind, drawing.label);
+    if (label === null) return;
+    onChange({ ...project, drawings: (project.drawings ?? []).map((item) => item.id === drawingId ? { ...item, label } : item) });
+    setSelectedDrawingId(drawingId);
+    setMessage("도형 레이블을 수정했습니다.");
+  }
+
+  function cycleWorkspaceDrawingColor(drawingId: string) {
+    onChange({
+      ...project,
+      drawings: (project.drawings ?? []).map((drawing) => drawing.id === drawingId ? { ...drawing, color: nextWorkspaceDrawingColor(drawing.color) } : drawing)
+    });
+    setSelectedDrawingId(drawingId);
+    setMessage("도형 색상을 변경했습니다.");
+  }
+
+  function toggleWorkspaceDrawingStroke(drawingId: string) {
+    onChange({
+      ...project,
+      drawings: (project.drawings ?? []).map((drawing) => drawing.id === drawingId ? { ...drawing, strokeStyle: drawing.strokeStyle === "dashed" ? "solid" : "dashed" } : drawing)
+    });
+    setSelectedDrawingId(drawingId);
+    setMessage("도형 선 스타일을 변경했습니다.");
+  }
+
+  function resizeWorkspaceDrawing(drawingId: string, scale: number) {
+    onChange({
+      ...project,
+      drawings: (project.drawings ?? []).map((drawing) => {
+        if (drawing.id !== drawingId) return drawing;
+        const center = drawingCenter(drawing);
+        const minSize = drawingMinSize(drawing.kind);
+        const width = Math.max(minSize.width, Math.min(1200, Math.round(drawing.width * scale)));
+        const height = Math.max(minSize.height, Math.min(900, Math.round(drawing.height * scale)));
+        return { ...drawing, width, height, position: drawingPlacementPosition(center, { width, height }, true) };
+      })
+    });
+    setSelectedDrawingId(drawingId);
+    setMessage(scale >= 1 ? "도형 크기를 키웠습니다." : "도형 크기를 줄였습니다.");
+  }
+
+  function startDrawingResize(event: React.PointerEvent<SVGRectElement>, drawing: WorkspaceDrawing, handle: DrawingResizeHandle) {
+    if (selectedCable || selectedModel || pduMode || complexPduMode || noteMode || drawingMode || event.button !== 0) return;
+    event.stopPropagation();
+    event.preventDefault();
+    const point = canvasPoint(event);
+    drawingResizeRef.current = {
+      id: drawing.id,
+      kind: drawing.kind,
+      handle,
+      startX: point.x,
+      startY: point.y,
+      startPosition: drawing.position,
+      startWidth: drawing.width,
+      startHeight: drawing.height,
+      moved: false
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setSelectedDrawingId(drawing.id);
+    setSelectedDeviceId("");
+    setSelectedLinkId("");
+    setSelectedNoteId("");
+    closeFloatingMenus();
+  }
+
+  function moveDrawingResize(event: React.PointerEvent<Element>) {
+    const drag = drawingResizeRef.current;
+    if (!drag) return;
+    event.preventDefault();
+    const point = canvasPoint(event);
+    const dx = point.x - drag.startX;
+    const dy = point.y - drag.startY;
+    const moved = Math.hypot(dx, dy) > 3;
+    drag.moved = drag.moved || moved;
+    const minSize = drawingMinSize(drag.kind);
+    const canvasLeft = 16;
+    const canvasTop = 16;
+    const canvasRight = CANVAS_WIDTH - 16;
+    const canvasBottom = CANVAS_HEIGHT - 16;
+    let left = drag.startPosition.x;
+    let top = drag.startPosition.y;
+    let right = drag.startPosition.x + drag.startWidth;
+    let bottom = drag.startPosition.y + drag.startHeight;
+
+    if (drag.handle.includes("e")) right = Math.max(left + minSize.width, Math.min(canvasRight, right + dx));
+    if (drag.handle.includes("s")) bottom = Math.max(top + minSize.height, Math.min(canvasBottom, bottom + dy));
+    if (drag.handle.includes("w")) left = Math.min(right - minSize.width, Math.max(canvasLeft, left + dx));
+    if (drag.handle.includes("n")) top = Math.min(bottom - minSize.height, Math.max(canvasTop, top + dy));
+
+    const nextPosition = { x: Math.round(left), y: Math.round(top) };
+    const nextWidth = Math.round(right - left);
+    const nextHeight = Math.round(bottom - top);
+    onChange({
+      ...project,
+      drawings: (project.drawings ?? []).map((drawing) => drawing.id === drag.id ? { ...drawing, position: nextPosition, width: nextWidth, height: nextHeight } : drawing)
+    });
+  }
+
+  function endDrawingResize() {
+    if (drawingResizeRef.current?.moved) {
+      suppressClickRef.current = true;
+      setMessage("도형 크기를 조절했습니다.");
+    }
+    drawingResizeRef.current = null;
+  }
+
+  function startFreehandDrawing(event: React.PointerEvent<HTMLElement>) {
+    if (drawingMode !== "freehand" || selectedCable || selectedModel || pduMode || complexPduMode || noteMode || event.button !== 0) return;
+    event.stopPropagation();
+    event.preventDefault();
+    const point = canvasPoint(event);
+    freehandDraftRef.current = { pointerId: event.pointerId, points: [point] };
+    setFreehandPreview([point]);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    closeFloatingMenus();
+    setMessage("자유선을 그리고 있습니다.");
+  }
+
+  function moveFreehandDrawing(event: React.PointerEvent<HTMLElement>) {
+    const draft = freehandDraftRef.current;
+    if (!draft || draft.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const point = canvasPoint(event);
+    const last = draft.points.at(-1);
+    if (last && Math.hypot(point.x - last.x, point.y - last.y) < 2) return;
+    draft.points = [...draft.points, point].slice(-300);
+    setFreehandPreview(draft.points);
+  }
+
+  function endFreehandDrawing(event: React.PointerEvent<HTMLElement>) {
+    const draft = freehandDraftRef.current;
+    if (!draft || draft.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    freehandDraftRef.current = null;
+    setFreehandPreview([]);
+    suppressWorkspaceClickRef.current = true;
+    if (draft.points.length < 2) {
+      setDrawingMode("");
+      setMessage("자유선 추가를 취소했습니다.");
+      return;
+    }
+    const label = promptWorkspaceDrawingLabel("freehand");
+    if (label === null) {
+      setDrawingMode("");
+      setMessage("자유선 추가를 취소했습니다.");
+      return;
+    }
+    const drawing = freehandDrawingFromPoints(draft.points, label);
+    onChange({ ...project, drawings: [...(project.drawings ?? []), drawing] });
+    setSelectedDrawingId(drawing.id);
+    setSelectedDeviceId("");
+    setSelectedLinkId("");
+    setSelectedNoteId("");
+    setDrawingMode("");
+    setMessage("자유선을 추가했습니다.");
+  }
+
+  function deleteWorkspaceDrawing(drawingId: string) {
+    const drawing = (project.drawings ?? []).find((item) => item.id === drawingId);
+    onChange({ ...project, drawings: (project.drawings ?? []).filter((item) => item.id !== drawingId) });
+    if (selectedDrawingId === drawingId) setSelectedDrawingId("");
+    setMessage(drawing ? "도형을 삭제했습니다." : "삭제할 도형이 없습니다.");
   }
 
   function commitRenameDevice() {
@@ -721,10 +1120,35 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
       devices.forEach((device, index) => arranged.set(device.id, { x: Math.round(startX + index * gap), y: group.y }));
     }
     const nextDevices = project.devices.map((device) => ({ ...device, position: arranged.get(device.id) ?? device.position }));
-    onChange(recalc({
-      ...project,
-      devices: nextDevices
-    }));
+    applyArrangedDevices(nextDevices, "장비를 계층형 토폴로지로 자동 정렬했습니다.");
+  }
+
+  function autoArrangePhysicalWorkspace() {
+    if (project.devices.length === 0) {
+      setMessage("정렬할 장비가 없습니다.");
+      return;
+    }
+    const rackKinds: DeviceKind[] = ["router", "firewall", "switch", "hub"];
+    const benchKinds: DeviceKind[] = ["pc", "server"];
+    const rackDevices = project.devices.filter((device) => rackKinds.includes(device.kind));
+    const benchDevices = project.devices.filter((device) => benchKinds.includes(device.kind));
+    const wirelessDevices = project.devices.filter((device) => device.kind === "wireless");
+    const groupedIds = new Set([...rackDevices, ...benchDevices, ...wirelessDevices].map((device) => device.id));
+    const remainingDevices = project.devices.filter((device) => !groupedIds.has(device.id));
+    const arranged = new Map<string, { x: number; y: number }>();
+
+    placeDevicesInGrid(rackDevices, arranged, { x: 206, y: 292, columns: 2, xGap: 142, yGap: 96 });
+    placeDevicesInGrid(benchDevices, arranged, { x: 648, y: 590, columns: 4, xGap: 170, yGap: 92 });
+    placeDevicesInGrid(wirelessDevices, arranged, { x: 1518, y: 330, columns: 3, xGap: 164, yGap: 124 });
+    placeDevicesInGrid(remainingDevices, arranged, { x: 660, y: 850, columns: 4, xGap: 170, yGap: 92 });
+
+    setWorkspaceMode("physical");
+    const nextDevices = project.devices.map((device) => ({ ...device, position: arranged.get(device.id) ?? device.position }));
+    applyArrangedDevices(nextDevices, "장비를 물리 작업공간 영역 기준으로 자동 정렬했습니다.");
+  }
+
+  function applyArrangedDevices(nextDevices: NetworkDevice[], nextMessage: string) {
+    onChange(recalc({ ...project, devices: nextDevices }));
     const workspace = workspaceRef.current;
     const bounds = topologyBounds(nextDevices);
     if (workspace && bounds) {
@@ -742,7 +1166,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
         updateViewport();
       });
     }
-    setMessage("장비를 계층형 토폴로지로 자동 정렬했습니다.");
+    setMessage(nextMessage);
   }
 
   function exportDiagnosticReport() {
@@ -794,7 +1218,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
       setMessage("내보낼 시뮬레이션 이벤트가 없습니다.");
       return;
     }
-    const headers = ["time", "type", "status", "source", "target", "lastDevice", "atDevice", "packetId", "info", "osiLayers"];
+    const headers = ["time", "type", "status", "source", "target", "lastDevice", "atDevice", "packetId", "info", "osiLayers", "headers"];
     const rows = events.map((event) => [
       new Date(event.time).toISOString(),
       event.type,
@@ -805,7 +1229,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
       eventDeviceLabel(project, event.atDeviceId),
       event.packetId ?? "",
       event.info,
-      event.osiLayers.join(" / ")
+      event.osiLayers.join(" / "),
+      pduHeaderRowsFor(project, event).map((header) => `${header.layer}:${header.field}=${header.value}`).join(" / ")
     ]);
     const lines = [headers, ...rows].map((row) => row.map(csvCell).join(","));
     const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
@@ -821,6 +1246,58 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
       URL.revokeObjectURL(url);
     }, 0);
     setMessage(`시뮬레이션 이벤트 CSV를 내보냈습니다 (${scope}, ${events.length}개).`);
+  }
+
+  function openActivityWizard() {
+    setActivityWindowOpen(true);
+    setMessage("Activity Wizard Check Results를 열었습니다.");
+  }
+
+  function exportActivityReport(assessmentOverride?: ActivityAssessment) {
+    const lines = activityReportLines(project, assessmentOverride);
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${project.name.replace(/[^a-zA-Z0-9_.-]/g, "_") || "network"}-activity-check.txt`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
+    setMessage("Activity Wizard Check Results를 내보냈습니다.");
+  }
+
+  function nudgeSelected(dx: number, dy: number): boolean {
+    if (selectedCable || selectedModel || pduMode || complexPduMode || noteMode || drawingMode || deviceWindowId || activityWindowOpen || connectionDraft) return false;
+    if (selectedDeviceId) {
+      const device = project.devices.find((item) => item.id === selectedDeviceId);
+      if (!device) return false;
+      const size = nodeSize(device.kind);
+      const x = Math.max(16, Math.min(CANVAS_WIDTH - size.width - 16, device.position.x + dx));
+      const y = Math.max(16, Math.min(CANVAS_HEIGHT - size.height - 16, device.position.y + dy));
+      onChange(recalc({ ...project, devices: project.devices.map((item) => item.id === selectedDeviceId ? { ...item, position: { x, y } } : item) }));
+      setMessage(`${device.label} 위치를 조정했습니다.`);
+      return true;
+    }
+    if (selectedNoteId) {
+      const note = (project.notes ?? []).find((item) => item.id === selectedNoteId);
+      if (!note) return false;
+      const position = notePlacementPosition({ x: note.position.x + dx, y: note.position.y + dy }, false);
+      onChange({ ...project, notes: (project.notes ?? []).map((item) => item.id === selectedNoteId ? { ...item, position } : item) });
+      setMessage("메모 위치를 조정했습니다.");
+      return true;
+    }
+    if (selectedDrawingId) {
+      const drawing = (project.drawings ?? []).find((item) => item.id === selectedDrawingId);
+      if (!drawing) return false;
+      const position = drawingPlacementPosition({ x: drawing.position.x + dx, y: drawing.position.y + dy }, drawing, false);
+      onChange({ ...project, drawings: (project.drawings ?? []).map((item) => item.id === selectedDrawingId ? { ...item, position } : item) });
+      setMessage("도형 위치를 조정했습니다.");
+      return true;
+    }
+    return false;
   }
 
   function updateViewport() {
@@ -877,6 +1354,26 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage("미니맵 위치로 이동했습니다.");
   }
 
+  function focusWorkspaceSearchResult(result: WorkspaceSearchResult) {
+    jumpToCanvasPoint(result.point);
+    closeFloatingMenus();
+    setSelectedDeviceId(result.kind === "device" ? result.id : "");
+    setSelectedLinkId(result.kind === "link" ? result.id : "");
+    setSelectedNoteId(result.kind === "note" ? result.id : "");
+    setSelectedDrawingId(result.kind === "drawing" ? result.id : "");
+    setSelectedModel("");
+    setSelectedCable("");
+    setPendingDeviceId("");
+    setConnectionDraft(null);
+    setPduMode(false);
+    setPduSourceId("");
+    setComplexPduMode(false);
+    setComplexPduSourceId("");
+    setNoteMode(false);
+    setDrawingMode("");
+    setMessage(`${result.label} 검색 결과로 이동했습니다.`);
+  }
+
   function fitTopologyToView() {
     const workspace = workspaceRef.current;
     const bounds = topologyBounds(project.devices);
@@ -902,7 +1399,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
   }
 
   function startDrag(event: React.PointerEvent<HTMLElement>, device: NetworkDevice) {
-    if (selectedCable || selectedModel || pduMode || complexPduMode || event.button !== 0) return;
+    if (selectedCable || selectedModel || pduMode || complexPduMode || noteMode || drawingMode || event.button !== 0) return;
     if ((event.target as HTMLElement).closest(".pdu-target")) return;
     event.stopPropagation();
     event.preventDefault();
@@ -918,6 +1415,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     event.currentTarget.setPointerCapture(event.pointerId);
     setSelectedDeviceId(device.id);
     setSelectedLinkId("");
+    setSelectedNoteId("");
+    setSelectedDrawingId("");
     closeFloatingMenus();
   }
 
@@ -946,8 +1445,97 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     dragRef.current = null;
   }
 
+  function startNoteDrag(event: React.PointerEvent<HTMLElement>, note: WorkspaceNote) {
+    if (selectedCable || selectedModel || pduMode || complexPduMode || noteMode || drawingMode || event.button !== 0) return;
+    if ((event.target as HTMLElement).closest("button")) return;
+    event.stopPropagation();
+    event.preventDefault();
+    const point = canvasPoint(event);
+    noteDragRef.current = {
+      id: note.id,
+      offsetX: point.x - note.position.x,
+      offsetY: point.y - note.position.y,
+      startX: point.x,
+      startY: point.y,
+      moved: false
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setSelectedNoteId(note.id);
+    setSelectedDrawingId("");
+    setSelectedDeviceId("");
+    setSelectedLinkId("");
+    closeFloatingMenus();
+  }
+
+  function moveNoteDrag(event: React.PointerEvent<HTMLElement>) {
+    const drag = noteDragRef.current;
+    if (!drag) return;
+    event.preventDefault();
+    const point = canvasPoint(event);
+    const moved = Math.hypot(point.x - drag.startX, point.y - drag.startY) > 3;
+    drag.moved = drag.moved || moved;
+    const position = notePlacementPosition({ x: point.x - drag.offsetX, y: point.y - drag.offsetY }, false);
+    onChange({
+      ...project,
+      notes: (project.notes ?? []).map((note) => note.id === drag.id ? { ...note, position } : note)
+    });
+  }
+
+  function endNoteDrag() {
+    if (noteDragRef.current?.moved) {
+      suppressClickRef.current = true;
+      setMessage("메모를 이동했습니다.");
+    }
+    noteDragRef.current = null;
+  }
+
+  function startDrawingDrag(event: React.PointerEvent<SVGElement>, drawing: WorkspaceDrawing) {
+    if (selectedCable || selectedModel || pduMode || complexPduMode || noteMode || drawingMode || event.button !== 0) return;
+    event.stopPropagation();
+    event.preventDefault();
+    const point = canvasPoint(event);
+    drawingDragRef.current = {
+      id: drawing.id,
+      offsetX: point.x - drawing.position.x,
+      offsetY: point.y - drawing.position.y,
+      startX: point.x,
+      startY: point.y,
+      moved: false
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setSelectedDrawingId(drawing.id);
+    setSelectedDeviceId("");
+    setSelectedLinkId("");
+    setSelectedNoteId("");
+    closeFloatingMenus();
+  }
+
+  function moveDrawingDrag(event: React.PointerEvent<Element>) {
+    const drag = drawingDragRef.current;
+    if (!drag) return;
+    event.preventDefault();
+    const point = canvasPoint(event);
+    const moved = Math.hypot(point.x - drag.startX, point.y - drag.startY) > 3;
+    drag.moved = drag.moved || moved;
+    const draggedDrawing = (project.drawings ?? []).find((drawing) => drawing.id === drag.id);
+    if (!draggedDrawing) return;
+    const position = drawingPlacementPosition({ x: point.x - drag.offsetX, y: point.y - drag.offsetY }, draggedDrawing, false);
+    onChange({
+      ...project,
+      drawings: (project.drawings ?? []).map((drawing) => drawing.id === drag.id ? { ...drawing, position } : drawing)
+    });
+  }
+
+  function endDrawingDrag() {
+    if (drawingDragRef.current?.moved) {
+      suppressClickRef.current = true;
+      setMessage("도형을 이동했습니다.");
+    }
+    drawingDragRef.current = null;
+  }
+
   function canStartWorkspacePan(event: React.PointerEvent<HTMLElement>): boolean {
-    if (event.button !== 0 || selectedModel || selectedCable || pduMode || complexPduMode) return false;
+    if (event.button !== 0 || selectedModel || selectedCable || pduMode || complexPduMode || noteMode || drawingMode) return false;
     const target = event.target as HTMLElement | SVGElement | null;
     if (!target || !(target instanceof Element)) return false;
     return !target.closest([
@@ -960,11 +1548,14 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
       ".selected-link-card",
       ".workspace-tabs",
       ".zoom-hud",
+      ".workspace-search",
       ".common-tools-bar",
       ".cable-hud",
       ".placement-hud",
       ".pdu-hud",
       ".selection-hud",
+      ".workspace-note",
+      ".workspace-drawing",
       ".board-guide",
       ".empty-canvas-starter",
       ".workspace-minimap"
@@ -1045,13 +1636,25 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setPduSourceId("");
     setComplexPduMode(false);
     setComplexPduSourceId("");
+    setNoteMode(false);
+    setDrawingMode("");
     setSelectedDeviceId("");
     setSelectedLinkId("");
+    setSelectedNoteId("");
+    setSelectedDrawingId("");
     closeFloatingMenus();
     setMessage("선택 모드입니다.");
   }
 
   function deleteSelected() {
+    if (selectedNoteId) {
+      deleteWorkspaceNote(selectedNoteId);
+      return;
+    }
+    if (selectedDrawingId) {
+      deleteWorkspaceDrawing(selectedDrawingId);
+      return;
+    }
     if (selectedDeviceId) {
       deleteDevice(selectedDeviceId);
       setMessage("장비를 삭제했습니다.");
@@ -1073,8 +1676,12 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setPduSourceId("");
     setComplexPduMode(false);
     setComplexPduSourceId("");
+    setNoteMode(false);
+    setDrawingMode("");
     setSelectedDeviceId("");
     setSelectedLinkId("");
+    setSelectedNoteId("");
+    setSelectedDrawingId("");
     setDeviceWindowId("");
     setDeviceWindowTab(undefined);
     closeFloatingMenus();
@@ -1090,8 +1697,12 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setComplexPduSourceId("");
     setPduMode(false);
     setPduSourceId("");
+    setNoteMode(false);
+    setDrawingMode("");
     setSelectedDeviceId("");
     setSelectedLinkId("");
+    setSelectedNoteId("");
+    setSelectedDrawingId("");
     setDeviceWindowId("");
     setDeviceWindowTab(undefined);
     closeFloatingMenus();
@@ -1120,7 +1731,12 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
       return [
         { label: "선택 모드", action: selectMode },
         { label: "선택 해제", action: selectMode },
-        { label: "선택 항목 삭제", action: deleteSelected, disabled: !selectedDeviceId && !selectedLinkId, danger: true }
+        { label: "메모 추가", action: startNoteTool },
+        { label: "사각형 영역 추가", action: () => startDrawingTool("rectangle") },
+        { label: "타원 영역 추가", action: () => startDrawingTool("ellipse") },
+        { label: "라인 추가", action: () => startDrawingTool("line") },
+        { label: "자유선 추가", action: () => startDrawingTool("freehand") },
+        { label: "선택 항목 삭제", action: deleteSelected, disabled: !selectedDeviceId && !selectedLinkId && !selectedNoteId && !selectedDrawingId, danger: true }
       ];
     }
     if (name === "옵션") {
@@ -1133,6 +1749,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
       return [
         { label: "논리 작업공간", action: () => setWorkspaceMode("logical"), disabled: workspaceMode === "logical" },
         { label: "물리 작업공간", action: () => setWorkspaceMode("physical"), disabled: workspaceMode === "physical" },
+        { label: "물리 기준 자동 정렬", action: autoArrangePhysicalWorkspace, disabled: project.devices.length === 0 },
         { label: "전체 보기", action: fitTopologyToView },
         { label: trayCollapsed ? "하단 도크 펼치기" : "하단 도크 접기", action: () => { setTrayCollapsed((value) => !value); setMessage(trayCollapsed ? "하단 도크를 펼쳤습니다." : "하단 도크를 접었습니다."); } },
         { label: "확대 100%", action: () => { setZoom(1); setMessage("확대를 100%로 초기화했습니다."); } },
@@ -1144,11 +1761,19 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
       return [
         { label: "프로젝트 복구", action: repairCurrentProject },
         { label: "진단 실행", action: () => setMessage(`프로젝트 수준 이슈 ${diagnoseProject(project).length}개`) },
+        { label: "Activity Wizard", action: openActivityWizard },
         { label: "진단 리포트 내보내기", action: exportDiagnosticReport },
+        { label: "Activity Check 내보내기", action: exportActivityReport },
         { label: "시뮬레이션 이벤트 CSV 내보내기", action: exportSimulationEvents, disabled: project.simulationEvents.length === 0 },
         { label: "Simple PDU 추가", action: startSimplePduTool, disabled: project.devices.length < 2 },
         { label: "Complex PDU 추가", action: startComplexPduTool, disabled: project.devices.length < 2 },
+        { label: "메모 추가", action: startNoteTool },
+        { label: "사각형 영역 추가", action: () => startDrawingTool("rectangle") },
+        { label: "타원 영역 추가", action: () => startDrawingTool("ellipse") },
+        { label: "라인 추가", action: () => startDrawingTool("line") },
+        { label: "자유선 추가", action: () => startDrawingTool("freehand") },
         { label: "장비 자동 정렬", action: autoArrangeTopology, disabled: project.devices.length === 0 },
+        { label: "물리 기준 자동 정렬", action: autoArrangePhysicalWorkspace, disabled: project.devices.length === 0 },
         { label: "선택 장비에서 전체 Ping", action: () => { void pingFromSelectedToAll(); }, disabled: !selectedDeviceId || project.devices.length < 2 },
         { label: "전체 장비 전원 켜기", action: () => setAllDevicePower(true), disabled: project.devices.length === 0 || project.devices.every((device) => device.powerOn) },
         { label: "전체 장비 전원 끄기", action: () => setAllDevicePower(false), disabled: project.devices.length === 0 || project.devices.every((device) => !device.powerOn) },
@@ -1158,6 +1783,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     }
     if (name === "확장") {
       return [
+        { label: "Activity Wizard", action: openActivityWizard },
         { label: "WASM 엔진 상태", action: () => setMessage(engineName) },
         { label: "PTWEB 호환성", action: () => setMessage(".ptweb은 이 앱의 자체 형식입니다. Cisco .pkt 바이너리 내보내기는 지원하지 않습니다.") }
       ];
@@ -1195,6 +1821,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
           <button className="icon-button" onClick={() => { onSave(project); setMessage("프로젝트 저장을 요청했습니다."); }} title="저장" type="button"><Save size={18} /></button>
           <button className="icon-button" onClick={() => downloadProject(project, "json")} title="JSON 내보내기" type="button"><FileJson size={18} /></button>
           <button className="icon-button" onClick={() => { downloadProject(project, "ptweb"); setMessage(".ptweb 프로젝트 파일을 내보냈습니다. Cisco Packet Tracer .pkt 바이너리 내보내기는 지원하지 않습니다."); }} title="PTWEB 프로젝트 내보내기 (Cisco .pkt 아님)" type="button"><Download size={18} /></button>
+          <button className="icon-button" onClick={openActivityWizard} title="Activity Wizard / Check Results" type="button"><CircleHelp size={18} /></button>
           <button className="icon-button" onClick={() => setZoom((value) => Math.min(1.9, value + 0.1))} title="확대" type="button"><ZoomIn size={18} /></button>
           <button className="icon-button" onClick={fitTopologyToView} title="전체 보기" type="button"><Maximize2 size={18} /></button>
           <button
@@ -1213,7 +1840,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
         </div>
       </header>
       <section
-        className={`workspace packet-workspace ${selectedModel ? "placing" : ""} ${selectedCable ? "cabling" : ""} ${complexPduMode ? "complex-pdu" : ""} ${isPanning ? "panning" : ""} ${workspaceMode}`}
+        className={`workspace packet-workspace ${selectedModel ? "placing" : ""} ${selectedCable ? "cabling" : ""} ${complexPduMode ? "complex-pdu" : ""} ${noteMode ? "note-mode" : ""} ${drawingMode ? "drawing-mode" : ""} ${isPanning ? "panning" : ""} ${workspaceMode}`}
         onClick={clickWorkspace}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -1242,12 +1869,31 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
           <button className="icon-button" onClick={() => setZoom((value) => Math.min(1.9, value + 0.1))} title="확대" type="button"><ZoomIn size={16} /></button>
           <button className="icon-button" onClick={fitTopologyToView} title="전체 보기" type="button"><Maximize2 size={16} /></button>
         </div>
+        <div className="workspace-search" onClick={(event) => { event.stopPropagation(); closeFloatingMenus(); }}>
+          <Search size={14} />
+          <input value={workspaceSearch} onChange={(event) => setWorkspaceSearch(event.target.value)} placeholder="장비, IP, 메모, 도형 검색" aria-label="작업공간 검색" />
+          {workspaceSearch.trim() && (
+            <div className="workspace-search-results">
+              {workspaceSearchResults.length > 0 ? workspaceSearchResults.map((result) => (
+                <button key={`${result.kind}:${result.id}`} onClick={() => focusWorkspaceSearchResult(result)} type="button">
+                  <strong>{result.label}</strong>
+                  <span>{result.detail}</span>
+                </button>
+              )) : <span className="workspace-search-empty">결과 없음</span>}
+            </div>
+          )}
+        </div>
         <div className="common-tools-bar" onClick={(event) => { event.stopPropagation(); closeFloatingMenus(); }}>
-          <button className={!selectedDeviceId && !selectedLinkId && !selectedCable && !selectedModel && !pduMode && !complexPduMode ? "active" : ""} onClick={selectMode} title="선택 도구" type="button"><MousePointer2 size={16} /></button>
-          <button disabled={pduMode || complexPduMode || !selectedDeviceId} onClick={() => selectedDeviceId && openDeviceWindow(selectedDeviceId)} title="선택 장비 검사" type="button"><Settings size={16} /></button>
-          <button disabled={pduMode || complexPduMode || (!selectedDeviceId && !selectedLinkId)} onClick={deleteSelected} title="선택 항목 삭제" type="button"><Trash2 size={16} /></button>
-          <button className={pduMode ? "active" : ""} disabled={project.devices.length < 2 || Boolean(selectedCable) || Boolean(selectedModel) || complexPduMode} onClick={startSimplePduTool} title="Simple PDU 추가" type="button"><Mail size={16} /></button>
-          <button className={complexPduMode ? "active" : ""} disabled={project.devices.length < 2 || Boolean(selectedCable) || Boolean(selectedModel) || pduMode} onClick={startComplexPduTool} title="Complex PDU 추가" type="button"><Plus size={16} /></button>
+          <button className={!selectedDeviceId && !selectedLinkId && !selectedNoteId && !selectedDrawingId && !selectedCable && !selectedModel && !pduMode && !complexPduMode && !noteMode && !drawingMode ? "active" : ""} onClick={selectMode} title="선택 도구" type="button"><MousePointer2 size={16} /></button>
+          <button disabled={pduMode || complexPduMode || Boolean(drawingMode) || !selectedDeviceId} onClick={() => selectedDeviceId && openDeviceWindow(selectedDeviceId)} title="선택 장비 검사" type="button"><Settings size={16} /></button>
+          <button disabled={pduMode || complexPduMode || noteMode || Boolean(drawingMode) || (!selectedDeviceId && !selectedLinkId && !selectedNoteId && !selectedDrawingId)} onClick={deleteSelected} title="선택 항목 삭제" type="button"><Trash2 size={16} /></button>
+          <button className={pduMode ? "active" : ""} disabled={project.devices.length < 2 || Boolean(selectedCable) || Boolean(selectedModel) || complexPduMode || noteMode || Boolean(drawingMode)} onClick={startSimplePduTool} title="Simple PDU 추가" type="button"><Mail size={16} /></button>
+          <button className={complexPduMode ? "active" : ""} disabled={project.devices.length < 2 || Boolean(selectedCable) || Boolean(selectedModel) || pduMode || noteMode || Boolean(drawingMode)} onClick={startComplexPduTool} title="Complex PDU 추가" type="button"><Plus size={16} /></button>
+          <button className={noteMode ? "active" : ""} disabled={Boolean(selectedCable) || Boolean(selectedModel) || pduMode || complexPduMode || Boolean(drawingMode)} onClick={startNoteTool} title="메모 추가" type="button"><Edit3 size={16} /></button>
+          <button className={drawingMode === "rectangle" ? "active" : ""} disabled={Boolean(selectedCable) || Boolean(selectedModel) || pduMode || complexPduMode || noteMode} onClick={() => startDrawingTool("rectangle")} title="사각형 영역 추가" type="button"><Square size={16} /></button>
+          <button className={drawingMode === "ellipse" ? "active" : ""} disabled={Boolean(selectedCable) || Boolean(selectedModel) || pduMode || complexPduMode || noteMode} onClick={() => startDrawingTool("ellipse")} title="타원 영역 추가" type="button"><CircleDot size={16} /></button>
+          <button className={drawingMode === "line" ? "active" : ""} disabled={Boolean(selectedCable) || Boolean(selectedModel) || pduMode || complexPduMode || noteMode} onClick={() => startDrawingTool("line")} title="라인 추가" type="button"><Minus size={16} /></button>
+          <button className={drawingMode === "freehand" ? "active" : ""} disabled={Boolean(selectedCable) || Boolean(selectedModel) || pduMode || complexPduMode || noteMode} onClick={() => startDrawingTool("freehand")} title="자유선 추가" type="button"><PenLine size={16} /></button>
         </div>
         {(selectedCable || pendingDeviceId) && (
           <div className="cable-hud">
@@ -1284,14 +1930,30 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
             <button className="hud-icon-button" onClick={(event) => { event.stopPropagation(); selectMode(); }} title="PDU 취소" type="button"><X size={14} /></button>
           </div>
         )}
-        {!selectedCable && !selectedModel && !pduMode && !complexPduMode && (
+        {noteMode && !selectedCable && !selectedModel && !pduMode && !complexPduMode && (
+          <div className="note-hud">
+            <Edit3 size={16} />
+            <strong>메모 추가</strong>
+            <span>작업 공간 위치 선택</span>
+            <button className="hud-icon-button" onClick={(event) => { event.stopPropagation(); selectMode(); }} title="메모 취소" type="button"><X size={14} /></button>
+          </div>
+        )}
+        {drawingMode && !selectedCable && !selectedModel && !pduMode && !complexPduMode && !noteMode && (
+          <div className="note-hud drawing-hud">
+            <WorkspaceDrawingIcon kind={drawingMode} size={16} />
+            <strong>{workspaceDrawingKindLabel(drawingMode)} 추가</strong>
+            <span>작업 공간 위치 선택</span>
+            <button className="hud-icon-button" onClick={(event) => { event.stopPropagation(); selectMode(); }} title="도형 취소" type="button"><X size={14} /></button>
+          </div>
+        )}
+        {!selectedCable && !selectedModel && !pduMode && !complexPduMode && !noteMode && !drawingMode && (
           <div className="board-guide" onClick={(event) => { event.stopPropagation(); closeFloatingMenus(); }}>
             <span><MousePointer2 size={14} />빈 보드 드래그 이동</span>
             <span><ZoomIn size={14} />휠 확대/축소</span>
             <span><Settings size={14} />우클릭 빠른 메뉴</span>
           </div>
         )}
-        {selectedDevice && !selectedCable && !selectedModel && !pduMode && !complexPduMode && (
+        {selectedDevice && !selectedCable && !selectedModel && !pduMode && !complexPduMode && !noteMode && !drawingMode && (
           <div className="selection-hud" onClick={(event) => { event.stopPropagation(); closeFloatingMenus(); }}>
             <span className={`selection-led ${selectedDevice.powerOn ? "on" : "off"}`} />
             <div>
@@ -1305,17 +1967,33 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
             <button className="icon-button danger" onClick={() => { deleteDevice(selectedDevice.id); setMessage("장비를 삭제했습니다."); }} title="선택 장비 삭제" type="button"><Trash2 size={16} /></button>
           </div>
         )}
+        {selectedDrawing && !selectedCable && !selectedModel && !pduMode && !complexPduMode && !noteMode && !drawingMode && (
+          <div className="selection-hud drawing-selection-hud" onClick={(event) => { event.stopPropagation(); closeFloatingMenus(); }}>
+            <WorkspaceDrawingIcon kind={selectedDrawing.kind} size={17} />
+            <div>
+              <strong>{selectedDrawing.label || workspaceDrawingKindLabel(selectedDrawing.kind)}</strong>
+              <span>{workspaceDrawingKindLabel(selectedDrawing.kind)} | {selectedDrawing.width}x{selectedDrawing.height}</span>
+            </div>
+            <button className="icon-button" onClick={() => editWorkspaceDrawingLabel(selectedDrawing.id)} title="도형 레이블 수정" type="button"><Edit3 size={16} /></button>
+            <button className="icon-button" onClick={() => cycleWorkspaceDrawingColor(selectedDrawing.id)} title="도형 색상 변경" type="button"><CircleDot size={16} /></button>
+            <button className="icon-button" onClick={() => toggleWorkspaceDrawingStroke(selectedDrawing.id)} title="도형 선 스타일 변경" type="button"><Minus size={16} /></button>
+            <button className="icon-button" onClick={() => resizeWorkspaceDrawing(selectedDrawing.id, 0.85)} title="도형 축소" type="button"><Minimize2 size={16} /></button>
+            <button className="icon-button" onClick={() => resizeWorkspaceDrawing(selectedDrawing.id, 1.15)} title="도형 확대" type="button"><Maximize2 size={16} /></button>
+            <button className="icon-button danger" onClick={() => deleteWorkspaceDrawing(selectedDrawing.id)} title="도형 삭제" type="button"><Trash2 size={16} /></button>
+          </div>
+        )}
         <div className="canvas-scroll-area" style={{ width: CANVAS_WIDTH * zoom, height: CANVAS_HEIGHT * zoom }}>
           <div
             className="logical-canvas"
-            onPointerMove={moveDrag}
-            onPointerUp={endDrag}
-            onPointerCancel={endDrag}
+            onPointerDown={startFreehandDrawing}
+            onPointerMove={(event) => { moveDrag(event); moveNoteDrag(event); moveDrawingDrag(event); moveDrawingResize(event); moveFreehandDrawing(event); }}
+            onPointerUp={(event) => { endDrag(); endNoteDrag(); endDrawingDrag(); endDrawingResize(); endFreehandDrawing(event); }}
+            onPointerCancel={(event) => { endDrag(); endNoteDrag(); endDrawingDrag(); endDrawingResize(); endFreehandDrawing(event); }}
             ref={canvasRef}
             style={{ transform: `scale(${zoom})`, transformOrigin: "0 0" }}
           >
             {workspaceMode === "physical" && <PhysicalWorkspaceBackdrop devices={project.devices} />}
-            {project.devices.length === 0 && !selectedCable && !selectedModel && !pduMode && !complexPduMode && (
+            {project.devices.length === 0 && !selectedCable && !selectedModel && !pduMode && !complexPduMode && !noteMode && !drawingMode && (
               <div className="empty-canvas-starter" onClick={(event) => event.stopPropagation()}>
                 <Network size={22} />
                 <strong>빈 네트워크</strong>
@@ -1334,6 +2012,43 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
                 </div>
               </div>
             )}
+            <svg className="drawing-layer" aria-label="작업 공간 도형">
+              {freehandPreview.length > 1 && (
+                <g className="workspace-drawing freehand blue solid outline preview">
+                  <polyline className="drawing-shape" points={drawingPointsAttribute(freehandPreview)} />
+                </g>
+              )}
+              {(project.drawings ?? []).map((drawing) => (
+                <g
+                  className={`workspace-drawing ${drawing.kind} ${drawing.color} ${drawing.strokeStyle} ${drawing.fill ? "filled" : "outline"} ${selectedDrawingId === drawing.id ? "selected" : ""}`}
+                  key={drawing.id}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (suppressClickRef.current) {
+                      suppressClickRef.current = false;
+                      return;
+                    }
+                    closeFloatingMenus();
+                    setSelectedDrawingId(drawing.id);
+                    setSelectedDeviceId("");
+                    setSelectedLinkId("");
+                    setSelectedNoteId("");
+                  }}
+                  onDoubleClick={(event) => {
+                    event.stopPropagation();
+                    editWorkspaceDrawingLabel(drawing.id);
+                  }}
+                  onKeyDown={(event) => activateRowOnKeyboard(event, () => editWorkspaceDrawingLabel(drawing.id))}
+                  onPointerDown={(event) => startDrawingDrag(event, drawing)}
+                  role="button"
+                  tabIndex={0}
+                  transform={`translate(${drawing.position.x} ${drawing.position.y})`}
+                >
+                  <title>{drawing.label || workspaceDrawingKindLabel(drawing.kind)}</title>
+                  <WorkspaceDrawingShape drawing={drawing} onResizeStart={startDrawingResize} selected={selectedDrawingId === drawing.id} />
+                </g>
+              ))}
+            </svg>
             <svg className="link-layer">
               {project.links.map((link) => {
                 const a = project.devices.find((device) => device.id === link.endpointA.deviceId);
@@ -1366,6 +2081,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
                       }
                       closeFloatingMenus();
                       setSelectedDeviceId("");
+                      setSelectedNoteId("");
+                      setSelectedDrawingId("");
                       setSelectedLinkId(link.id);
                       setMessage(linkLabel(project, link));
                     }}
@@ -1378,6 +2095,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
                       }
                       closeFloatingMenus();
                       setSelectedDeviceId("");
+                      setSelectedNoteId("");
+                      setSelectedDrawingId("");
                       setSelectedLinkId(link.id);
                       setLinkMenu({ linkId: link.id, x: event.clientX, y: event.clientY });
                     }}
@@ -1392,6 +2111,43 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
                 );
               })}
             </svg>
+            {(project.notes ?? []).map((note) => (
+              <div
+                className={`workspace-note ${note.color} ${selectedNoteId === note.id ? "selected" : ""}`}
+                key={note.id}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (suppressClickRef.current) {
+                    suppressClickRef.current = false;
+                    return;
+                  }
+                  closeFloatingMenus();
+                  setSelectedNoteId(note.id);
+                  setSelectedDrawingId("");
+                  setSelectedDeviceId("");
+                  setSelectedLinkId("");
+                }}
+                onDoubleClick={(event) => {
+                  event.stopPropagation();
+                  editWorkspaceNote(note.id);
+                }}
+                onKeyDown={(event) => activateRowOnKeyboard(event, () => editWorkspaceNote(note.id))}
+                onPointerDown={(event) => startNoteDrag(event, note)}
+                role="button"
+                style={{ left: note.position.x, top: note.position.y }}
+                tabIndex={0}
+                title="더블클릭으로 메모 수정"
+              >
+                <span>{note.text}</span>
+                {selectedNoteId === note.id && (
+                  <div className="workspace-note-actions">
+                    <button onClick={(event) => { event.stopPropagation(); editWorkspaceNote(note.id); }} title="메모 수정" type="button"><Edit3 size={13} /></button>
+                    <button onClick={(event) => { event.stopPropagation(); cycleWorkspaceNoteColor(note.id); }} title="메모 색상 변경" type="button"><CircleDot size={13} /></button>
+                    <button className="danger" onClick={(event) => { event.stopPropagation(); deleteWorkspaceNote(note.id); }} title="메모 삭제" type="button"><Trash2 size={13} /></button>
+                  </div>
+                )}
+              </div>
+            ))}
             {project.devices.map((device) => (
               <button
                 className={`device-node ${device.kind} ${device.powerOn ? "" : "off"} ${selectedDeviceId === device.id ? "selected" : ""} ${pendingDeviceId === device.id ? "pending" : ""}`}
@@ -1414,6 +2170,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
                   event.stopPropagation();
                   setSelectedDeviceId(device.id);
                   setSelectedLinkId("");
+                  setSelectedNoteId("");
+                  setSelectedDrawingId("");
                   closeFloatingMenus();
                   setContextMenu({ deviceId: device.id, x: event.clientX, y: event.clientY });
                 }}
@@ -1460,7 +2218,9 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
         <WorkspaceMiniMap
           project={project}
           selectedDeviceId={selectedDeviceId}
+          selectedDrawingId={selectedDrawingId}
           selectedLinkId={selectedLinkId}
+          selectedNoteId={selectedNoteId}
           viewport={viewport}
           onJump={jumpToCanvasPoint}
         />
@@ -1469,9 +2229,9 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
         <Palette
           selectedModel={selectedModel}
           selectedCable={selectedCable}
-          onSelect={() => { closeFloatingMenus(); setSelectedLinkId(""); setSelectedModel(""); setSelectedCable(""); setPendingDeviceId(""); setConnectionDraft(null); setPduMode(false); setPduSourceId(""); setComplexPduMode(false); setComplexPduSourceId(""); setMessage("선택 모드입니다."); }}
-          onModel={(id) => { closeFloatingMenus(); setSelectedLinkId(""); setSelectedModel(id); setSelectedCable(""); setConnectionDraft(null); setPduMode(false); setPduSourceId(""); setComplexPduMode(false); setComplexPduSourceId(""); setMessage("작업 공간을 클릭하거나 끌어 놓아 장비를 배치하세요."); }}
-          onCable={(type) => { closeFloatingMenus(); setSelectedLinkId(""); setSelectedCable(type); setSelectedModel(""); setPendingDeviceId(""); setConnectionDraft(null); setPduMode(false); setPduSourceId(""); setComplexPduMode(false); setComplexPduSourceId(""); setMessage("연결할 두 장비를 선택하세요."); }}
+          onSelect={() => { closeFloatingMenus(); setSelectedLinkId(""); setSelectedNoteId(""); setSelectedDrawingId(""); setSelectedModel(""); setSelectedCable(""); setPendingDeviceId(""); setConnectionDraft(null); setPduMode(false); setPduSourceId(""); setComplexPduMode(false); setComplexPduSourceId(""); setNoteMode(false); setDrawingMode(""); setMessage("선택 모드입니다."); }}
+          onModel={(id) => { closeFloatingMenus(); setSelectedLinkId(""); setSelectedNoteId(""); setSelectedDrawingId(""); setSelectedModel(id); setSelectedCable(""); setConnectionDraft(null); setPduMode(false); setPduSourceId(""); setComplexPduMode(false); setComplexPduSourceId(""); setNoteMode(false); setDrawingMode(""); setMessage("작업 공간을 클릭하거나 끌어 놓아 장비를 배치하세요."); }}
+          onCable={(type) => { closeFloatingMenus(); setSelectedLinkId(""); setSelectedNoteId(""); setSelectedDrawingId(""); setSelectedCable(type); setSelectedModel(""); setPendingDeviceId(""); setConnectionDraft(null); setPduMode(false); setPduSourceId(""); setComplexPduMode(false); setComplexPduSourceId(""); setNoteMode(false); setDrawingMode(""); setMessage("연결할 두 장비를 선택하세요."); }}
         />
         <div className="simulation-dock">
           <div className="time-tabs">
@@ -1518,6 +2278,21 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
           />
         </DeviceWindow>
       )}
+      {activityWindowOpen && (
+        <DeviceWindow
+          title="Activity Wizard"
+          subtitle="Instructions / Check Results"
+          onClose={() => setActivityWindowOpen(false)}
+        >
+          <ActivityWizard
+            project={project}
+            onExport={exportActivityReport}
+            onUpdateProject={(nextProject, nextMessage) => { onChange(nextProject); setMessage(nextMessage); }}
+            onRunPingSweep={() => { void pingFromSelectedToAll(); }}
+            canRunPingSweep={Boolean(selectedDeviceId && project.devices.length > 1)}
+          />
+        </DeviceWindow>
+      )}
       {contextMenu && (
         <DeviceContextMenu
           device={project.devices.find((device) => device.id === contextMenu.deviceId) ?? null}
@@ -1561,6 +2336,9 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
           onPhysical={() => { setWorkspaceMode("physical"); setWorkspaceMenu(null); }}
           onPlaceModel={(modelId) => placeWorkspaceModel(modelId, workspaceMenu)}
           onArrange={() => { autoArrangeTopology(); setWorkspaceMenu(null); }}
+          onPhysicalArrange={() => { autoArrangePhysicalWorkspace(); setWorkspaceMenu(null); }}
+          onNote={() => addWorkspaceNoteFromMenu({ x: workspaceMenu.canvasX, y: workspaceMenu.canvasY })}
+          onDrawing={(kind) => addWorkspaceDrawingFromMenu(kind, { x: workspaceMenu.canvasX, y: workspaceMenu.canvasY })}
           onRepair={() => { repairCurrentProject(); setWorkspaceMenu(null); }}
           onSelect={() => {
             setSelectedModel("");
@@ -1571,8 +2349,12 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
             setPduSourceId("");
             setComplexPduMode(false);
             setComplexPduSourceId("");
+            setNoteMode(false);
+            setDrawingMode("");
             setSelectedDeviceId("");
             setSelectedLinkId("");
+            setSelectedNoteId("");
+            setSelectedDrawingId("");
             setWorkspaceMenu(null);
             setMessage("선택 모드입니다.");
           }}
@@ -1630,35 +2412,1027 @@ function powerDevice(device: NetworkDevice, powerOn: boolean): NetworkDevice {
 }
 
 function PhysicalWorkspaceBackdrop({ devices }: { devices: NetworkDevice[] }) {
-  const routers = devices.filter((device) => device.kind === "router" || device.kind === "firewall").length;
-  const switches = devices.filter((device) => device.kind === "switch" || device.kind === "hub").length;
-  const hosts = devices.filter((device) => device.kind === "pc" || device.kind === "server").length;
-  const wireless = devices.filter((device) => device.kind === "wireless" || device.ports.some((port) => port.kind === "wireless")).length;
+  const rackDevices = devices.filter((device) => device.kind === "router" || device.kind === "firewall" || device.kind === "switch" || device.kind === "hub");
+  const benchDevices = devices.filter((device) => device.kind === "pc" || device.kind === "server");
+  const wirelessDevices = devices.filter((device) => device.kind === "wireless" || device.ports.some((port) => port.kind === "wireless"));
   return (
     <div className="physical-backdrop" aria-hidden="true">
       <div className="physical-location-strip">
         <strong>도시 / 캠퍼스 / 사무실 / 배선실</strong>
-        <span>장비 {devices.length}개 | 라우터/방화벽 {routers}개 | 스위치/허브 {switches}개 | 호스트 {hosts}개 | 무선 {wireless}개</span>
+        <span>장비 {devices.length}개 | 랙 {rackDevices.length}개 | 데스크 {benchDevices.length}개 | 무선 {wirelessDevices.length}개</span>
       </div>
       <div className="physical-rack">
         <span>랙 1</span>
-        <i />
-        <i />
-        <i />
-        <i />
-        <i />
+        <PhysicalZoneDeviceList devices={rackDevices} emptyLabel="랙 장비 없음" />
       </div>
       <div className="physical-bench">
         <span>데스크톱 테이블</span>
-        <i />
-        <i />
-        <i />
+        <PhysicalZoneDeviceList devices={benchDevices} emptyLabel="호스트 없음" />
       </div>
       <div className="physical-wireless-zone">
         <span>무선 영역</span>
+        <PhysicalZoneDeviceList devices={wirelessDevices} emptyLabel="무선 장비 없음" />
       </div>
     </div>
   );
+}
+
+function PhysicalZoneDeviceList({ devices, emptyLabel }: { devices: NetworkDevice[]; emptyLabel: string }) {
+  const visibleDevices = devices.slice(0, 8);
+  return (
+    <div className="physical-zone-device-list">
+      {visibleDevices.length ? visibleDevices.map((device) => (
+        <b className={device.powerOn ? "" : "off"} key={device.id}>{device.label}</b>
+      )) : <em>{emptyLabel}</em>}
+      {devices.length > visibleDevices.length && <em>+{devices.length - visibleDevices.length} more</em>}
+    </div>
+  );
+}
+
+type ActivityCheckStatus = "pass" | "partial" | "fail" | "todo";
+
+interface ActivityCheck {
+  id: string;
+  category: string;
+  label: string;
+  detail: string;
+  status: ActivityCheckStatus;
+  points: number;
+  earned: number;
+}
+
+interface ActivityAssessment {
+  checks: ActivityCheck[];
+  earned: number;
+  total: number;
+  score: number;
+  passed: number;
+  partial: number;
+  failed: number;
+  todo: number;
+}
+
+function ActivityWizard({
+  project,
+  canRunPingSweep,
+  onUpdateProject,
+  onRunPingSweep,
+  onExport
+}: {
+  project: NetworkProject;
+  canRunPingSweep: boolean;
+  onUpdateProject: (project: NetworkProject, message: string) => void;
+  onRunPingSweep: () => void;
+  onExport: (assessment?: ActivityAssessment) => void;
+}) {
+  const [tab, setTab] = useState<"instructions" | "check">("check");
+  const [activeCliChecks, setActiveCliChecks] = useState<Record<string, ActivityCheck>>({});
+  const [activeCliRunning, setActiveCliRunning] = useState(false);
+  const [activeCliMessage, setActiveCliMessage] = useState("");
+  const activity = project.activity ?? { title: "", objectives: [], requirements: [] };
+  const objectives = activity.objectives.length ? activity.objectives : defaultActivityObjectives();
+  const baseAssessment = useMemo(() => assessActivity(project), [project]);
+  const assessment = useMemo(() => mergeActivityAssessment(baseAssessment, activeCliChecks), [baseAssessment, activeCliChecks]);
+  const groupedChecks = useMemo(() => {
+    const groups = new Map<string, ActivityCheck[]>();
+    for (const check of assessment.checks) {
+      groups.set(check.category, [...(groups.get(check.category) ?? []), check]);
+    }
+    return Array.from(groups.entries());
+  }, [assessment.checks]);
+  const blockers = assessment.checks.filter((check) => check.status === "fail").slice(0, 4);
+  const commandOutputAssertionCount = activity.commandOutputAssertions?.length ?? 0;
+
+  useEffect(() => {
+    setActiveCliChecks({});
+    setActiveCliMessage("");
+  }, [project.id, project.updatedAt]);
+
+  function updateActivity(nextActivity: NonNullable<NetworkProject["activity"]>, message: string) {
+    onUpdateProject({ ...project, activity: nextActivity }, message);
+  }
+
+  function editActivityTitle() {
+    const title = window.prompt("Activity title", activity.title || project.name);
+    if (title === null) return;
+    updateActivity({ ...activity, title: title.trim().slice(0, 100) }, "Activity Wizard 제목을 수정했습니다.");
+  }
+
+  function addActivityObjective() {
+    const objective = window.prompt("Objective", "Configure and verify the lab requirement.");
+    if (objective === null) return;
+    const value = objective.trim().slice(0, 180);
+    if (!value) return;
+    updateActivity({ ...activity, objectives: [...activity.objectives, value].slice(0, 12) }, "Activity Wizard 목표를 추가했습니다.");
+  }
+
+  function deleteActivityObjective(index: number) {
+    updateActivity({ ...activity, objectives: activity.objectives.filter((_, itemIndex) => itemIndex !== index) }, "Activity Wizard 목표를 삭제했습니다.");
+  }
+
+  function addActivityRequirement(kind: ActivityRequirementKind) {
+    const template = activityRequirementCatalog.find((item) => item.kind === kind);
+    if (!template) return;
+    const label = window.prompt("Requirement label", template.label);
+    if (label === null) return;
+    const target = promptBoundedInteger("Target count", template.defaultTarget, 1, 999);
+    if (target === null) return;
+    const points = promptBoundedInteger("Points", template.defaultPoints, 1, 100);
+    if (points === null) return;
+    updateActivity({
+      ...activity,
+      requirements: [
+        ...activity.requirements,
+        { id: createId("act_req"), kind, label: label.trim().slice(0, 80) || template.label, target, points }
+      ].slice(0, 24)
+    }, "Activity Wizard 요구사항을 추가했습니다.");
+  }
+
+  function deleteActivityRequirement(id: string) {
+    updateActivity({ ...activity, requirements: activity.requirements.filter((requirement) => requirement.id !== id) }, "Activity Wizard 요구사항을 삭제했습니다.");
+  }
+
+  function addCommandRule() {
+    const command = window.prompt("Startup-config command", "ip route 0.0.0.0 0.0.0.0 192.168.1.1");
+    if (command === null) return;
+    const normalizedCommand = normalizeCommandRuleText(command);
+    if (!normalizedCommand) return;
+    const deviceText = window.prompt("Device label/id (blank = any device)", "");
+    if (deviceText === null) return;
+    const targetDevice = deviceText.trim()
+      ? project.devices.find((device) => [device.id, device.label, device.config.hostname].some((value) => value.toLowerCase() === deviceText.trim().toLowerCase()))
+      : undefined;
+    const points = promptBoundedInteger("Points", 5, 1, 100);
+    if (points === null) return;
+    updateActivity({
+      ...activity,
+      commandRules: [
+        ...(activity.commandRules ?? []),
+        { id: createId("act_cmd"), label: targetDevice ? `${targetDevice.label}: ${normalizedCommand}` : normalizedCommand, deviceId: targetDevice?.id, command: normalizedCommand, points }
+      ].slice(0, 40)
+    }, "Activity Wizard 명령 채점 규칙을 추가했습니다.");
+  }
+
+  function deleteCommandRule(id: string) {
+    updateActivity({ ...activity, commandRules: (activity.commandRules ?? []).filter((rule) => rule.id !== id) }, "Activity Wizard 명령 채점 규칙을 삭제했습니다.");
+  }
+
+  function addCommandSequence() {
+    const rawCommands = window.prompt("Ordered startup-config commands separated by semicolon", "interface GigabitEthernet0/0; ip address 192.168.1.1 255.255.255.0; no shutdown");
+    if (rawCommands === null) return;
+    const commands = rawCommands.split(";").map(normalizeCommandRuleText).filter(Boolean).slice(0, 20);
+    if (!commands.length) return;
+    const deviceText = window.prompt("Device label/id (blank = any device)", "");
+    if (deviceText === null) return;
+    const targetDevice = deviceText.trim()
+      ? project.devices.find((device) => [device.id, device.label, device.config.hostname].some((value) => value.toLowerCase() === deviceText.trim().toLowerCase()))
+      : undefined;
+    const points = promptBoundedInteger("Points", 10, 1, 100);
+    if (points === null) return;
+    updateActivity({
+      ...activity,
+      commandSequences: [
+        ...(activity.commandSequences ?? []),
+        { id: createId("act_seq"), label: targetDevice ? `${targetDevice.label}: ordered config` : "Ordered startup-config", deviceId: targetDevice?.id, commands, points }
+      ].slice(0, 24)
+    }, "Activity Wizard 명령 순서 채점 규칙을 추가했습니다.");
+  }
+
+  function deleteCommandSequence(id: string) {
+    updateActivity({ ...activity, commandSequences: (activity.commandSequences ?? []).filter((sequence) => sequence.id !== id) }, "Activity Wizard 명령 순서 채점 규칙을 삭제했습니다.");
+  }
+
+  function addCommandOutputAssertion() {
+    const rawCommands = window.prompt("CLI commands separated by semicolon", "enable; show version");
+    if (rawCommands === null) return;
+    const commands = rawCommands.split(";").map(normalizeCommandRuleText).filter(Boolean).slice(0, 20);
+    if (!commands.length) return;
+    const expectedText = window.prompt("Expected output text", "Configuration register");
+    if (expectedText === null || !expectedText.trim()) return;
+    const deviceText = window.prompt("Device label/id (blank = any device)", "");
+    if (deviceText === null) return;
+    const targetDevice = deviceText.trim()
+      ? project.devices.find((device) => [device.id, device.label, device.config.hostname].some((value) => value.toLowerCase() === deviceText.trim().toLowerCase()))
+      : undefined;
+    const points = promptBoundedInteger("Points", 10, 1, 100);
+    if (points === null) return;
+    updateActivity({
+      ...activity,
+      commandOutputAssertions: [
+        ...(activity.commandOutputAssertions ?? []),
+        { id: createId("act_out"), label: targetDevice ? `${targetDevice.label}: ${commands.at(-1)}` : `${commands.at(-1)} output`, deviceId: targetDevice?.id, commands, expectedText: expectedText.trim(), points }
+      ].slice(0, 24)
+    }, "Activity Wizard 명령 출력 검증을 추가했습니다.");
+  }
+
+  function deleteCommandOutputAssertion(id: string) {
+    updateActivity({ ...activity, commandOutputAssertions: (activity.commandOutputAssertions ?? []).filter((assertion) => assertion.id !== id) }, "Activity Wizard 명령 출력 검증을 삭제했습니다.");
+  }
+
+  function addInterfaceExpectation() {
+    const deviceText = window.prompt("Device label/id", project.devices[0]?.label ?? "");
+    if (deviceText === null) return;
+    const device = project.devices.find((item) => [item.id, item.label, item.config.hostname].some((value) => value.toLowerCase() === deviceText.trim().toLowerCase()));
+    if (!device) {
+      window.alert("Device not found.");
+      return;
+    }
+    const portText = window.prompt("Port name/id", device.ports.find((port) => port.kind !== "console")?.name ?? device.ports[0]?.name ?? "");
+    if (portText === null) return;
+    const port = device.ports.find((item) => item.id === portText.trim() || item.name.toLowerCase() === portText.trim().toLowerCase());
+    if (!port) {
+      window.alert("Port not found.");
+      return;
+    }
+    const ipAddress = window.prompt("Expected IPv4 (blank = skip)", port.ipAddress);
+    if (ipAddress === null) return;
+    const subnetMask = window.prompt("Expected subnet mask (blank = skip)", port.subnetMask);
+    if (subnetMask === null) return;
+    const mode = window.prompt("Expected mode access/trunk/routed (blank = skip)", port.mode);
+    if (mode === null) return;
+    const vlanRaw = window.prompt("Expected VLAN (blank = skip)", port.mode === "access" ? String(port.vlan) : "");
+    if (vlanRaw === null) return;
+    const points = promptBoundedInteger("Points", 5, 1, 100);
+    if (points === null) return;
+    const modeText = mode.trim();
+    const expectedMode: NetworkPort["mode"] | undefined = modeText === "access" || modeText === "trunk" || modeText === "routed" ? modeText : undefined;
+    updateActivity({
+      ...activity,
+      interfaceExpectations: [
+        ...(activity.interfaceExpectations ?? []),
+        {
+          id: createId("act_int"),
+          label: `${device.label} ${port.name}`,
+          deviceId: device.id,
+          portId: port.id,
+          ipAddress: ipAddress.trim() || undefined,
+          subnetMask: subnetMask.trim() || undefined,
+          mode: expectedMode,
+          vlan: vlanRaw.trim() ? boundedNumber(vlanRaw, 1, 4094) : undefined,
+          points
+        }
+      ].slice(0, 80)
+    }, "Activity Wizard 인터페이스 기대값을 추가했습니다.");
+  }
+
+  function deleteInterfaceExpectation(id: string) {
+    updateActivity({ ...activity, interfaceExpectations: (activity.interfaceExpectations ?? []).filter((expectation) => expectation.id !== id) }, "Activity Wizard 인터페이스 기대값을 삭제했습니다.");
+  }
+
+  function addHeaderAssertion() {
+    const protocol = window.prompt("Protocol (blank = any)", "HTTP");
+    if (protocol === null) return;
+    const field = window.prompt("Header field", "Ports");
+    if (field === null || !field.trim()) return;
+    const value = window.prompt("Expected value", "80");
+    if (value === null || !value.trim()) return;
+    const points = promptBoundedInteger("Points", 5, 1, 100);
+    if (points === null) return;
+    updateActivity({
+      ...activity,
+      headerAssertions: [
+        ...(activity.headerAssertions ?? []),
+        { id: createId("act_hdr"), label: `${protocol.trim() || "Any"} ${field.trim()}=${value.trim()}`, protocol: protocol.trim().toUpperCase() || undefined, field: field.trim(), value: value.trim(), points }
+      ].slice(0, 80)
+    }, "Activity Wizard PDU 헤더 검증을 추가했습니다.");
+  }
+
+  function deleteHeaderAssertion(id: string) {
+    updateActivity({ ...activity, headerAssertions: (activity.headerAssertions ?? []).filter((assertion) => assertion.id !== id) }, "Activity Wizard PDU 헤더 검증을 삭제했습니다.");
+  }
+
+  async function runActiveCliOutputAssertions() {
+    const assertions = activity.commandOutputAssertions ?? [];
+    if (!assertions.length) {
+      setActiveCliMessage("재검증할 CLI 출력 검증 항목이 없습니다.");
+      return;
+    }
+    setActiveCliRunning(true);
+    setActiveCliMessage(`${cliEngine.kind === "remote" ? "Remote" : "Local"} CLI 엔진으로 출력 검증 중...`);
+    try {
+      const entries: Array<[string, ActivityCheck]> = [];
+      for (const assertion of assertions) {
+        const check = await assessActivityCommandOutputAssertionWithEngine(project, assertion);
+        entries.push([check.id, check]);
+      }
+      setActiveCliChecks(Object.fromEntries(entries));
+      setActiveCliMessage(`${cliEngine.kind === "remote" ? "Remote" : "Local"} CLI 엔진으로 출력 검증 ${entries.length}개를 갱신했습니다.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown error";
+      setActiveCliMessage(`CLI 출력 재검증 실패: ${message}`);
+    } finally {
+      setActiveCliRunning(false);
+    }
+  }
+
+  function captureAnswerSnapshot() {
+    updateActivity({ ...activity, answerSnapshot: captureActivityAnswerSnapshot(project) }, "Activity Wizard 정답 스냅샷을 캡처했습니다.");
+  }
+
+  function deleteAnswerSnapshot() {
+    const { answerSnapshot: _answerSnapshot, ...rest } = activity;
+    updateActivity(rest, "Activity Wizard 정답 스냅샷을 삭제했습니다.");
+  }
+
+  return (
+    <section className="activity-wizard">
+      <div className="activity-tabs" role="tablist" aria-label="Activity Wizard">
+        <button className={tab === "instructions" ? "active" : ""} onClick={() => setTab("instructions")} role="tab" type="button">Instructions</button>
+        <button className={tab === "check" ? "active" : ""} onClick={() => setTab("check")} role="tab" type="button">Check Results</button>
+      </div>
+      <div className="activity-summary">
+        <div className={`activity-score ${activityScoreClass(assessment.score)}`}>
+          <strong>{assessment.score}%</strong>
+          <span>{assessment.earned}/{assessment.total} pts</span>
+        </div>
+        <div className="activity-stat-grid">
+          <span className="pass"><strong>{assessment.passed}</strong> 통과</span>
+          <span className="partial"><strong>{assessment.partial}</strong> 부분</span>
+          <span className="fail"><strong>{assessment.failed}</strong> 실패</span>
+          <span><strong>{assessment.todo}</strong> TODO</span>
+        </div>
+        {commandOutputAssertionCount > 0 && <button className="secondary-action" disabled={activeCliRunning} onClick={() => { void runActiveCliOutputAssertions(); }} type="button">{activeCliRunning ? "CLI 검증 중" : `CLI 엔진 재검증 (${cliEngine.kind})`}</button>}
+        <button className="secondary-action" onClick={() => onExport(assessment)} type="button">TXT 내보내기</button>
+        {activeCliMessage && <small className="activity-engine-note">{activeCliMessage}</small>}
+      </div>
+      {tab === "instructions" ? (
+        <div className="activity-instructions">
+          <header>
+            <div>
+              <strong>{activity.title || "Lab Objectives"}</strong>
+              <small>Packet Tracer Activity Wizard 형식의 현재 프로젝트 목표입니다.</small>
+            </div>
+            <div className="activity-header-actions">
+              <button onClick={editActivityTitle} type="button">제목</button>
+              <button onClick={addActivityObjective} type="button">목표 추가</button>
+            </div>
+          </header>
+          <ol>
+            {objectives.map((objective, index) => (
+              <li key={`${objective}:${index}`}>
+                <span>{objective}</span>
+                {activity.objectives.length > 0 && <button onClick={() => deleteActivityObjective(index)} type="button">삭제</button>}
+              </li>
+            ))}
+          </ol>
+          <section className="activity-authoring">
+            <header>
+              <div>
+                <strong>Instructor Criteria</strong>
+                <small>{activity.requirements.length} stored requirements{activity.answerSnapshot ? " / answer snapshot saved" : ""}</small>
+              </div>
+              <div className="activity-header-actions">
+                <button onClick={addCommandRule} type="button">명령 규칙</button>
+                <button onClick={addCommandSequence} type="button">명령 순서</button>
+                <button onClick={addCommandOutputAssertion} type="button">출력 검증</button>
+                <button onClick={addInterfaceExpectation} type="button">인터페이스</button>
+                <button onClick={addHeaderAssertion} type="button">헤더 검증</button>
+                <button onClick={captureAnswerSnapshot} type="button">정답 캡처</button>
+                {activity.answerSnapshot && <button onClick={deleteAnswerSnapshot} type="button">정답 삭제</button>}
+              </div>
+            </header>
+            <div className="activity-requirement-tools">
+              {activityRequirementCatalog.map((item) => (
+                <button key={item.kind} onClick={() => addActivityRequirement(item.kind)} title={item.detail} type="button">{item.label}</button>
+              ))}
+            </div>
+            {activity.requirements.length > 0 ? (
+              <div className="activity-requirement-list">
+                {activity.requirements.map((requirement) => {
+                  const current = activityRequirementCurrentValue(project, requirement.kind);
+                  return (
+                    <div key={requirement.id}>
+                      <span>{activityStatusLabel(current >= requirement.target ? "pass" : current > 0 ? "partial" : "fail")}</span>
+                      <div>
+                        <strong>{requirement.label || activityRequirementKindLabel(requirement.kind)}</strong>
+                        <small>{activityRequirementKindLabel(requirement.kind)}: {current}/{requirement.target} · {requirement.points} pts</small>
+                      </div>
+                      <button onClick={() => deleteActivityRequirement(requirement.id)} type="button">삭제</button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="activity-note">
+                <strong>TODO</strong>
+                <span>강사 기준이 비어 있습니다. 위 항목으로 현재 프로젝트에 저장될 채점 요구사항을 추가합니다.</span>
+              </div>
+            )}
+            {activity.answerSnapshot && (
+              <div className="activity-snapshot-summary">
+                <strong>Answer Snapshot</strong>
+                <span>{new Date(activity.answerSnapshot.capturedAt).toLocaleString()} · 장비 {activity.answerSnapshot.devices.length} · 링크 {activity.answerSnapshot.links.length} · 주석 {activity.answerSnapshot.annotationCount}</span>
+              </div>
+            )}
+            {(activity.commandRules ?? []).length > 0 && (
+              <div className="activity-requirement-list">
+                {(activity.commandRules ?? []).map((rule) => {
+                  const matched = activityCommandRuleMatched(project, rule);
+                  return (
+                    <div key={rule.id}>
+                      <span>{activityStatusLabel(matched ? "pass" : "fail")}</span>
+                      <div>
+                        <strong>{rule.label || rule.command}</strong>
+                        <small>{rule.deviceId ? eventDeviceLabel(project, rule.deviceId) : "Any device"} · {rule.command} · {rule.points} pts</small>
+                      </div>
+                      <button onClick={() => deleteCommandRule(rule.id)} type="button">삭제</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {(activity.commandSequences ?? []).length > 0 && (
+              <div className="activity-requirement-list">
+                {(activity.commandSequences ?? []).map((sequence) => {
+                  const check = assessActivityCommandSequence(project, sequence);
+                  return (
+                    <div key={sequence.id}>
+                      <span>{activityStatusLabel(check.status)}</span>
+                      <div>
+                        <strong>{sequence.label}</strong>
+                        <small>{check.detail} · {sequence.points} pts</small>
+                      </div>
+                      <button onClick={() => deleteCommandSequence(sequence.id)} type="button">삭제</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {(activity.commandOutputAssertions ?? []).length > 0 && (
+              <div className="activity-requirement-list">
+                {(activity.commandOutputAssertions ?? []).map((assertion) => {
+                  const check = activeCliChecks[`command-output-${assertion.id}`] ?? assessActivityCommandOutputAssertion(project, assertion);
+                  return (
+                    <div key={assertion.id}>
+                      <span>{activityStatusLabel(check.status)}</span>
+                      <div>
+                        <strong>{assertion.label}</strong>
+                        <small>{check.detail} · {assertion.points} pts</small>
+                      </div>
+                      <button onClick={() => deleteCommandOutputAssertion(assertion.id)} type="button">삭제</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {(activity.interfaceExpectations ?? []).length > 0 && (
+              <div className="activity-requirement-list">
+                {(activity.interfaceExpectations ?? []).map((expectation) => {
+                  const check = assessActivityInterfaceExpectation(project, expectation);
+                  return (
+                    <div key={expectation.id}>
+                      <span>{activityStatusLabel(check.status)}</span>
+                      <div>
+                        <strong>{expectation.label}</strong>
+                        <small>{check.detail} · {expectation.points} pts</small>
+                      </div>
+                      <button onClick={() => deleteInterfaceExpectation(expectation.id)} type="button">삭제</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {(activity.headerAssertions ?? []).length > 0 && (
+              <div className="activity-requirement-list">
+                {(activity.headerAssertions ?? []).map((assertion) => {
+                  const check = assessActivityHeaderAssertion(project, assertion);
+                  return (
+                    <div key={assertion.id}>
+                      <span>{activityStatusLabel(check.status)}</span>
+                      <div>
+                        <strong>{assertion.label}</strong>
+                        <small>{check.detail} · {assertion.points} pts</small>
+                      </div>
+                      <button onClick={() => deleteHeaderAssertion(assertion.id)} type="button">삭제</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+          <div className="activity-note">
+            <strong>TODO</strong>
+            <span>브라우저 자동 테스트와 시각 회귀 기준선은 TODO입니다. 현재 버전은 정답 스냅샷, 저장된 요구사항, 활성 CLI 엔진 출력, 인터페이스, PDU 헤더, TDR 기준을 함께 점검합니다.</span>
+          </div>
+        </div>
+      ) : (
+        <div className="activity-check-results">
+          <header>
+            <div>
+              <strong>Assessment Items</strong>
+              <small>{project.devices.length} devices, {project.links.length} links, {project.simulationEvents.length} events</small>
+            </div>
+            <button disabled={!canRunPingSweep} onClick={onRunPingSweep} type="button">선택 장비 전체 Ping</button>
+          </header>
+          {blockers.length > 0 && (
+            <div className="activity-blockers">
+              <strong>미해결 실패 항목</strong>
+              {blockers.map((check) => <span key={check.id}>{check.label}: {check.detail}</span>)}
+            </div>
+          )}
+          {groupedChecks.map(([category, checks]) => (
+            <div className="activity-category" key={category}>
+              <h3>{category}</h3>
+              {checks.map((check) => (
+                <div className={`activity-check-row ${check.status}`} key={check.id}>
+                  <span>{activityStatusLabel(check.status)}</span>
+                  <div>
+                    <strong>{check.label}</strong>
+                    <small>{check.detail}</small>
+                  </div>
+                  <em>{check.earned}/{check.points}</em>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function assessActivity(project: NetworkProject): ActivityAssessment {
+  const issues = diagnoseProject(project);
+  const errors = issues.filter((item) => item.severity === "error").length;
+  const warnings = issues.filter((item) => item.severity === "warning").length;
+  const validLinks = project.links.filter((link) => linkEndpointPair(project, link));
+  const upLinks = project.links.filter((link) => link.status === "up");
+  const poweredDevices = project.devices.filter((device) => device.powerOn);
+  const hostPorts = project.devices
+    .filter((device) => device.kind === "pc" || device.kind === "server")
+    .flatMap((device) => device.ports.filter((port) => port.kind !== "console").map((port) => ({ device, port })));
+  const addressedHostPorts = hostPorts.filter(({ port }) => isIpv4(port.ipAddress) && isSubnetMask(port.subnetMask) && maskToPrefix(port.subnetMask) > 0);
+  const serviceDevices = project.devices.filter((device) => enabledServices(device).length > 0);
+  const reachableServiceDevices = serviceDevices.filter((device) => device.powerOn && device.ports.some((port) => port.adminUp && isIpv4(port.ipAddress)));
+  const networkDevices = project.devices.filter((device) => device.kind === "router" || device.kind === "switch" || device.kind === "firewall" || device.kind === "wireless");
+  const savedNetworkDevices = networkDevices.filter((device) => device.config.startupConfig.length > 0);
+  const deliveredEvents = project.simulationEvents.filter((event) => event.status === "delivered");
+  const droppedEvents = project.simulationEvents.filter((event) => event.status === "dropped");
+  const workspaceAnnotations = (project.notes ?? []).length + (project.drawings ?? []).length;
+  const authoredChecks = (project.activity?.requirements ?? []).map((requirement) => assessActivityRequirement(project, requirement));
+  const answerSnapshotChecks = project.activity?.answerSnapshot ? assessActivityAnswerSnapshot(project, project.activity.answerSnapshot) : [];
+  const commandRuleChecks = (project.activity?.commandRules ?? []).map((rule) => assessActivityCommandRule(project, rule));
+  const commandSequenceChecks = (project.activity?.commandSequences ?? []).map((sequence) => assessActivityCommandSequence(project, sequence));
+  const commandOutputChecks = (project.activity?.commandOutputAssertions ?? []).map((assertion) => assessActivityCommandOutputAssertion(project, assertion));
+  const interfaceExpectationChecks = (project.activity?.interfaceExpectations ?? []).map((expectation) => assessActivityInterfaceExpectation(project, expectation));
+  const headerAssertionChecks = (project.activity?.headerAssertions ?? []).map((assertion) => assessActivityHeaderAssertion(project, assertion));
+
+  const checks: ActivityCheck[] = [
+    makeActivityCheck(
+      "topology-devices",
+      "Topology",
+      "필수 장비 배치",
+      project.devices.length >= 2 ? `${project.devices.length}개 장비가 배치되었습니다.` : `${project.devices.length}개 장비만 배치되었습니다.`,
+      project.devices.length >= 2 ? "pass" : project.devices.length === 1 ? "partial" : "fail",
+      10,
+      project.devices.length >= 2 ? 10 : project.devices.length === 1 ? 4 : 0
+    ),
+    makeActivityCheck(
+      "topology-links",
+      "Topology",
+      "케이블 끝점 무결성",
+      project.links.length === 0 ? "케이블이 없습니다." : `${validLinks.length}/${project.links.length}개 케이블 끝점이 유효합니다.`,
+      project.links.length > 0 && validLinks.length === project.links.length ? "pass" : validLinks.length > 0 ? "partial" : "fail",
+      10,
+      project.links.length > 0 && validLinks.length === project.links.length ? 10 : validLinks.length > 0 ? 5 : 0
+    ),
+    makeActivityCheck(
+      "topology-link-state",
+      "Topology",
+      "링크 상태",
+      project.links.length === 0 ? "up 상태로 검증할 링크가 없습니다." : `${upLinks.length}/${project.links.length}개 링크가 up 상태입니다.`,
+      project.links.length > 0 && upLinks.length === project.links.length ? "pass" : upLinks.length > 0 ? "partial" : "fail",
+      15,
+      project.links.length > 0 && upLinks.length === project.links.length ? 15 : Math.round((upLinks.length / Math.max(1, project.links.length)) * 10)
+    ),
+    makeActivityCheck(
+      "physical-power",
+      "Physical",
+      "장비 전원",
+      project.devices.length === 0 ? "전원을 확인할 장비가 없습니다." : `${poweredDevices.length}/${project.devices.length}개 장비 전원이 켜져 있습니다.`,
+      project.devices.length > 0 && poweredDevices.length === project.devices.length ? "pass" : poweredDevices.length > 0 ? "partial" : "fail",
+      10,
+      project.devices.length > 0 && poweredDevices.length === project.devices.length ? 10 : Math.round((poweredDevices.length / Math.max(1, project.devices.length)) * 6)
+    ),
+    makeActivityCheck(
+      "workspace-annotations",
+      "Documentation",
+      "작업공간 주석",
+      workspaceAnnotations > 0 ? `메모/도형 ${workspaceAnnotations}개가 배치되었습니다.` : "메모 또는 도형 주석이 없습니다.",
+      workspaceAnnotations > 0 ? "pass" : "todo",
+      5,
+      workspaceAnnotations > 0 ? 5 : 0
+    ),
+    ...authoredChecks,
+    ...answerSnapshotChecks,
+    ...commandRuleChecks,
+    ...commandSequenceChecks,
+    ...commandOutputChecks,
+    ...interfaceExpectationChecks,
+    ...headerAssertionChecks,
+    makeActivityCheck(
+      "addressing-hosts",
+      "Addressing",
+      "호스트 IPv4 설정",
+      hostPorts.length === 0 ? "PC/서버 데이터 포트가 없습니다." : `${addressedHostPorts.length}/${hostPorts.length}개 호스트 포트에 유효한 IPv4/mask가 있습니다.`,
+      hostPorts.length > 0 && addressedHostPorts.length === hostPorts.length ? "pass" : addressedHostPorts.length > 0 ? "partial" : "fail",
+      15,
+      hostPorts.length > 0 && addressedHostPorts.length === hostPorts.length ? 15 : Math.round((addressedHostPorts.length / Math.max(1, hostPorts.length)) * 8)
+    ),
+    makeActivityCheck(
+      "addressing-diagnostics",
+      "Addressing",
+      "주소/구성 오류",
+      errors === 0 ? `오류 0개, 경고 ${warnings}개입니다.` : `진단 오류 ${errors}개, 경고 ${warnings}개가 남아 있습니다.`,
+      errors === 0 && warnings === 0 ? "pass" : errors === 0 ? "partial" : "fail",
+      15,
+      errors === 0 && warnings === 0 ? 15 : errors === 0 ? 10 : 0
+    ),
+    makeActivityCheck(
+      "services-reachable",
+      "Services",
+      "서비스 도달성 준비",
+      serviceDevices.length === 0 ? "활성화된 서버 서비스가 없습니다." : `${reachableServiceDevices.length}/${serviceDevices.length}개 서비스 장비에 활성 IPv4가 있습니다.`,
+      serviceDevices.length === 0 ? "todo" : reachableServiceDevices.length === serviceDevices.length ? "pass" : reachableServiceDevices.length > 0 ? "partial" : "fail",
+      10,
+      serviceDevices.length === 0 ? 0 : reachableServiceDevices.length === serviceDevices.length ? 10 : Math.round((reachableServiceDevices.length / Math.max(1, serviceDevices.length)) * 6)
+    ),
+    makeActivityCheck(
+      "simulation-delivered",
+      "Simulation",
+      "PDU 전달 검증",
+      project.simulationEvents.length === 0 ? "아직 캡처된 PDU 이벤트가 없습니다." : `전달 ${deliveredEvents.length}개, 드롭 ${droppedEvents.length}개 이벤트가 있습니다.`,
+      deliveredEvents.length > 0 && droppedEvents.length === 0 ? "pass" : deliveredEvents.length > 0 ? "partial" : "fail",
+      10,
+      deliveredEvents.length > 0 && droppedEvents.length === 0 ? 10 : deliveredEvents.length > 0 ? 6 : 0
+    ),
+    makeActivityCheck(
+      "startup-config",
+      "CLI",
+      "Startup-config 저장",
+      networkDevices.length === 0 ? "저장할 네트워크 장비가 없습니다." : `${savedNetworkDevices.length}/${networkDevices.length}개 네트워크 장비에 startup-config가 있습니다.`,
+      networkDevices.length === 0 ? "todo" : savedNetworkDevices.length === networkDevices.length ? "pass" : savedNetworkDevices.length > 0 ? "partial" : "fail",
+      5,
+      networkDevices.length === 0 ? 0 : savedNetworkDevices.length === networkDevices.length ? 5 : savedNetworkDevices.length > 0 ? 3 : 0
+    )
+  ];
+  return summarizeActivityChecks(checks);
+}
+
+function makeActivityCheck(id: string, category: string, label: string, detail: string, status: ActivityCheckStatus, points: number, earned: number): ActivityCheck {
+  return { id, category, label, detail, status, points, earned: Math.max(0, Math.min(points, earned)) };
+}
+
+function mergeActivityAssessment(assessment: ActivityAssessment, replacements: Record<string, ActivityCheck>): ActivityAssessment {
+  const entries = Object.entries(replacements);
+  if (!entries.length) return assessment;
+  const replacementMap = new Map(entries);
+  return summarizeActivityChecks(assessment.checks.map((check) => replacementMap.get(check.id) ?? check));
+}
+
+function summarizeActivityChecks(checks: ActivityCheck[]): ActivityAssessment {
+  const scoredChecks = checks.filter((check) => check.status !== "todo");
+  const earned = scoredChecks.reduce((sum, check) => sum + check.earned, 0);
+  const total = scoredChecks.reduce((sum, check) => sum + check.points, 0);
+  return {
+    checks,
+    earned,
+    total,
+    score: total ? Math.round((earned / total) * 100) : 0,
+    passed: checks.filter((check) => check.status === "pass").length,
+    partial: checks.filter((check) => check.status === "partial").length,
+    failed: checks.filter((check) => check.status === "fail").length,
+    todo: checks.filter((check) => check.status === "todo").length
+  };
+}
+
+function captureActivityAnswerSnapshot(project: NetworkProject): NonNullable<NonNullable<NetworkProject["activity"]>["answerSnapshot"]> {
+  return {
+    capturedAt: new Date().toISOString(),
+    devices: project.devices.map((device) => ({ id: device.id, label: device.label, kind: device.kind, model: device.model })),
+    links: project.links.map((link) => ({ id: link.id, type: link.type, endpointADeviceId: link.endpointA.deviceId, endpointBDeviceId: link.endpointB.deviceId })),
+    annotationCount: (project.notes ?? []).length + (project.drawings ?? []).length,
+    serviceDeviceIds: project.devices.filter((device) => enabledServices(device).length > 0).map((device) => device.id),
+    startupConfigDeviceIds: project.devices.filter((device) => device.config.startupConfig.length > 0).map((device) => device.id)
+  };
+}
+
+function assessActivityAnswerSnapshot(project: NetworkProject, snapshot: NonNullable<NonNullable<NetworkProject["activity"]>["answerSnapshot"]>): ActivityCheck[] {
+  const expectedDeviceIds = new Set(snapshot.devices.map((device) => device.id));
+  const matchedDevices = snapshot.devices.filter((expected) => project.devices.some((device) => device.id === expected.id && device.kind === expected.kind && device.model === expected.model)).length;
+  const extraDevices = project.devices.filter((device) => !expectedDeviceIds.has(device.id)).length;
+  const deviceTarget = Math.max(1, snapshot.devices.length + extraDevices);
+  const deviceEarned = snapshot.devices.length === 0 && extraDevices === 0 ? 10 : Math.round((matchedDevices / deviceTarget) * 10);
+
+  const expectedLinkKeys = new Set(snapshot.links.map((link) => activitySnapshotLinkKey(link.endpointADeviceId, link.endpointBDeviceId, link.type)));
+  const currentLinkKeys = new Set(project.links.map((link) => activitySnapshotLinkKey(link.endpointA.deviceId, link.endpointB.deviceId, link.type)));
+  const matchedLinks = Array.from(expectedLinkKeys).filter((key) => currentLinkKeys.has(key)).length;
+  const extraLinks = Array.from(currentLinkKeys).filter((key) => !expectedLinkKeys.has(key)).length;
+  const linkTarget = Math.max(1, expectedLinkKeys.size + extraLinks);
+  const linkEarned = expectedLinkKeys.size === 0 && extraLinks === 0 ? 10 : Math.round((matchedLinks / linkTarget) * 10);
+
+  const currentAnnotationCount = (project.notes ?? []).length + (project.drawings ?? []).length;
+  const currentServiceIds = new Set(project.devices.filter((device) => enabledServices(device).length > 0).map((device) => device.id));
+  const currentStartupIds = new Set(project.devices.filter((device) => device.config.startupConfig.length > 0).map((device) => device.id));
+  const matchedServices = snapshot.serviceDeviceIds.filter((id) => currentServiceIds.has(id)).length;
+  const matchedStartup = snapshot.startupConfigDeviceIds.filter((id) => currentStartupIds.has(id)).length;
+
+  return [
+    makeActivityCheck(
+      "answer-devices",
+      "Answer Snapshot",
+      "정답 장비 일치",
+      `장비 ${matchedDevices}/${snapshot.devices.length}개 일치, 추가 ${extraDevices}개`,
+      matchedDevices === snapshot.devices.length && extraDevices === 0 ? "pass" : matchedDevices > 0 ? "partial" : "fail",
+      10,
+      deviceEarned
+    ),
+    makeActivityCheck(
+      "answer-links",
+      "Answer Snapshot",
+      "정답 링크 일치",
+      `링크 ${matchedLinks}/${expectedLinkKeys.size}개 일치, 추가 ${extraLinks}개`,
+      matchedLinks === expectedLinkKeys.size && extraLinks === 0 ? "pass" : matchedLinks > 0 ? "partial" : "fail",
+      10,
+      linkEarned
+    ),
+    makeActivityCheck(
+      "answer-annotations",
+      "Answer Snapshot",
+      "정답 주석 수",
+      `주석 ${currentAnnotationCount}/${snapshot.annotationCount}개`,
+      currentAnnotationCount >= snapshot.annotationCount ? "pass" : currentAnnotationCount > 0 ? "partial" : "fail",
+      5,
+      snapshot.annotationCount === 0 ? 5 : Math.round((Math.min(currentAnnotationCount, snapshot.annotationCount) / snapshot.annotationCount) * 5)
+    ),
+    makeActivityCheck(
+      "answer-services",
+      "Answer Snapshot",
+      "정답 서비스 장비",
+      `서비스 장비 ${matchedServices}/${snapshot.serviceDeviceIds.length}개`,
+      matchedServices === snapshot.serviceDeviceIds.length ? "pass" : matchedServices > 0 ? "partial" : "fail",
+      5,
+      snapshot.serviceDeviceIds.length === 0 ? 5 : Math.round((matchedServices / snapshot.serviceDeviceIds.length) * 5)
+    ),
+    makeActivityCheck(
+      "answer-startup-config",
+      "Answer Snapshot",
+      "정답 startup-config",
+      `startup-config ${matchedStartup}/${snapshot.startupConfigDeviceIds.length}개`,
+      matchedStartup === snapshot.startupConfigDeviceIds.length ? "pass" : matchedStartup > 0 ? "partial" : "fail",
+      5,
+      snapshot.startupConfigDeviceIds.length === 0 ? 5 : Math.round((matchedStartup / snapshot.startupConfigDeviceIds.length) * 5)
+    )
+  ];
+}
+
+function activitySnapshotLinkKey(aDeviceId: string, bDeviceId: string, type: CableType): string {
+  return [aDeviceId, bDeviceId].sort().join("<->") + `:${type}`;
+}
+
+function assessActivityCommandRule(project: NetworkProject, rule: NonNullable<NonNullable<NetworkProject["activity"]>["commandRules"]>[number]): ActivityCheck {
+  const matched = activityCommandRuleMatched(project, rule);
+  const deviceLabel = rule.deviceId ? eventDeviceLabel(project, rule.deviceId) : "Any device";
+  return makeActivityCheck(
+    `command-rule-${rule.id}`,
+    "Command Rules",
+    rule.label || rule.command,
+    matched ? `${deviceLabel} startup-config contains "${rule.command}"` : `${deviceLabel} startup-config missing "${rule.command}"`,
+    matched ? "pass" : "fail",
+    rule.points,
+    matched ? rule.points : 0
+  );
+}
+
+function activityCommandRuleMatched(project: NetworkProject, rule: NonNullable<NonNullable<NetworkProject["activity"]>["commandRules"]>[number]): boolean {
+  const expected = normalizeCommandRuleText(rule.command);
+  if (!expected) return false;
+  const devices = rule.deviceId ? project.devices.filter((device) => device.id === rule.deviceId) : project.devices;
+  return devices.some((device) => device.config.startupConfig.some((line) => normalizeCommandRuleText(line).includes(expected)));
+}
+
+function normalizeCommandRuleText(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function assessActivityCommandSequence(project: NetworkProject, sequence: NonNullable<NonNullable<NetworkProject["activity"]>["commandSequences"]>[number]): ActivityCheck {
+  const devices = sequence.deviceId ? project.devices.filter((device) => device.id === sequence.deviceId) : project.devices;
+  const best = devices.reduce((bestMatch, device) => Math.max(bestMatch, orderedCommandMatchCount(device.config.startupConfig, sequence.commands)), 0);
+  const total = Math.max(1, sequence.commands.length);
+  const deviceLabel = sequence.deviceId ? eventDeviceLabel(project, sequence.deviceId) : "Any device";
+  return makeActivityCheck(
+    `command-sequence-${sequence.id}`,
+    "Command Rules",
+    sequence.label,
+    `${deviceLabel}: ordered commands ${best}/${sequence.commands.length}`,
+    best === sequence.commands.length ? "pass" : best > 0 ? "partial" : "fail",
+    sequence.points,
+    Math.round((best / total) * sequence.points)
+  );
+}
+
+function orderedCommandMatchCount(startupConfig: string[], commands: string[]): number {
+  const lines = startupConfig.map(normalizeCommandRuleText);
+  let cursor = 0;
+  let matched = 0;
+  for (const command of commands.map(normalizeCommandRuleText)) {
+    const index = lines.findIndex((line, lineIndex) => lineIndex >= cursor && line.includes(command));
+    if (index < 0) break;
+    matched += 1;
+    cursor = index + 1;
+  }
+  return matched;
+}
+
+function assessActivityCommandOutputAssertion(project: NetworkProject, assertion: NonNullable<NonNullable<NetworkProject["activity"]>["commandOutputAssertions"]>[number]): ActivityCheck {
+  const devices = assertion.deviceId ? project.devices.filter((device) => device.id === assertion.deviceId) : project.devices;
+  const expected = assertion.expectedText.trim().toLowerCase();
+  const matched = devices.some((device) => runActivityCliCommands(device, assertion.commands).toLowerCase().includes(expected));
+  const deviceLabel = assertion.deviceId ? eventDeviceLabel(project, assertion.deviceId) : "Any device";
+  return makeActivityCheck(
+    `command-output-${assertion.id}`,
+    "Command Rules",
+    assertion.label,
+    matched ? `${deviceLabel}: CLI output contains "${assertion.expectedText}"` : `${deviceLabel}: CLI output missing "${assertion.expectedText}"`,
+    matched ? "pass" : "fail",
+    assertion.points,
+    matched ? assertion.points : 0
+  );
+}
+
+async function assessActivityCommandOutputAssertionWithEngine(project: NetworkProject, assertion: NonNullable<NonNullable<NetworkProject["activity"]>["commandOutputAssertions"]>[number]): Promise<ActivityCheck> {
+  const devices = assertion.deviceId ? project.devices.filter((device) => device.id === assertion.deviceId) : project.devices;
+  const expected = assertion.expectedText.trim().toLowerCase();
+  let matched = false;
+  for (const device of devices) {
+    const output = await runActivityCliCommandsWithEngine(device, assertion.commands);
+    if (output.toLowerCase().includes(expected)) {
+      matched = true;
+      break;
+    }
+  }
+  const deviceLabel = assertion.deviceId ? eventDeviceLabel(project, assertion.deviceId) : "Any device";
+  const engine = cliEngine.kind === "remote" ? "Remote CLI" : "Local CLI";
+  return makeActivityCheck(
+    `command-output-${assertion.id}`,
+    "Command Rules",
+    assertion.label,
+    matched ? `${engine} ${deviceLabel}: CLI output contains "${assertion.expectedText}"` : `${engine} ${deviceLabel}: CLI output missing "${assertion.expectedText}"`,
+    matched ? "pass" : "fail",
+    assertion.points,
+    matched ? assertion.points : 0
+  );
+}
+
+function runActivityCliCommands(sourceDevice: NetworkDevice, commands: string[]): string {
+  let device = sourceDevice;
+  let session = initialCliSession();
+  const output: string[] = [];
+  for (const command of commands) {
+    const result = runCliCommand(device, session, command);
+    device = result.device;
+    session = result.session;
+    output.push(result.output || "");
+  }
+  return output.join("\n");
+}
+
+async function runActivityCliCommandsWithEngine(sourceDevice: NetworkDevice, commands: string[]): Promise<string> {
+  let device = sourceDevice;
+  let session = cliEngine.initialSession();
+  const output: string[] = [];
+  for (const command of commands) {
+    const result = await cliEngine.run(device, session, command);
+    device = result.device;
+    session = result.session;
+    output.push(result.output || "");
+  }
+  return output.join("\n");
+}
+
+function assessActivityInterfaceExpectation(project: NetworkProject, expectation: NonNullable<NonNullable<NetworkProject["activity"]>["interfaceExpectations"]>[number]): ActivityCheck {
+  const device = project.devices.find((item) => item.id === expectation.deviceId);
+  const port = device?.ports.find((item) => item.id === expectation.portId);
+  if (!device || !port) {
+    return makeActivityCheck(`interface-expectation-${expectation.id}`, "Interface Expectations", expectation.label, "대상 장비 또는 포트가 없습니다.", "fail", expectation.points, 0);
+  }
+  const expected = [
+    expectation.ipAddress ? { label: "IP", ok: port.ipAddress === expectation.ipAddress, value: `${port.ipAddress || "-"}=${expectation.ipAddress}` } : null,
+    expectation.subnetMask ? { label: "Mask", ok: port.subnetMask === expectation.subnetMask, value: `${port.subnetMask || "-"}=${expectation.subnetMask}` } : null,
+    expectation.mode ? { label: "Mode", ok: port.mode === expectation.mode, value: `${port.mode}=${expectation.mode}` } : null,
+    expectation.vlan ? { label: "VLAN", ok: port.vlan === expectation.vlan, value: `${port.vlan}=${expectation.vlan}` } : null
+  ].filter((item): item is { label: string; ok: boolean; value: string } => Boolean(item));
+  const matched = expected.filter((item) => item.ok).length;
+  const total = Math.max(1, expected.length);
+  return makeActivityCheck(
+    `interface-expectation-${expectation.id}`,
+    "Interface Expectations",
+    expectation.label || `${device.label} ${port.name}`,
+    expected.length ? `${device.label} ${port.name}: ${expected.map((item) => `${item.label} ${item.value}`).join(", ")}` : `${device.label} ${port.name}: 기대값 없음`,
+    matched === total ? "pass" : matched > 0 ? "partial" : "fail",
+    expectation.points,
+    Math.round((matched / total) * expectation.points)
+  );
+}
+
+function assessActivityHeaderAssertion(project: NetworkProject, assertion: NonNullable<NonNullable<NetworkProject["activity"]>["headerAssertions"]>[number]): ActivityCheck {
+  const protocol = assertion.protocol?.trim().toUpperCase();
+  const field = assertion.field.trim().toLowerCase();
+  const value = assertion.value.trim().toLowerCase();
+  const matchingEvent = project.simulationEvents.find((event) =>
+    (!protocol || event.type.toUpperCase() === protocol) &&
+    pduHeaderRowsFor(project, event).some((header) => header.field.toLowerCase() === field && header.value.toLowerCase().includes(value))
+  );
+  return makeActivityCheck(
+    `header-assertion-${assertion.id}`,
+    "PDU Header Assertions",
+    assertion.label || `${assertion.field}=${assertion.value}`,
+    matchingEvent ? `일치 이벤트: ${matchingEvent.type} ${(matchingEvent.packetId ?? matchingEvent.id).slice(-10)}` : `${protocol || "Any"} ${assertion.field}=${assertion.value} 헤더가 없습니다.`,
+    matchingEvent ? "pass" : "fail",
+    assertion.points,
+    matchingEvent ? assertion.points : 0
+  );
+}
+
+function assessActivityRequirement(project: NetworkProject, requirement: NonNullable<NetworkProject["activity"]>["requirements"][number]): ActivityCheck {
+  const current = activityRequirementCurrentValue(project, requirement.kind);
+  const target = Math.max(1, requirement.target);
+  const points = Math.max(1, requirement.points);
+  const ratio = Math.min(1, current / target);
+  const status: ActivityCheckStatus = current >= target ? "pass" : current > 0 ? "partial" : "fail";
+  return makeActivityCheck(
+    `activity-${requirement.id}`,
+    "Instructor Criteria",
+    requirement.label || activityRequirementKindLabel(requirement.kind),
+    `${activityRequirementKindLabel(requirement.kind)} ${current}/${target}`,
+    status,
+    points,
+    Math.round(points * ratio)
+  );
+}
+
+function activityRequirementCurrentValue(project: NetworkProject, kind: ActivityRequirementKind): number {
+  if (kind === "device-count") return project.devices.length;
+  if (kind === "link-count") return project.links.length;
+  if (kind === "annotation-count") return (project.notes ?? []).length + (project.drawings ?? []).length;
+  if (kind === "delivered-pdu-count") return project.simulationEvents.filter((event) => event.status === "delivered").length;
+  if (kind === "saved-config-count") {
+    return project.devices.filter((device) => (device.kind === "router" || device.kind === "switch" || device.kind === "firewall" || device.kind === "wireless") && device.config.startupConfig.length > 0).length;
+  }
+  if (kind === "tdr-normal-count") return project.links.filter((link) => linkCableDiagnosticSummary(project, link).summary === "TDR Normal/Normal").length;
+  return project.devices.filter((device) => enabledServices(device).length > 0).length;
+}
+
+function activityRequirementKindLabel(kind: ActivityRequirementKind): string {
+  return activityRequirementCatalog.find((item) => item.kind === kind)?.label ?? kind;
+}
+
+function defaultActivityObjectives(): string[] {
+  return [
+    "라우터, 스위치, PC/서버를 배치하고 모든 링크를 up 상태로 유지합니다.",
+    "메모와 도형으로 서버 영역, VLAN 범위, 시험 TODO 같은 작업공간 주석을 남깁니다.",
+    "호스트와 라우팅 장비의 IPv4 주소, subnet mask, gateway, DNS를 일관되게 설정합니다.",
+    "DHCP, DNS, HTTP, FTP, EMAIL, TFTP, SYSLOG 같은 서버 서비스를 켜고 도달성을 확인합니다.",
+    "Simple PDU, Complex PDU, Desktop 명령, CLI ping/traceroute로 패킷 흐름을 검증합니다.",
+    "Physical 탭과 TDR 명령으로 구리 케이블 상태를 점검합니다.",
+    "네트워크 장비의 running-config를 startup-config에 저장합니다."
+  ];
+}
+
+function promptBoundedInteger(title: string, initialValue: number, min: number, max: number): number | null {
+  const raw = window.prompt(title, String(initialValue));
+  if (raw === null) return null;
+  const value = Number.parseInt(raw.trim(), 10);
+  if (!Number.isFinite(value)) return null;
+  return Math.max(min, Math.min(max, value));
+}
+
+function activityStatusLabel(status: ActivityCheckStatus): string {
+  return ({ pass: "통과", partial: "부분", fail: "실패", todo: "TODO" })[status];
+}
+
+function activityScoreClass(score: number): string {
+  if (score >= 80) return "high";
+  if (score >= 50) return "mid";
+  return "low";
+}
+
+function activityReportLines(project: NetworkProject, assessment = assessActivity(project)): string[] {
+  return [
+    "Network Editor Web Activity Wizard Check Results",
+    `Project: ${project.name}`,
+    `Generated: ${new Date().toLocaleString()}`,
+    "",
+    `Score: ${assessment.score}% (${assessment.earned}/${assessment.total} pts)`,
+    `Passed: ${assessment.passed}, Partial: ${assessment.partial}, Failed: ${assessment.failed}, TODO: ${assessment.todo}`,
+    "",
+    "Assessment Items",
+    ...assessment.checks.map((check) => `- [${activityStatusLabel(check.status)}] ${check.category} / ${check.label}: ${check.detail} (${check.earned}/${check.points})`),
+    "",
+    "TODO",
+    "- Add browser-driven checks for live CLI responses and Activity Wizard active CLI engine output assertion UI.",
+    "- Add browser visual regression coverage for Activity Wizard authoring panels."
+  ];
 }
 
 function DeviceWindow({
@@ -1824,6 +3598,9 @@ function WorkspaceContextMenu({
   onPhysical,
   onPlaceModel,
   onArrange,
+  onPhysicalArrange,
+  onNote,
+  onDrawing,
   onRepair
 }: {
   x: number;
@@ -1837,6 +3614,9 @@ function WorkspaceContextMenu({
   onPhysical: () => void;
   onPlaceModel: (modelId: string) => void;
   onArrange: () => void;
+  onPhysicalArrange: () => void;
+  onNote: () => void;
+  onDrawing: (kind: WorkspaceDrawingKind) => void;
   onRepair: () => void;
 }) {
   useEffect(() => {
@@ -1878,7 +3658,13 @@ function WorkspaceContextMenu({
         <button onClick={onZoomReset} type="button"><RotateCcw size={15} />확대 100%</button>
         <button className={mode === "logical" ? "active" : ""} onClick={onLogical} type="button"><Network size={15} />논리</button>
         <button className={mode === "physical" ? "active" : ""} onClick={onPhysical} type="button"><Cpu size={15} />물리</button>
+        <button onClick={onNote} type="button"><Edit3 size={15} />여기에 메모 추가</button>
+        <button onClick={() => onDrawing("rectangle")} type="button"><Square size={15} />여기에 사각형 영역</button>
+        <button onClick={() => onDrawing("ellipse")} type="button"><CircleDot size={15} />여기에 타원 영역</button>
+        <button onClick={() => onDrawing("line")} type="button"><Minus size={15} />여기에 라인</button>
+        <button onClick={() => onDrawing("freehand")} type="button"><PenLine size={15} />여기에 자유선</button>
         <button onClick={onArrange} type="button"><Maximize2 size={15} />장비 자동 정렬</button>
+        <button onClick={onPhysicalArrange} type="button"><Cpu size={15} />물리 기준 자동 정렬</button>
         <button onClick={onRepair} type="button"><Settings size={15} />프로젝트 복구</button>
       </div>
     </div>
@@ -1965,6 +3751,7 @@ function LinkContextMenu({
   const allPortsAdminUp = endpointPorts.length === 2 && endpointPorts.every((port) => port.adminUp);
   const serialClockMissing = (link.type === "serial-dce" || link.type === "serial-dte") && endpointPorts.every((port) => !port.clockRate);
   const hasVlanIssue = linkHasVlanIssue(project, link);
+  const cableDiagnostic = linkCableDiagnosticSummary(project, link);
   const left = typeof window === "undefined" ? x : Math.min(x, Math.max(8, window.innerWidth - 280));
   const top = typeof window === "undefined" ? y : Math.min(y, Math.max(8, window.innerHeight - 380));
 
@@ -1981,6 +3768,7 @@ function LinkContextMenu({
         <small>링크</small>
         <span>{linkLabel(project, link)}</span>
         <span>{linkStatusDetail(project, link)}</span>
+        <span title={cableDiagnostic.detail}>{cableDiagnostic.summary}</span>
       </div>
       <div className="context-menu-section">
         <small>끝점</small>
@@ -2006,13 +3794,17 @@ function LinkContextMenu({
 function WorkspaceMiniMap({
   project,
   selectedDeviceId,
+  selectedDrawingId,
   selectedLinkId,
+  selectedNoteId,
   viewport,
   onJump
 }: {
   project: NetworkProject;
   selectedDeviceId: string;
+  selectedDrawingId: string;
   selectedLinkId: string;
+  selectedNoteId: string;
   viewport: CanvasViewport;
   onJump: (point: { x: number; y: number }) => void;
 }) {
@@ -2048,7 +3840,7 @@ function WorkspaceMiniMap({
       <header className="minimap-head">
         <div>
           <strong>미니맵</strong>
-          <small>{project.devices.length} 장비 / {project.links.length} 링크</small>
+          <small>{project.devices.length} 장비 / {project.links.length} 링크 / {(project.notes ?? []).length + (project.drawings ?? []).length} 주석</small>
         </div>
         <span>클릭 이동</span>
       </header>
@@ -2072,6 +3864,40 @@ function WorkspaceMiniMap({
             );
           })}
         </svg>
+        {(project.drawings ?? []).map((drawing) => {
+          const center = drawingCenter(drawing);
+          return (
+            <button
+              className={`minimap-drawing ${drawing.kind} ${drawing.color} ${selectedDrawingId === drawing.id ? "selected" : ""}`}
+              key={drawing.id}
+              onClick={(event) => {
+                event.stopPropagation();
+                onJump(center);
+              }}
+              style={{
+                left: `${(drawing.position.x / CANVAS_WIDTH) * 100}%`,
+                top: `${(drawing.position.y / CANVAS_HEIGHT) * 100}%`,
+                width: `${Math.max(1.4, (drawing.width / CANVAS_WIDTH) * 100)}%`,
+                height: `${Math.max(1.1, (drawing.height / CANVAS_HEIGHT) * 100)}%`
+              }}
+              title={`${drawing.label || workspaceDrawingKindLabel(drawing.kind)}로 이동`}
+              type="button"
+            />
+          );
+        })}
+        {(project.notes ?? []).map((note) => (
+          <button
+            className={`minimap-note ${note.color} ${selectedNoteId === note.id ? "selected" : ""}`}
+            key={note.id}
+            onClick={(event) => {
+              event.stopPropagation();
+              onJump({ x: note.position.x + 110, y: note.position.y + 44 });
+            }}
+            style={{ left: `${((note.position.x + 110) / CANVAS_WIDTH) * 100}%`, top: `${((note.position.y + 44) / CANVAS_HEIGHT) * 100}%` }}
+            title={`메모: ${note.text}`}
+            type="button"
+          />
+        ))}
         {project.devices.map((device) => {
           const center = nodeCenter(device);
           return (
@@ -2089,7 +3915,7 @@ function WorkspaceMiniMap({
           );
         })}
         <span className="minimap-viewport" style={viewportStyle} />
-        {!project.devices.length && <span className="minimap-empty">장비 없음</span>}
+        {!project.devices.length && !(project.notes ?? []).length && !(project.drawings ?? []).length && <span className="minimap-empty">장비 없음</span>}
       </div>
     </aside>
   );
@@ -2099,6 +3925,7 @@ function SelectedLinkCard({ link, project, onRemove }: { link: NetworkLink; proj
   const point = linkMidpoint(project, link);
   if (!point) return null;
   const endpoints = linkEndpointSummaries(project, link);
+  const cableDiagnostic = linkCableDiagnosticSummary(project, link);
   return (
     <div
       className={`selected-link-card ${link.status}`}
@@ -2122,6 +3949,7 @@ function SelectedLinkCard({ link, project, onRemove }: { link: NetworkLink; proj
         ))}
       </div>
       <em>{linkStatusDetail(project, link)}</em>
+      <em title={cableDiagnostic.detail}>{cableDiagnostic.summary}</em>
       <button className="danger" onClick={() => onRemove(link.id)} type="button"><Trash2 size={14} />케이블 삭제</button>
     </div>
   );
@@ -2173,6 +4001,56 @@ function DeviceIcon({ kind, size = 18 }: { kind: DeviceKind; size?: number }) {
   return <CircleDot size={size} />;
 }
 
+function WorkspaceDrawingIcon({ kind, size = 18 }: { kind: WorkspaceDrawingKind; size?: number }) {
+  if (kind === "rectangle") return <Square size={size} />;
+  if (kind === "line") return <Minus size={size} />;
+  if (kind === "freehand") return <PenLine size={size} />;
+  return <CircleDot size={size} />;
+}
+
+function WorkspaceDrawingShape({ drawing, selected, onResizeStart }: { drawing: WorkspaceDrawing; selected: boolean; onResizeStart?: (event: React.PointerEvent<SVGRectElement>, drawing: WorkspaceDrawing, handle: DrawingResizeHandle) => void }) {
+  const label = drawing.label.trim().slice(0, 42);
+  const labelX = drawing.kind === "line" ? drawing.width / 2 : drawing.width / 2;
+  const labelY = drawing.kind === "line" || drawing.kind === "freehand" ? drawing.height / 2 - 8 : Math.min(drawing.height - 14, 24);
+  const handles = selected ? drawingResizeHandles(drawing) : [];
+  const freehandPoints = drawing.points ?? defaultFreehandPoints(drawing.width, drawing.height);
+  return (
+    <>
+      {drawing.kind === "rectangle" && <rect className="drawing-shape" width={drawing.width} height={drawing.height} rx={8} />}
+      {drawing.kind === "ellipse" && <ellipse className="drawing-shape" cx={drawing.width / 2} cy={drawing.height / 2} rx={drawing.width / 2} ry={drawing.height / 2} />}
+      {drawing.kind === "line" && (
+        <>
+          <line className="drawing-hitbox" x1={0} x2={drawing.width} y1={0} y2={drawing.height} />
+          <line className="drawing-shape" x1={0} x2={drawing.width} y1={0} y2={drawing.height} />
+        </>
+      )}
+      {drawing.kind === "freehand" && (
+        <>
+          <polyline className="drawing-hitbox" points={drawingPointsAttribute(freehandPoints)} />
+          <polyline className="drawing-shape" points={drawingPointsAttribute(freehandPoints)} />
+        </>
+      )}
+      {selected && <rect className="drawing-selection-outline" x={-6} y={-6} width={drawing.width + 12} height={drawing.height + 12} rx={10} />}
+      {label && <text className="drawing-label" x={labelX} y={labelY}>{label}</text>}
+      {handles.map((handle) => (
+        <rect
+          aria-label={`도형 ${handle.id} 크기 조절`}
+          className={`drawing-resize-handle ${handle.id}`}
+          height={12}
+          key={handle.id}
+          onPointerDown={(event) => onResizeStart?.(event, drawing, handle.id)}
+          role="button"
+          rx={3}
+          tabIndex={-1}
+          width={12}
+          x={handle.x - 6}
+          y={handle.y - 6}
+        />
+      ))}
+    </>
+  );
+}
+
 function nodeSize(kind: DeviceKind): { width: number; height: number } {
   if (kind === "switch") return { width: 148, height: 116 };
   if (kind === "server") return { width: 112, height: 96 };
@@ -2194,6 +4072,208 @@ function nodeCenter(device: NetworkDevice): { x: number; y: number } {
   return { x: device.position.x + size.width / 2, y: device.position.y + size.height / 2 };
 }
 
+function drawingDefaultSize(kind: WorkspaceDrawingKind): { width: number; height: number } {
+  if (kind === "freehand") return { width: 260, height: 130 };
+  if (kind === "line") return { width: 280, height: 120 };
+  if (kind === "ellipse") return { width: 280, height: 156 };
+  return { width: 320, height: 184 };
+}
+
+function drawingMinSize(kind: WorkspaceDrawingKind): { width: number; height: number } {
+  if (kind === "freehand") return { width: 28, height: 8 };
+  if (kind === "line") return { width: 28, height: 8 };
+  return { width: 48, height: 32 };
+}
+
+function freehandDrawingFromPoints(points: Array<{ x: number; y: number }>, label: string): WorkspaceDrawing {
+  const minSize = drawingMinSize("freehand");
+  const minX = Math.max(0, Math.min(...points.map((point) => point.x)));
+  const minY = Math.max(0, Math.min(...points.map((point) => point.y)));
+  const maxX = Math.min(CANVAS_WIDTH, Math.max(...points.map((point) => point.x)));
+  const maxY = Math.min(CANVAS_HEIGHT, Math.max(...points.map((point) => point.y)));
+  const width = Math.max(minSize.width, Math.round(maxX - minX));
+  const height = Math.max(minSize.height, Math.round(maxY - minY));
+  const position = {
+    x: Math.max(0, Math.min(CANVAS_WIDTH - width, Math.round(minX))),
+    y: Math.max(0, Math.min(CANVAS_HEIGHT - height, Math.round(minY)))
+  };
+  return {
+    id: createId("draw"),
+    kind: "freehand",
+    label,
+    position,
+    width,
+    height,
+    points: points.map((point) => ({
+      x: Math.max(0, Math.min(width, Math.round(point.x - position.x))),
+      y: Math.max(0, Math.min(height, Math.round(point.y - position.y)))
+    })).slice(-300),
+    color: "blue",
+    strokeStyle: "solid",
+    fill: false
+  };
+}
+
+function defaultFreehandPoints(width: number, height: number): Array<{ x: number; y: number }> {
+  return [
+    { x: 0, y: Math.round(height * 0.62) },
+    { x: Math.round(width * 0.24), y: Math.round(height * 0.28) },
+    { x: Math.round(width * 0.52), y: Math.round(height * 0.7) },
+    { x: Math.round(width * 0.78), y: Math.round(height * 0.38) },
+    { x: width, y: Math.round(height * 0.58) }
+  ];
+}
+
+function drawingPointsAttribute(points: Array<{ x: number; y: number }>): string {
+  return points.map((point) => `${Math.round(point.x)},${Math.round(point.y)}`).join(" ");
+}
+
+function drawingResizeHandles(drawing: WorkspaceDrawing): Array<{ id: DrawingResizeHandle; x: number; y: number }> {
+  return [
+    { id: "nw", x: 0, y: 0 },
+    { id: "ne", x: drawing.width, y: 0 },
+    { id: "se", x: drawing.width, y: drawing.height },
+    { id: "sw", x: 0, y: drawing.height }
+  ];
+}
+
+function drawingPlacement(kind: WorkspaceDrawingKind, point: { x: number; y: number }): { position: { x: number; y: number }; width: number; height: number } {
+  const size = drawingDefaultSize(kind);
+  return {
+    ...size,
+    position: drawingPlacementPosition(point, { width: size.width, height: size.height }, true)
+  };
+}
+
+function drawingPlacementPosition(point: { x: number; y: number }, drawing: Pick<WorkspaceDrawing, "width" | "height">, center = true): { x: number; y: number } {
+  const x = center ? point.x - drawing.width / 2 : point.x;
+  const y = center ? point.y - drawing.height / 2 : point.y;
+  return {
+    x: Math.max(16, Math.min(CANVAS_WIDTH - drawing.width - 16, Math.round(x))),
+    y: Math.max(16, Math.min(CANVAS_HEIGHT - drawing.height - 16, Math.round(y)))
+  };
+}
+
+function drawingCenter(drawing: WorkspaceDrawing): { x: number; y: number } {
+  return { x: drawing.position.x + drawing.width / 2, y: drawing.position.y + drawing.height / 2 };
+}
+
+function workspaceSearchResultsFor(project: NetworkProject, query: string): WorkspaceSearchResult[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  const deviceResults: WorkspaceSearchResult[] = project.devices
+    .filter((device) => workspaceDeviceSearchText(device).includes(needle))
+    .map((device) => ({
+      id: device.id,
+      kind: "device" as const,
+      label: device.label,
+      detail: `${device.model} | ${displayKind(device.kind)} | ${primaryDeviceIp(device) || "IP 없음"}`,
+      point: nodeCenter(device)
+    }));
+  const linkResults: WorkspaceSearchResult[] = project.links
+    .filter((link) => linkSearchText(project, link).toLowerCase().includes(needle))
+    .flatMap((link) => {
+      const point = linkMidpoint(project, link);
+      if (!point) return [];
+      return [{
+        id: link.id,
+        kind: "link" as const,
+        label: shortCableLabel(link.type),
+        detail: `${linkLabel(project, link)} | ${linkStatusLabel(link.status)}`,
+        point
+      }];
+    });
+  const noteResults: WorkspaceSearchResult[] = (project.notes ?? [])
+    .filter((note) => note.text.toLowerCase().includes(needle))
+    .map((note) => ({
+      id: note.id,
+      kind: "note" as const,
+      label: "메모",
+      detail: note.text,
+      point: { x: note.position.x + 110, y: note.position.y + 44 }
+    }));
+  const drawingResults: WorkspaceSearchResult[] = (project.drawings ?? [])
+    .filter((drawing) => workspaceDrawingSearchText(drawing).includes(needle))
+    .map((drawing) => ({
+      id: drawing.id,
+      kind: "drawing" as const,
+      label: drawing.label || workspaceDrawingKindLabel(drawing.kind),
+      detail: `${workspaceDrawingKindLabel(drawing.kind)} | ${workspaceDrawingColorLabel(drawing.color)}`,
+      point: drawingCenter(drawing)
+    }));
+  return [...deviceResults, ...linkResults, ...noteResults, ...drawingResults].slice(0, 10);
+}
+
+function workspaceDeviceSearchText(device: NetworkDevice): string {
+  return [
+    device.label,
+    device.model,
+    device.config.hostname,
+    displayKind(device.kind),
+    ...enabledServices(device),
+    ...device.ports.flatMap((port) => [port.name, port.ipAddress, port.gateway, port.dnsServer, port.description])
+  ].join(" ").toLowerCase();
+}
+
+function notePlacementPosition(point: { x: number; y: number }, center = true): { x: number; y: number } {
+  const width = 220;
+  const height = 108;
+  const x = center ? point.x - width / 2 : point.x;
+  const y = center ? point.y - 22 : point.y;
+  return {
+    x: Math.max(16, Math.min(CANVAS_WIDTH - width - 16, Math.round(x))),
+    y: Math.max(16, Math.min(CANVAS_HEIGHT - height - 16, Math.round(y)))
+  };
+}
+
+function workspaceDrawingKindLabel(kind: WorkspaceDrawingKind): string {
+  if (kind === "rectangle") return "사각형 영역";
+  if (kind === "ellipse") return "타원 영역";
+  if (kind === "freehand") return "자유선";
+  return "라인";
+}
+
+function workspaceDrawingColorLabel(color: WorkspaceDrawing["color"]): string {
+  return ({ amber: "노랑", blue: "파랑", green: "초록", rose: "분홍" })[color];
+}
+
+function workspaceDrawingSearchText(drawing: WorkspaceDrawing): string {
+  return [
+    drawing.label,
+    drawing.kind,
+    workspaceDrawingKindLabel(drawing.kind),
+    drawing.color,
+    workspaceDrawingColorLabel(drawing.color),
+    drawing.strokeStyle
+  ].join(" ").toLowerCase();
+}
+
+function promptWorkspaceNote(title: string, initialValue = "TODO: lab note"): string | null {
+  if (typeof window === "undefined") return initialValue;
+  const value = window.prompt(title, initialValue);
+  if (value === null) return null;
+  return value.trim().replace(/\s+/g, " ").slice(0, 240);
+}
+
+function promptWorkspaceDrawingLabel(kind: WorkspaceDrawingKind, initialValue = workspaceDrawingKindLabel(kind)): string | null {
+  if (typeof window === "undefined") return initialValue;
+  const value = window.prompt("도형 레이블", initialValue);
+  if (value === null) return null;
+  return value.trim().replace(/\s+/g, " ").slice(0, 80);
+}
+
+function nextWorkspaceNoteColor(color: WorkspaceNote["color"]): WorkspaceNote["color"] {
+  const colors: Array<WorkspaceNote["color"]> = ["yellow", "blue", "green", "rose"];
+  const index = colors.indexOf(color);
+  return colors[(index + 1) % colors.length];
+}
+
+function nextWorkspaceDrawingColor(color: WorkspaceDrawing["color"]): WorkspaceDrawing["color"] {
+  const colors: Array<WorkspaceDrawing["color"]> = ["amber", "blue", "green", "rose"];
+  const index = colors.indexOf(color);
+  return colors[(index + 1) % colors.length];
+}
+
 function topologyBounds(devices: NetworkDevice[]): { x: number; y: number; width: number; height: number } | null {
   if (!devices.length) return null;
   const boxes = devices.map((device) => {
@@ -2210,6 +4290,18 @@ function topologyBounds(devices: NetworkDevice[]): { x: number; y: number; width
   const right = Math.min(CANVAS_WIDTH, Math.max(...boxes.map((box) => box.right)) + 80);
   const bottom = Math.min(CANVAS_HEIGHT, Math.max(...boxes.map((box) => box.bottom)) + 80);
   return { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
+}
+
+function placeDevicesInGrid(devices: NetworkDevice[], target: Map<string, { x: number; y: number }>, layout: { x: number; y: number; columns: number; xGap: number; yGap: number }) {
+  devices.forEach((device, index) => {
+    const size = nodeSize(device.kind);
+    const column = index % Math.max(1, layout.columns);
+    const row = Math.floor(index / Math.max(1, layout.columns));
+    target.set(device.id, {
+      x: Math.max(24, Math.min(CANVAS_WIDTH - size.width - 24, layout.x + column * layout.xGap)),
+      y: Math.max(24, Math.min(CANVAS_HEIGHT - size.height - 24, layout.y + row * layout.yGap))
+    });
+  });
 }
 
 function cloneDeviceForDuplicate(device: NetworkDevice, position: { x: number; y: number }, existing: NetworkDevice[]): NetworkDevice {
@@ -2335,6 +4427,7 @@ function eventSearchText(project: NetworkProject, event: SimulationEvent): strin
     event.status,
     event.info,
     event.osiLayers.join(" "),
+    pduHeaderRowsFor(project, event).map((header) => `${header.layer} ${header.field} ${header.value}`).join(" "),
     eventDeviceLabel(project, event.lastDeviceId),
     eventDeviceLabel(project, event.atDeviceId),
     eventDeviceLabel(project, event.sourceDeviceId ?? ""),
@@ -2401,13 +4494,16 @@ function linkStatusDetail(project: NetworkProject, link: NetworkLink): string {
 }
 
 function linkSearchText(project: NetworkProject, link: NetworkLink): string {
+  const tdr = linkCableDiagnosticSummary(project, link);
   return [
     link.type,
     shortCableLabel(link.type),
     link.status,
     linkStatusLabel(link.status),
     linkLabel(project, link),
-    linkStatusDetail(project, link)
+    linkStatusDetail(project, link),
+    tdr.summary,
+    tdr.detail
   ].join(" ").toLowerCase();
 }
 
@@ -2417,6 +4513,30 @@ function linkEndpointPair(project: NetworkProject, link: NetworkLink): { aDevice
   const aPort = aDevice?.ports.find((port) => port.id === link.endpointA.portId);
   const bPort = bDevice?.ports.find((port) => port.id === link.endpointB.portId);
   return aDevice && aPort && bDevice && bPort ? { aDevice, aPort, bDevice, bPort } : null;
+}
+
+function linkCableDiagnosticSummary(project: NetworkProject, link: NetworkLink): { summary: string; detail: string } {
+  const pair = linkEndpointPair(project, link);
+  if (!pair) return { summary: "TDR missing", detail: "끝점 장비 또는 포트를 찾을 수 없습니다." };
+  const aStatus = cableTdrStatus(pair.aDevice, pair.aPort, link);
+  const bStatus = cableTdrStatus(pair.bDevice, pair.bPort, link);
+  return {
+    summary: `TDR ${aStatus}/${bStatus}`,
+    detail: `${pair.aDevice.label} ${pair.aPort.name}: ${aStatus}; ${pair.bDevice.label} ${pair.bPort.name}: ${bStatus}`
+  };
+}
+
+function cableTdrStatus(device: NetworkDevice, port: NetworkPort, link: NetworkLink): string {
+  if (!copperTdrCapable(port)) return "N/A";
+  if (!device.powerOn || !port.adminUp) return "Not completed";
+  if (!port.linkId) return "Open";
+  if (link.status === "blocked") return "Blocked";
+  if (link.status === "down") return "Check";
+  return "Normal";
+}
+
+function copperTdrCapable(port: NetworkPort): boolean {
+  return port.kind === "ethernet" || port.kind === "fast-ethernet" || port.kind === "gigabit-ethernet";
 }
 
 function linkHasVlanIssue(project: NetworkProject, link: NetworkLink): boolean {
@@ -2828,11 +4948,20 @@ function Inspector({ device, project, initialTab, onUpdate, onProjectChange, onD
 
 function PhysicalTab({ device, project, onUpdate, onProjectChange }: { device: NetworkDevice; project: NetworkProject; onUpdate: (device: NetworkDevice) => void; onProjectChange: (project: NetworkProject, message: string) => void }) {
   const [slotSelections, setSlotSelections] = useState<Record<string, string>>({});
+  const [selectedPortId, setSelectedPortId] = useState(device.ports[0]?.id ?? "");
   const [notice, setNotice] = useState("");
   const model = getDeviceModel(device.modelId);
+  const selectedPort = device.ports.find((port) => port.id === selectedPortId) ?? device.ports[0];
+  const selectedLink = selectedPort?.linkId ? project.links.find((link) => link.id === selectedPort.linkId) : undefined;
+  const selectedPortState = selectedPort ? physicalPortState(project, device, selectedPort) : "down";
+  const selectedPeer = selectedPort ? physicalPortPeer(project, device, selectedPort) : null;
   const compatibleModules = Array.from(new Set(model.modules.flatMap((slot) => slot.accepts)))
     .map((moduleId) => getModuleSpec(moduleId))
     .filter((module): module is ModuleSpec => Boolean(module));
+
+  useEffect(() => {
+    if (!device.ports.some((port) => port.id === selectedPortId)) setSelectedPortId(device.ports[0]?.id ?? "");
+  }, [device.id, device.ports.length, selectedPortId]);
 
   function selectCompatibleModule(moduleId: string) {
     const slot = model.modules.find((candidate) => candidate.accepts.includes(moduleId) && !device.modules.some((module) => module.slotId === candidate.id));
@@ -2862,6 +4991,10 @@ function PhysicalTab({ device, project, onUpdate, onProjectChange }: { device: N
     onUpdate(powerDevice(device, powerOn));
   }
 
+  function updatePort(portId: string, patch: Partial<NetworkPort>) {
+    onUpdate({ ...device, ports: device.ports.map((port) => port.id === portId ? { ...port, ...patch } : port) });
+  }
+
   return (
     <section className="panel-section physical-panel">
       <aside className="physical-module-list">
@@ -2887,9 +5020,9 @@ function PhysicalTab({ device, project, onUpdate, onProjectChange }: { device: N
           <div className="physical-port-map">
             {device.ports.map((port) => (
               <button
-                className={`physical-port ${port.kind} ${port.linkId ? "connected" : ""} ${port.adminUp ? "" : "shutdown"}`}
+                className={`physical-port ${port.kind} ${port.id === selectedPort?.id ? "selected" : ""} ${port.linkId ? "connected" : ""} ${port.adminUp ? "" : "shutdown"}`}
                 key={port.id}
-                onClick={() => port.linkId && onProjectChange(removeLink(project, port.linkId), `${device.label} ${port.name} disconnected.`)}
+                onClick={() => setSelectedPortId(port.id)}
                 title={`${port.name} / ${port.kind} / ${portConnectionLabel(project, device, port)}`}
                 type="button"
               >
@@ -2898,6 +5031,45 @@ function PhysicalTab({ device, project, onUpdate, onProjectChange }: { device: N
             ))}
           </div>
         </div>
+        {selectedPort && (
+          <div className="physical-port-inspector">
+            <header>
+              <div>
+                <strong>{selectedPort.name}</strong>
+                <small>{selectedPort.kind}{selectedPort.moduleId ? ` | ${selectedPort.moduleId}` : ""}</small>
+              </div>
+              <span className={`port-state-pill ${selectedPortState}`}>{physicalPortStateLabel(selectedPortState)}</span>
+            </header>
+            <div className="physical-cable-trace">
+              <div>
+                <span>케이블</span>
+                <strong>{selectedLink ? shortCableLabel(selectedLink.type) : "미연결"}</strong>
+              </div>
+              <div>
+                <span>상대 포트</span>
+                <strong>{selectedPeer ? `${selectedPeer.device.label} ${selectedPeer.port.name}` : "없음"}</strong>
+              </div>
+              <div>
+                <span>상태 진단</span>
+                <strong>{selectedLink ? linkStatusDetail(project, selectedLink) : "포트에 연결된 링크가 없습니다."}</strong>
+              </div>
+            </div>
+            <dl className="physical-port-details">
+              <div><dt>Layer 1</dt><dd>{device.powerOn ? "전원 켜짐" : "전원 꺼짐"} / {selectedPort.adminUp ? "no shutdown" : "shutdown"}</dd></div>
+              <div><dt>Layer 2</dt><dd>{physicalLayer2Label(selectedPort)}</dd></div>
+              <div><dt>Layer 3</dt><dd>{physicalLayer3Label(selectedPort)}</dd></div>
+              <div><dt>속도/듀플렉스</dt><dd>{selectedPort.speed ?? "auto"} / {selectedPort.duplex ?? "auto"}</dd></div>
+              <div><dt>MTU</dt><dd>{selectedPort.mtu ?? 1500}</dd></div>
+              <div><dt>TDR</dt><dd>{physicalPortTdrLabel(project, device, selectedPort)}</dd></div>
+              <div><dt>Serial</dt><dd>{physicalSerialLabel(project, device, selectedPort)}</dd></div>
+            </dl>
+            <div className="button-row">
+              <button className="secondary-action" onClick={() => updatePort(selectedPort.id, { adminUp: !selectedPort.adminUp })} type="button">{selectedPort.adminUp ? "Shutdown" : "No shutdown"}</button>
+              {selectedPort.kind === "serial" && <button className="secondary-action" onClick={() => updatePort(selectedPort.id, { clockRate: selectedPort.clockRate ? undefined : 64000 })} type="button">{selectedPort.clockRate ? "Clock 제거" : "DCE clock 64000"}</button>}
+              {selectedPort.linkId ? <button className="secondary-action danger" onClick={() => onProjectChange(removeLink(project, selectedPort.linkId!), `${device.label} ${selectedPort.name} 연결을 해제했습니다.`)} type="button">케이블 분리</button> : <small>케이블 연결은 작업공간 케이블 도구에서 시작하세요.</small>}
+            </div>
+          </div>
+        )}
         {model.modules.length > 0 && (
           <div className="module-rack">
             <header>
@@ -2967,6 +5139,56 @@ function portConnectionLabel(project: NetworkProject, device: NetworkDevice, por
   const peer = project.devices.find((item) => item.id === peerRef.deviceId);
   const peerPort = peer?.ports.find((item) => item.id === peerRef.portId);
   return peer && peerPort ? `${peer.label} ${peerPort.name}` : "누락된 상대";
+}
+
+function physicalPortPeer(project: NetworkProject, device: NetworkDevice, port: NetworkPort): { device: NetworkDevice; port: NetworkPort } | null {
+  if (!port.linkId) return null;
+  const link = project.links.find((item) => item.id === port.linkId);
+  if (!link) return null;
+  const peerRef = link.endpointA.deviceId === device.id && link.endpointA.portId === port.id ? link.endpointB : link.endpointA;
+  const peer = project.devices.find((item) => item.id === peerRef.deviceId);
+  const peerPort = peer?.ports.find((item) => item.id === peerRef.portId);
+  return peer && peerPort ? { device: peer, port: peerPort } : null;
+}
+
+function physicalPortState(project: NetworkProject, device: NetworkDevice, port: NetworkPort): NetworkLink["status"] {
+  if (!device.powerOn || !port.adminUp || !port.linkId) return "down";
+  const link = project.links.find((item) => item.id === port.linkId);
+  return link?.status ?? "down";
+}
+
+function physicalPortStateLabel(status: NetworkLink["status"]): string {
+  if (status === "up") return "Link up";
+  if (status === "blocked") return "Blocked";
+  return "Link down";
+}
+
+function physicalLayer2Label(port: NetworkPort): string {
+  if (port.kind === "console") return "Console";
+  if (port.kind === "wireless") return `SSID VLAN ${port.vlan}`;
+  if (port.mode === "trunk") return `trunk native ${port.nativeVlan ?? 1}, allowed ${port.allowedVlans.join(",") || "none"}`;
+  if (port.mode === "access") return `access VLAN ${port.vlan}`;
+  return "routed";
+}
+
+function physicalLayer3Label(port: NetworkPort): string {
+  if (port.ipAddress && port.subnetMask) return `${port.ipAddress} / ${port.subnetMask}`;
+  if (port.ipCapable) return "IP 미설정";
+  return "L3 비활성";
+}
+
+function physicalPortTdrLabel(project: NetworkProject, device: NetworkDevice, port: NetworkPort): string {
+  const link = port.linkId ? project.links.find((item) => item.id === port.linkId) : undefined;
+  return cableTdrStatus(device, port, link ?? { id: "", type: "auto", endpointA: { deviceId: device.id, portId: port.id }, endpointB: { deviceId: "", portId: "" }, status: "down", createdAt: 0 });
+}
+
+function physicalSerialLabel(project: NetworkProject, device: NetworkDevice, port: NetworkPort): string {
+  if (port.kind !== "serial") return "해당 없음";
+  const link = port.linkId ? project.links.find((item) => item.id === port.linkId) : undefined;
+  const endpoint = link?.endpointB.deviceId === device.id && link.endpointB.portId === port.id ? "B" : "A";
+  const role = link?.dceEndpoint === endpoint ? "DCE" : "DTE";
+  if (!link) return port.clockRate ? `clock ${port.clockRate}` : "미연결";
+  return role === "DCE" ? `DCE ${port.clockRate ? `clock ${port.clockRate}` : "clock 필요"}` : "DTE";
 }
 
 function ConfigTab({ device, onUpdate, onDhcp }: { device: NetworkDevice; onUpdate: (device: NetworkDevice) => void; onDhcp: () => void }) {
@@ -3317,6 +5539,8 @@ const cliCommandHints = [
   { command: "show interfaces status", detail: "포트 상태/속도 요약" },
   { command: "show interfaces counters", detail: "포트 카운터" },
   { command: "show interfaces trunk", detail: "trunk 목록" },
+  { command: "test cable-diagnostics tdr interface ", detail: "케이블 TDR 진단 시작" },
+  { command: "show cable-diagnostics tdr", detail: "케이블 TDR 결과" },
   { command: "show vlan brief", detail: "VLAN 테이블" },
   { command: "show mac address-table", detail: "MAC 테이블" },
   { command: "show cdp neighbors", detail: "직접 연결 이웃" },
@@ -3608,21 +5832,68 @@ function transportAllows(transportInput: string, protocol: "ssh" | "telnet"): bo
 
 const desktopQuickCommands = ["help", "ipconfig /all", "ipconfig /displaydns", "ipconfig /flushdns", "ipconfig /renew", "ipconfig /release", "arp -a", "route print", "netstat -r", "ping -n 4 www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "web www.lab.local", "ftp www.lab.local", "mail www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
 
+type DesktopApp = "ip" | "prompt" | "browser" | "terminal" | "ftp" | "email" | "tftp" | "syslog";
+
 function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: NetworkDevice; project: NetworkProject; onProjectChange: (project: NetworkProject, message: string) => void; onUpdate: (device: NetworkDevice) => void }) {
   const dataPorts = device.ports.filter((port) => port.kind !== "console");
-  const [activeApp, setActiveApp] = useState<"ip" | "prompt" | "browser">("prompt");
+  const [activeApp, setActiveApp] = useState<DesktopApp>("prompt");
   const [selectedPortId, setSelectedPortId] = useState(dataPorts[0]?.id ?? "");
   const [output, setOutput] = useState("명령 프롬프트");
   const [input, setInput] = useState("");
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const consoleTargets = useMemo(() => desktopConsoleTargets(project, device), [device.id, project.devices, project.links]);
+  const [terminalTargetId, setTerminalTargetId] = useState("");
+  const terminalTarget = consoleTargets.find((target) => target.id === terminalTargetId) ?? consoleTargets[0] ?? null;
+  const [terminalLines, setTerminalLines] = useState<string[]>(["Terminal"]);
+  const [terminalInput, setTerminalInput] = useState("");
+  const [terminalSession, setTerminalSession] = useState<CliSession>(() => cliEngine.initialSession());
+  const [terminalHistory, setTerminalHistory] = useState<string[]>([]);
+  const [terminalHistoryIndex, setTerminalHistoryIndex] = useState<number | null>(null);
+  const terminalOutputRef = useRef<HTMLDivElement | null>(null);
   const [browserTarget, setBrowserTarget] = useState("www.lab.local");
   const [browserOutput, setBrowserOutput] = useState("웹 브라우저");
+  const [ftpTarget, setFtpTarget] = useState("www.lab.local");
+  const [ftpAction, setFtpAction] = useState("ls");
+  const [ftpOutput, setFtpOutput] = useState("FTP Client");
+  const [emailTarget, setEmailTarget] = useState("www.lab.local");
+  const [emailRecipient, setEmailRecipient] = useState("admin@lab.local");
+  const [emailMessage, setEmailMessage] = useState(`${device.label} mail test`);
+  const [emailOutput, setEmailOutput] = useState("Email Client");
+  const [tftpTarget, setTftpTarget] = useState("www.lab.local");
+  const [tftpOutput, setTftpOutput] = useState("TFTP Client");
+  const [syslogTarget, setSyslogTarget] = useState("www.lab.local");
+  const [syslogMessage, setSyslogMessage] = useState(`${device.label} link-check`);
+  const [syslogOutput, setSyslogOutput] = useState("SYSLOG Client");
   const selectedPort = dataPorts.find((port) => port.id === selectedPortId) ?? dataPorts[0];
 
   useEffect(() => {
     if (!dataPorts.some((port) => port.id === selectedPortId)) setSelectedPortId(dataPorts[0]?.id ?? "");
   }, [device.id, dataPorts.length, selectedPortId]);
+
+  useEffect(() => {
+    if (!consoleTargets.some((target) => target.id === terminalTargetId)) setTerminalTargetId(consoleTargets[0]?.id ?? "");
+  }, [consoleTargets, terminalTargetId]);
+
+  useEffect(() => {
+    if (!terminalTarget) {
+      setTerminalLines(["Terminal", "Console 케이블 대상이 없습니다. PC RS232와 장비 Console 포트를 Console 케이블로 연결하세요."]);
+      setTerminalSession(cliEngine.initialSession());
+      setTerminalInput("");
+      setTerminalHistory([]);
+      setTerminalHistoryIndex(null);
+      return;
+    }
+    setTerminalLines([`Connected from ${device.label} RS232 to ${terminalTarget.label} console`, ...initialCliLines(terminalTarget)]);
+    setTerminalSession(initialCliSessionForDevice(terminalTarget));
+    setTerminalInput("");
+    setTerminalHistory([]);
+    setTerminalHistoryIndex(null);
+  }, [device.label, terminalTarget?.id]);
+
+  useEffect(() => {
+    if (terminalOutputRef.current) terminalOutputRef.current.scrollTop = terminalOutputRef.current.scrollHeight;
+  }, [terminalLines]);
 
   function updateDesktopPort(portId: string, patch: Partial<NetworkPort>) {
     onUpdate({ ...device, ports: device.ports.map((port) => port.id === portId ? { ...port, ...patch } : port) });
@@ -3636,6 +5907,71 @@ function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: Ne
     const nextOutput = await desktopCommand(project, device, command, onProjectChange);
     setOutput((current) => `${current}\n\n> ${command}\n${nextOutput}`);
     setInput("");
+  }
+
+  async function runTerminalCommand() {
+    if (!terminalTarget) return;
+    const prompt = cliEngine.prompt(terminalTarget, terminalSession);
+    const commandText = terminalInput;
+    const normalizedInput = commandText.trim().toLowerCase().replace(/\s+/g, " ");
+    const sensitiveInput = terminalSession.pendingAction === "enable-password" || terminalSession.pendingAction === "console-password";
+    setTerminalHistoryIndex(null);
+    if (commandText.trim() && !sensitiveInput) {
+      setTerminalHistory((items) => [...items, commandText].slice(-80));
+    }
+    if (normalizedInput.startsWith("ping ") || normalizedInput.startsWith("traceroute ") || normalizedInput.startsWith("tracert ")) {
+      const outputText = await runCliPacketCommand(project, terminalTarget, commandText, onProjectChange);
+      setTerminalLines((items) => [...items, `${prompt} ${commandText}`, outputText].filter(Boolean));
+      setTerminalInput("");
+      return;
+    }
+    if (terminalTarget.powerOn && isCdpNeighborsCommand(normalizedInput)) {
+      setTerminalLines((items) => [...items, `${prompt} ${commandText}`, showCdpNeighbors(project, terminalTarget, isCdpDetailCommand(normalizedInput))].filter(Boolean));
+      setTerminalInput("");
+      return;
+    }
+    const result = await cliEngine.run(terminalTarget, terminalSession, commandText);
+    setTerminalSession(result.session);
+    onProjectChange({
+      ...project,
+      devices: project.devices.map((item) => item.id === result.device.id ? result.device : item)
+    }, `${device.label} Terminal에서 ${result.device.label} CLI를 실행했습니다.`);
+    setTerminalLines((items) => [...items, sensitiveInput ? "" : `${prompt} ${commandText}`, result.output].filter(Boolean));
+    setTerminalInput("");
+  }
+
+  function handleTerminalKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (!terminalTarget) return;
+    if (event.key === "Tab") {
+      event.preventDefault();
+      const matches = cliEngine.completions(terminalTarget, terminalSession, terminalInput);
+      if (matches.length === 1) {
+        setTerminalInput(matches[0].endsWith(" ") ? matches[0] : `${matches[0]} `);
+      } else if (matches.length > 1) {
+        setTerminalLines((items) => [...items, `Completions: ${matches.join(", ")}`]);
+      }
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      if (!terminalHistory.length) return;
+      event.preventDefault();
+      const nextIndex = terminalHistoryIndex === null ? terminalHistory.length - 1 : Math.max(0, terminalHistoryIndex - 1);
+      setTerminalHistoryIndex(nextIndex);
+      setTerminalInput(terminalHistory[nextIndex]);
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      if (!terminalHistory.length || terminalHistoryIndex === null) return;
+      event.preventDefault();
+      const nextIndex = terminalHistoryIndex + 1;
+      if (nextIndex >= terminalHistory.length) {
+        setTerminalHistoryIndex(null);
+        setTerminalInput("");
+      } else {
+        setTerminalHistoryIndex(nextIndex);
+        setTerminalInput(terminalHistory[nextIndex]);
+      }
+    }
   }
 
   function chooseCommand(command: string) {
@@ -3673,12 +6009,40 @@ function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: Ne
     setBrowserOutput(nextOutput);
   }
 
+  async function runDesktopAppCommand(command: string, updateOutput: (value: string) => void) {
+    const normalized = command.trim();
+    if (!normalized) return;
+    const nextOutput = await desktopCommand(project, device, normalized, onProjectChange);
+    updateOutput(nextOutput);
+  }
+
+  async function runFtpApp() {
+    await runDesktopAppCommand(`ftp ${ftpTarget.trim()} ${ftpAction.trim() || "ls"}`, setFtpOutput);
+  }
+
+  async function runEmailApp() {
+    await runDesktopAppCommand(`email ${emailTarget.trim()} ${emailRecipient.trim()} ${emailMessage.trim()}`, setEmailOutput);
+  }
+
+  async function runTftpApp() {
+    await runDesktopAppCommand(`tftp ${tftpTarget.trim()}`, setTftpOutput);
+  }
+
+  async function runSyslogApp() {
+    await runDesktopAppCommand(`syslog ${syslogTarget.trim()} ${syslogMessage.trim()}`, setSyslogOutput);
+  }
+
   return (
     <section className="desktop-panel">
       <div className="desktop-app-bar">
         <button className={activeApp === "ip" ? "active" : ""} onClick={() => setActiveApp("ip")} type="button"><Settings size={15} />IP 설정</button>
         <button className={activeApp === "prompt" ? "active" : ""} onClick={() => setActiveApp("prompt")} type="button"><Terminal size={15} />명령 프롬프트</button>
+        <button className={activeApp === "terminal" ? "active" : ""} onClick={() => setActiveApp("terminal")} type="button"><Terminal size={15} />Terminal</button>
         <button className={activeApp === "browser" ? "active" : ""} onClick={() => setActiveApp("browser")} type="button"><Monitor size={15} />웹 브라우저</button>
+        <button className={activeApp === "ftp" ? "active" : ""} onClick={() => setActiveApp("ftp")} type="button"><Server size={15} />FTP</button>
+        <button className={activeApp === "email" ? "active" : ""} onClick={() => setActiveApp("email")} type="button"><Mail size={15} />Email</button>
+        <button className={activeApp === "tftp" ? "active" : ""} onClick={() => setActiveApp("tftp")} type="button"><Download size={15} />TFTP</button>
+        <button className={activeApp === "syslog" ? "active" : ""} onClick={() => setActiveApp("syslog")} type="button"><Info size={15} />Syslog</button>
       </div>
       {activeApp === "ip" && (
         <div className="desktop-ip-config">
@@ -3719,6 +6083,69 @@ function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: Ne
             <button className="secondary-action" type="submit">이동</button>
           </form>
           <pre>{browserOutput}</pre>
+        </section>
+      )}
+      {activeApp === "terminal" && (
+        <section className="terminal desktop-console-app">
+          <header>
+            <strong>Terminal</strong>
+            <select value={terminalTarget?.id ?? ""} onChange={(event) => setTerminalTargetId(event.target.value)} disabled={!consoleTargets.length}>
+              {consoleTargets.length ? consoleTargets.map((target) => <option key={target.id} value={target.id}>{target.label} Console</option>) : <option value="">Console 대상 없음</option>}
+            </select>
+          </header>
+          <div ref={terminalOutputRef} className="terminal-output">{terminalLines.map((line, index) => <pre key={index}>{line}</pre>)}</div>
+          <form className="cli-input-row" onSubmit={(event) => { event.preventDefault(); void runTerminalCommand(); }}>
+            <span>{terminalTarget ? cliEngine.prompt(terminalTarget, terminalSession) : "Terminal>"}</span>
+            <input
+              disabled={!terminalTarget}
+              type={terminalSession.pendingAction === "enable-password" || terminalSession.pendingAction === "console-password" ? "password" : "text"}
+              value={terminalInput}
+              onChange={(event) => setTerminalInput(event.target.value)}
+              onKeyDown={handleTerminalKeyDown}
+              placeholder="show ip interface brief"
+            />
+          </form>
+          <small>Console 케이블로 연결된 장비 CLI입니다. Tab 자동완성, ↑/↓ 기록을 지원합니다.</small>
+        </section>
+      )}
+      {activeApp === "ftp" && (
+        <section className="desktop-service-app">
+          <form onSubmit={(event) => { event.preventDefault(); void runFtpApp(); }}>
+            <label>서버<input value={ftpTarget} onChange={(event) => setFtpTarget(event.target.value)} placeholder="www.lab.local" /></label>
+            <label>명령<input value={ftpAction} onChange={(event) => setFtpAction(event.target.value)} placeholder="ls 또는 get readme.txt" /></label>
+            <button className="secondary-action" type="submit">연결</button>
+          </form>
+          <pre>{ftpOutput}</pre>
+        </section>
+      )}
+      {activeApp === "email" && (
+        <section className="desktop-service-app">
+          <form onSubmit={(event) => { event.preventDefault(); void runEmailApp(); }}>
+            <label>서버<input value={emailTarget} onChange={(event) => setEmailTarget(event.target.value)} placeholder="www.lab.local" /></label>
+            <label>받는 사람<input value={emailRecipient} onChange={(event) => setEmailRecipient(event.target.value)} placeholder="admin@lab.local" /></label>
+            <label className="wide">메시지<input value={emailMessage} onChange={(event) => setEmailMessage(event.target.value)} placeholder="Packet Tracer lab test" /></label>
+            <button className="secondary-action" type="submit">보내기</button>
+          </form>
+          <pre>{emailOutput}</pre>
+        </section>
+      )}
+      {activeApp === "tftp" && (
+        <section className="desktop-service-app compact">
+          <form onSubmit={(event) => { event.preventDefault(); void runTftpApp(); }}>
+            <label>서버<input value={tftpTarget} onChange={(event) => setTftpTarget(event.target.value)} placeholder="www.lab.local" /></label>
+            <button className="secondary-action" type="submit">조회</button>
+          </form>
+          <pre>{tftpOutput}</pre>
+        </section>
+      )}
+      {activeApp === "syslog" && (
+        <section className="desktop-service-app">
+          <form onSubmit={(event) => { event.preventDefault(); void runSyslogApp(); }}>
+            <label>서버<input value={syslogTarget} onChange={(event) => setSyslogTarget(event.target.value)} placeholder="www.lab.local" /></label>
+            <label className="wide">메시지<input value={syslogMessage} onChange={(event) => setSyslogMessage(event.target.value)} placeholder="link-check" /></label>
+            <button className="secondary-action" type="submit">전송</button>
+          </form>
+          <pre>{syslogOutput}</pre>
         </section>
       )}
     </section>
@@ -4062,6 +6489,7 @@ function releaseDhcp(project: NetworkProject, deviceId: string): { project: Netw
   const hasLease = releasedLeases.length > 0;
   const releaseStatus: SimulationEvent["status"] = hasLease ? "delivered" : "dropped";
   const releasedText = releasedLeases.map((lease) => lease.ipAddress).join(", ") || "client address";
+  const releaseEvent: SimulationEvent = withPduHeaders(project, { id: createId("evt"), time, lastDeviceId: deviceId, atDeviceId: targetId, sourceDeviceId: deviceId, targetDeviceId: targetId, packetId, type: "DHCP", info: hasLease ? `DHCPRELEASE sent by client for ${releasedText}.` : "DHCPRELEASE skipped: no active DHCP lease.", status: releaseStatus, osiLayers: ["Layer 7", "Layer 3"] });
   const nextProject = {
     ...project,
     devices: project.devices.map((device) => {
@@ -4077,17 +6505,22 @@ function releaseDhcp(project: NetworkProject, deviceId: string): { project: Netw
     }),
     simulationEvents: [
       ...project.simulationEvents,
-      { id: createId("evt"), time, lastDeviceId: deviceId, atDeviceId: targetId, sourceDeviceId: deviceId, targetDeviceId: targetId, packetId, type: "DHCP", info: hasLease ? `DHCPRELEASE sent by client for ${releasedText}.` : "DHCPRELEASE skipped: no active DHCP lease.", status: releaseStatus, osiLayers: ["Layer 7", "Layer 3"] }
+      releaseEvent
     ]
   };
   return { project: nextProject, message: hasLease ? "DHCP 임대를 해제했습니다." : "활성 DHCP 임대가 없습니다." };
 }
 
 function appendDesktopEvent(project: NetworkProject, sourceId: string, targetId: string, type: string, info: string, status: "forwarded" | "delivered" | "dropped", packetId = createId("packet")): NetworkProject {
+  const event = withPduHeaders(project, { id: createId("evt"), time: Date.now(), lastDeviceId: sourceId, atDeviceId: targetId, sourceDeviceId: sourceId, targetDeviceId: targetId, packetId, type, info, status, osiLayers: ["Layer 7", "Layer 4", "Layer 3"] });
   return {
     ...project,
-    simulationEvents: [...project.simulationEvents, { id: createId("evt"), time: Date.now(), lastDeviceId: sourceId, atDeviceId: targetId, sourceDeviceId: sourceId, targetDeviceId: targetId, packetId, type, info, status, osiLayers: ["Layer 7", "Layer 4", "Layer 3"] }]
+    simulationEvents: [...project.simulationEvents, event]
   };
+}
+
+function withPduHeaders(project: NetworkProject, event: SimulationEvent): SimulationEvent {
+  return event.headers?.length ? event : { ...event, headers: inferredPduHeaders(project, event) };
 }
 
 function appendServerLog(project: NetworkProject, deviceId: string, level: "info" | "warning" | "error", message: string): NetworkProject {
@@ -4584,11 +7017,12 @@ function EventPanel({
   const [eventSearch, setEventSearch] = useState("");
   const [pduDetailTab, setPduDetailTab] = useState<PduDetailTab>("osi");
   const [userPacketFilter, setUserPacketFilter] = useState("all");
+  const [selectedPacketOnly, setSelectedPacketOnly] = useState(false);
   const [autoPlaying, setAutoPlaying] = useState(false);
   const [captureDelayMs, setCaptureDelayMs] = useState(450);
   const playTimer = useRef<number | null>(null);
   const eventSearchQuery = eventSearch.trim().toLowerCase();
-  const filteredEvents = project.simulationEvents.filter((event) =>
+  const baseFilteredEvents = project.simulationEvents.filter((event) =>
     (eventFilter === "all" || event.type.toLowerCase() === eventFilter || event.status === eventFilter) &&
     (osiFilter === "all" || event.osiLayers.includes(osiFilter)) &&
     (!eventSearchQuery || eventSearchText(project, event).includes(eventSearchQuery))
@@ -4597,9 +7031,13 @@ function EventPanel({
   const userPacketProtocols = Array.from(new Set(userPackets.map((packet) => packet.protocol))).sort();
   const visibleUserPackets = userPacketFilter === "all" ? userPackets : userPackets.filter((packet) => packet.protocol.toLowerCase() === userPacketFilter);
   const activeEventId = focusedEventId ?? "";
+  const baseSelectedEvent = baseFilteredEvents.find((event) => event.id === activeEventId) ?? baseFilteredEvents.at(-1);
+  const selectedPacketKey = baseSelectedEvent ? baseSelectedEvent.packetId ?? baseSelectedEvent.id : "";
+  const filteredEvents = selectedPacketOnly && selectedPacketKey
+    ? baseFilteredEvents.filter((event) => (event.packetId ?? event.id) === selectedPacketKey)
+    : baseFilteredEvents;
   const focusedIndex = filteredEvents.findIndex((event) => event.id === activeEventId);
-  const selectedEvent = filteredEvents.find((event) => event.id === activeEventId) ?? filteredEvents.at(-1);
-  const selectedPacketKey = selectedEvent ? selectedEvent.packetId ?? selectedEvent.id : "";
+  const selectedEvent = filteredEvents.find((event) => event.id === activeEventId) ?? filteredEvents.at(-1) ?? baseSelectedEvent;
   const selectedPacketEvents = selectedPacketKey
     ? project.simulationEvents.filter((event) => (event.packetId ?? event.id) === selectedPacketKey)
     : [];
@@ -4609,6 +7047,7 @@ function EventPanel({
   const nextPacketEvent = selectedPacketIndex >= 0 ? selectedPacketEvents[selectedPacketIndex + 1] : undefined;
   const pduOsiRows = selectedEvent ? pduOsiRowsFor(selectedEvent) : [];
   const pduDetailRows = selectedEvent ? pduDetailRowsFor(project, selectedEvent, previousPacketEvent, nextPacketEvent, pduDetailTab) : [];
+  const pduHeaderRows = selectedEvent ? pduHeaderRowsFor(project, selectedEvent) : [];
   const eventStats = {
     total: project.simulationEvents.length,
     forwarded: project.simulationEvents.filter((event) => event.status === "forwarded").length,
@@ -4629,7 +7068,7 @@ function EventPanel({
   useEffect(() => () => stopAutoCapture(), []);
   useEffect(() => {
     stopAutoCapture();
-  }, [eventFilter, osiFilter, eventSearchQuery, project.simulationEvents.length, captureDelayMs]);
+  }, [eventFilter, osiFilter, eventSearchQuery, selectedPacketOnly, project.simulationEvents.length, captureDelayMs]);
 
   function stopAutoCapture() {
     if (playTimer.current) {
@@ -4684,7 +7123,7 @@ function EventPanel({
     <section className={`event-panel ${mode}`}>
       {mode === "simulation" ? (
         <>
-          <header><strong>시뮬레이션 이벤트</strong><select value={eventFilter} onChange={(event) => setEventFilter(event.target.value)}><option value="all">전체</option><option value="icmp">ICMP</option><option value="arp">ARP</option><option value="switch">SWITCH</option><option value="hub">HUB</option><option value="dhcp">DHCP</option><option value="dns">DNS</option><option value="http">HTTP</option><option value="ftp">FTP</option><option value="email">EMAIL</option><option value="tftp">TFTP</option><option value="syslog">SYSLOG</option><option value="ssh">SSH</option><option value="telnet">TELNET</option><option value="delivered">전달됨</option><option value="forwarded">전송 중</option><option value="dropped">드롭됨</option></select><select aria-label="OSI 레이어 필터" value={osiFilter} onChange={(event) => setOsiFilter(event.target.value)}><option value="all">전체 OSI</option><option value="Layer 1">Layer 1</option><option value="Layer 2">Layer 2</option><option value="Layer 3">Layer 3</option><option value="Layer 4">Layer 4</option><option value="Layer 5">Layer 5</option><option value="Layer 6">Layer 6</option><option value="Layer 7">Layer 7</option></select><input aria-label="시뮬레이션 이벤트 검색" className="event-search-input" value={eventSearch} onChange={(event) => setEventSearch(event.target.value)} placeholder="검색" /><button disabled={eventFilter === "all" && osiFilter === "all" && !eventSearchQuery} onClick={() => { stopAutoCapture(); setEventFilter("all"); setOsiFilter("all"); setEventSearch(""); }} type="button">필터 해제</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusEdge("first")} type="button">처음</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusRelative(-1)} type="button">이전</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={captureForward} type="button">캡처/전송</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={() => focusEdge("last")} type="button">끝</button><button className={autoPlaying ? "active" : ""} disabled={!onFocusEvent || filteredEvents.length === 0} onClick={autoCapturePlay} type="button">{autoPlaying ? "정지" : "자동 재생"}</button><label className="capture-speed-control">속도<select value={captureDelayMs} onChange={(event) => setCaptureDelayMs(Number(event.target.value))}><option value={900}>느림</option><option value={450}>보통</option><option value={180}>빠름</option></select></label><button disabled={!onExportEvents || filteredEvents.length === 0} onClick={() => onExportEvents?.(filteredEvents, eventPanelExportScope(eventFilter, osiFilter, eventSearch))} type="button">CSV</button><button onClick={() => { stopAutoCapture(); onClear(); }} type="button">비우기</button></header>
+          <header><strong>시뮬레이션 이벤트</strong><select value={eventFilter} onChange={(event) => setEventFilter(event.target.value)}><option value="all">전체</option><option value="icmp">ICMP</option><option value="arp">ARP</option><option value="switch">SWITCH</option><option value="hub">HUB</option><option value="dhcp">DHCP</option><option value="dns">DNS</option><option value="http">HTTP</option><option value="ftp">FTP</option><option value="email">EMAIL</option><option value="tftp">TFTP</option><option value="syslog">SYSLOG</option><option value="ssh">SSH</option><option value="telnet">TELNET</option><option value="delivered">전달됨</option><option value="forwarded">전송 중</option><option value="dropped">드롭됨</option></select><select aria-label="OSI 레이어 필터" value={osiFilter} onChange={(event) => setOsiFilter(event.target.value)}><option value="all">전체 OSI</option><option value="Layer 1">Layer 1</option><option value="Layer 2">Layer 2</option><option value="Layer 3">Layer 3</option><option value="Layer 4">Layer 4</option><option value="Layer 5">Layer 5</option><option value="Layer 6">Layer 6</option><option value="Layer 7">Layer 7</option></select><input aria-label="시뮬레이션 이벤트 검색" className="event-search-input" value={eventSearch} onChange={(event) => setEventSearch(event.target.value)} placeholder="검색" /><button disabled={eventFilter === "all" && osiFilter === "all" && !eventSearchQuery && !selectedPacketOnly} onClick={() => { stopAutoCapture(); setEventFilter("all"); setOsiFilter("all"); setEventSearch(""); setSelectedPacketOnly(false); }} type="button">필터 해제</button><button className={selectedPacketOnly ? "active" : ""} disabled={!selectedPacketKey} onClick={() => { stopAutoCapture(); setSelectedPacketOnly((value) => !value); }} type="button">선택 패킷만</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusEdge("first")} type="button">처음</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex <= 0} onClick={() => focusRelative(-1)} type="button">이전</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={captureForward} type="button">캡처/전송</button><button disabled={!onFocusEvent || filteredEvents.length === 0 || focusedIndex === filteredEvents.length - 1} onClick={() => focusEdge("last")} type="button">끝</button><button className={autoPlaying ? "active" : ""} disabled={!onFocusEvent || filteredEvents.length === 0} onClick={autoCapturePlay} type="button">{autoPlaying ? "정지" : "자동 재생"}</button><label className="capture-speed-control">속도<select value={captureDelayMs} onChange={(event) => setCaptureDelayMs(Number(event.target.value))}><option value={900}>느림</option><option value={450}>보통</option><option value={180}>빠름</option></select></label><button disabled={!onExportEvents || filteredEvents.length === 0} onClick={() => onExportEvents?.(filteredEvents, eventPanelExportScope(eventFilter, osiFilter, eventSearch))} type="button">CSV</button><button onClick={() => { stopAutoCapture(); onClear(); }} type="button">비우기</button></header>
           <div className="sim-status-strip">
             <span><strong>{eventStats.total}</strong> 이벤트</span>
             <span className="forwarded"><strong>{eventStats.forwarded}</strong> 전송 중</span>
@@ -4694,6 +7133,7 @@ function EventPanel({
             <span><strong>{osiFilterLabel(osiFilter)}</strong> OSI</span>
             <span><strong>{eventSearchQuery ? "적용" : "전체"}</strong> 검색</span>
             <span className="capture-position"><strong>{capturePositionLabel}</strong> 캡처 위치</span>
+            <span className={selectedPacketOnly ? "selected-packet" : ""}><strong>{selectedPacketOnly ? selectedPacketEvents.length : "전체"}</strong> 패킷 범위</span>
           </div>
           <div className="simulation-layout">
             <div className="simulation-main">
@@ -4754,6 +7194,18 @@ function EventPanel({
                     <div><dt>현재</dt><dd>{eventDeviceLabel(project, selectedEvent.atDeviceId)}</dd></div>
                     <div><dt>패킷</dt><dd>{(selectedEvent.packetId ?? selectedEvent.id).slice(-10)}</dd></div>
                   </dl>
+                  {pduHeaderRows.length > 0 && (
+                    <div className="pdu-header-table" role="table" aria-label="PDU 헤더">
+                      <div className="head" role="row"><strong>Layer</strong><strong>Field</strong><strong>Value</strong></div>
+                      {pduHeaderRows.map((header, index) => (
+                        <div key={`${header.layer}:${header.field}:${index}`} role="row">
+                          <span>{header.layer}</span>
+                          <span>{header.field}</span>
+                          <small>{header.value}</small>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="pdu-detail-tabs" role="tablist" aria-label="PDU 상세">
                     {(["osi", "inbound", "outbound"] as const).map((tab) => (
                       <button
@@ -4849,14 +7301,18 @@ function EventPanel({
         <>
           <header><strong>케이블</strong><small>링크 {project.links.length}개 / 표시 {visibleLinks.length}개</small><select aria-label="케이블 필터" value={linkFilter} onChange={(event) => setLinkFilter(event.target.value as LinkListFilter)}><option value="all">전체</option><option value="up">정상</option><option value="down">다운</option><option value="blocked">차단</option><option value="auto">자동</option><option value="copper-straight">구리 직결</option><option value="copper-cross">구리 크로스</option><option value="fiber">광케이블</option><option value="serial-dce">Serial DCE</option><option value="serial-dte">Serial DTE</option><option value="wireless">무선</option><option value="console">콘솔</option></select><input aria-label="케이블 검색" className="event-search-input" value={linkSearch} onChange={(event) => setLinkSearch(event.target.value)} placeholder="케이블 검색" />{(linkFilter !== "all" || linkSearchQuery) && <button onClick={() => { setLinkFilter("all"); setLinkSearch(""); }} type="button">필터 해제</button>}</header>
           {visibleLinks.length === 0 && <p className="event-empty-state">현재 필터와 일치하는 케이블이 없습니다.</p>}
-          {visibleLinks.map((link) => (
-            <div className={`event-row cable-row ${link.status}`} key={link.id}>
-              <span className="cable-row-kind"><i className={`cable-swatch ${link.type}`} />{shortCableLabel(link.type)}</span>
-              <span>{linkLabel(project, link)}</span>
-              <small title={linkStatusDetail(project, link)}>{linkStatusLabel(link.status)}: {linkStatusDetail(project, link)}</small>
-              <button className="secondary-action" onClick={() => onRemoveLink(link.id)} type="button">삭제</button>
-            </div>
-          ))}
+          {visibleLinks.map((link) => {
+            const cableDiagnostic = linkCableDiagnosticSummary(project, link);
+            return (
+              <div className={`event-row cable-row ${link.status}`} key={link.id}>
+                <span className="cable-row-kind"><i className={`cable-swatch ${link.type}`} />{shortCableLabel(link.type)}</span>
+                <span>{linkLabel(project, link)}</span>
+                <small title={linkStatusDetail(project, link)}>{linkStatusLabel(link.status)}: {linkStatusDetail(project, link)}</small>
+                <span className="cable-row-test" title={cableDiagnostic.detail}>{cableDiagnostic.summary}</span>
+                <button className="secondary-action" onClick={() => onRemoveLink(link.id)} type="button">삭제</button>
+              </div>
+            );
+          })}
         </>
       )}
     </section>
@@ -4896,6 +7352,59 @@ function pduLayerDescription(event: SimulationEvent, layer: string): string {
 
 function pduLayerStatus(status: SimulationEvent["status"]): string {
   return ({ forwarded: "처리/전송", delivered: "처리 완료", dropped: "드롭" })[status];
+}
+
+function pduHeaderRowsFor(project: NetworkProject, event: SimulationEvent): NonNullable<SimulationEvent["headers"]> {
+  const headers = event.headers?.length ? event.headers : inferredPduHeaders(project, event);
+  return headers.map((header) => ({ ...header, value: pduHeaderValue(project, header.value) }));
+}
+
+function inferredPduHeaders(project: NetworkProject, event: SimulationEvent): NonNullable<SimulationEvent["headers"]> {
+  const protocol = event.type.toUpperCase();
+  const source = project.devices.find((device) => device.id === (event.sourceDeviceId ?? event.lastDeviceId));
+  const target = project.devices.find((device) => device.id === (event.targetDeviceId ?? event.atDeviceId));
+  const sourceAddress = primaryDeviceIp(source) || source?.label || event.sourceDeviceId || event.lastDeviceId;
+  const targetAddress = primaryDeviceIp(target) || target?.label || event.targetDeviceId || event.atDeviceId;
+  if (protocol === "ARP" || protocol === "SWITCH" || protocol === "HUB") {
+    return [
+      { layer: "Layer 2", field: "Frame type", value: protocol },
+      { layer: "Layer 2", field: "Source", value: source?.label ?? event.lastDeviceId },
+      { layer: "Layer 2", field: "Destination", value: target?.label ?? event.atDeviceId },
+      { layer: "Layer 2", field: "Action", value: eventStatusLabel(event.status) }
+    ];
+  }
+  const transport = pduTransportForProtocol(protocol);
+  return [
+    { layer: "Layer 2", field: "EtherType", value: "IPv4" },
+    { layer: "Layer 3", field: "Source", value: sourceAddress },
+    { layer: "Layer 3", field: "Destination", value: targetAddress },
+    { layer: "Layer 3", field: "Protocol", value: transport.protocol === "ICMP" ? "ICMP" : "IP" },
+    { layer: "Layer 4", field: "Protocol", value: transport.protocol },
+    ...(transport.ports ? [{ layer: "Layer 4", field: "Ports", value: transport.ports }] : []),
+    { layer: "Layer 7", field: "Application", value: protocol },
+    { layer: "Packet", field: "Disposition", value: eventStatusLabel(event.status) }
+  ];
+}
+
+function pduHeaderValue(project: NetworkProject, value: string): string {
+  const device = project.devices.find((item) => item.id === value);
+  if (!device) return value;
+  const ip = primaryDeviceIp(device);
+  return ip ? `${device.label} (${ip})` : device.label;
+}
+
+function pduTransportForProtocol(protocol: string): { protocol: string; ports?: string } {
+  if (protocol === "ICMP") return { protocol: "ICMP" };
+  if (protocol === "DHCP") return { protocol: "UDP", ports: "67/68" };
+  if (protocol === "DNS") return { protocol: "UDP", ports: "53" };
+  if (protocol === "HTTP") return { protocol: "TCP", ports: "80" };
+  if (protocol === "FTP") return { protocol: "TCP", ports: "21" };
+  if (protocol === "EMAIL") return { protocol: "TCP", ports: "25" };
+  if (protocol === "TFTP") return { protocol: "UDP", ports: "69" };
+  if (protocol === "SYSLOG") return { protocol: "UDP", ports: "514" };
+  if (protocol === "SSH") return { protocol: "TCP", ports: "22" };
+  if (protocol === "TELNET") return { protocol: "TCP", ports: "23" };
+  return { protocol: "IP" };
 }
 
 function pduDetailRowsFor(

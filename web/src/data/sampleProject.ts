@@ -43,6 +43,22 @@ export function createRoutedSampleProject(ownerId: string): NetworkProject {
     name: "라우팅 HTTP 샘플",
     devices: [configuredPc, switchDevice, configuredRouter, configuredServer],
     links: [],
+    notes: [{ id: createId("note"), text: "HTTP/DNS/DHCP 라우팅 샘플", position: { x: 120, y: 130 }, color: "blue" }],
+    drawings: [{ id: createId("draw"), kind: "rectangle", label: "Server services zone", position: { x: 700, y: 118 }, width: 300, height: 178, color: "green", strokeStyle: "dashed", fill: true }],
+    activity: {
+      title: "Routed Services Lab",
+      objectives: [
+        "Build a routed PC-to-server topology with DNS, DHCP, HTTP, FTP, EMAIL, TFTP, and SYSLOG services.",
+        "Document the server services zone and verify traffic with PDU events."
+      ],
+      requirements: [
+        { id: createId("act_req"), kind: "device-count", label: "At least four devices", target: 4, points: 10 },
+        { id: createId("act_req"), kind: "link-count", label: "At least three links", target: 3, points: 10 },
+        { id: createId("act_req"), kind: "annotation-count", label: "At least two workspace annotations", target: 2, points: 5 },
+        { id: createId("act_req"), kind: "tdr-normal-count", label: "Three normal copper TDR links", target: 3, points: 5 },
+        { id: createId("act_req"), kind: "service-count", label: "At least one service device", target: 1, points: 5 }
+      ]
+    },
     simulationEvents: [],
     createdAt: now,
     updatedAt: now

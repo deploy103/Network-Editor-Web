@@ -420,6 +420,36 @@ function cloneProjectForDuplicate(source: NetworkProject, ownerId: string, name:
       })
     })),
     links,
+    notes: (source.notes ?? []).map((note) => ({ ...note, id: createId("note") })),
+    drawings: (source.drawings ?? []).map((drawing) => ({ ...drawing, id: createId("draw") })),
+    activity: source.activity ? {
+      ...source.activity,
+      requirements: source.activity.requirements.map((requirement) => ({ ...requirement, id: createId("act_req") })),
+      commandRules: (source.activity.commandRules ?? []).map((rule) => ({ ...rule, id: createId("act_cmd"), deviceId: rule.deviceId ? deviceIdMap.get(rule.deviceId) : undefined })),
+      commandSequences: (source.activity.commandSequences ?? []).map((sequence) => ({ ...sequence, id: createId("act_seq"), deviceId: sequence.deviceId ? deviceIdMap.get(sequence.deviceId) : undefined })),
+      commandOutputAssertions: (source.activity.commandOutputAssertions ?? []).map((assertion) => ({ ...assertion, id: createId("act_out"), deviceId: assertion.deviceId ? deviceIdMap.get(assertion.deviceId) : undefined })),
+      interfaceExpectations: (source.activity.interfaceExpectations ?? []).flatMap((expectation) => {
+        const deviceId = deviceIdMap.get(expectation.deviceId);
+        const portId = portIdMap.get(`${expectation.deviceId}:${expectation.portId}`);
+        return deviceId && portId ? [{ ...expectation, id: createId("act_int"), deviceId, portId }] : [];
+      }),
+      headerAssertions: (source.activity.headerAssertions ?? []).map((assertion) => ({ ...assertion, id: createId("act_hdr") })),
+      answerSnapshot: source.activity.answerSnapshot ? {
+        ...source.activity.answerSnapshot,
+        devices: source.activity.answerSnapshot.devices.flatMap((device) => {
+          const id = deviceIdMap.get(device.id);
+          return id ? [{ ...device, id }] : [];
+        }),
+        links: source.activity.answerSnapshot.links.flatMap((link) => {
+          const id = linkIdMap.get(link.id);
+          const endpointADeviceId = deviceIdMap.get(link.endpointADeviceId);
+          const endpointBDeviceId = deviceIdMap.get(link.endpointBDeviceId);
+          return id && endpointADeviceId && endpointBDeviceId ? [{ ...link, id, endpointADeviceId, endpointBDeviceId }] : [];
+        }),
+        serviceDeviceIds: source.activity.answerSnapshot.serviceDeviceIds.flatMap((id) => deviceIdMap.get(id) ?? []),
+        startupConfigDeviceIds: source.activity.answerSnapshot.startupConfigDeviceIds.flatMap((id) => deviceIdMap.get(id) ?? [])
+      } : undefined
+    } : undefined,
     simulationEvents: [],
     createdAt: now,
     updatedAt: now

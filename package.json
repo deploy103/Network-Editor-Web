@@ -14,6 +14,7 @@
     "preview": "npm run preview --workspace web",
     "smoke:cli": "bash scripts/smoke-cli.sh",
     "smoke:features": "bash scripts/smoke-features.sh",
+    "smoke:visual": "bash scripts/smoke-visual.sh",
     "smoke:python-cli": "bash scripts/smoke-python-cli.sh",
     "smoke:python-http": "bash scripts/smoke-python-http.sh",
     "smoke:all": "npm run smoke:features && npm run smoke:cli && npm run smoke:python-cli && npm run smoke:python-http",
@@ -21,5 +22,8 @@
     "build:rust": "bash scripts/build-wasm.sh",
     "build:go": "cd server-go && go build ./...",
     "check:all": "npm run build && npm run build:rust && npm run build:go"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.1"
   }
 }
