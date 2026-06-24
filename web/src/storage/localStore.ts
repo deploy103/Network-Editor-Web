@@ -70,6 +70,9 @@ export function createBlankProject(ownerId: string): NetworkProject {
     name: "새 네트워크",
     devices: [],
     links: [],
+    notes: [],
+    drawings: [],
+    activity: { title: "", objectives: [], requirements: [] },
     simulationEvents: [],
     createdAt: now,
     updatedAt: now

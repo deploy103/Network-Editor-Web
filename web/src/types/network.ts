@@ -218,6 +218,108 @@ export interface SimulationEvent {
   info: string;
   status: "forwarded" | "delivered" | "dropped";
   osiLayers: string[];
+  headers?: Array<{ layer: string; field: string; value: string }>;
+}
+
+export type WorkspaceNoteColor = "yellow" | "blue" | "green" | "rose";
+export type WorkspaceDrawingKind = "rectangle" | "ellipse" | "line" | "freehand";
+export type WorkspaceDrawingColor = "amber" | "blue" | "green" | "rose";
+
+export interface WorkspaceNote {
+  id: string;
+  text: string;
+  position: Position;
+  color: WorkspaceNoteColor;
+}
+
+export interface WorkspaceDrawing {
+  id: string;
+  kind: WorkspaceDrawingKind;
+  label: string;
+  position: Position;
+  width: number;
+  height: number;
+  points?: Position[];
+  color: WorkspaceDrawingColor;
+  strokeStyle: "solid" | "dashed";
+  fill: boolean;
+}
+
+export type ActivityRequirementKind = "device-count" | "link-count" | "annotation-count" | "delivered-pdu-count" | "saved-config-count" | "service-count" | "tdr-normal-count";
+
+export interface ActivityRequirement {
+  id: string;
+  kind: ActivityRequirementKind;
+  label: string;
+  target: number;
+  points: number;
+}
+
+export interface ActivityAnswerSnapshot {
+  capturedAt: string;
+  devices: Array<{ id: string; label: string; kind: DeviceKind; model: string }>;
+  links: Array<{ id: string; type: CableType; endpointADeviceId: string; endpointBDeviceId: string }>;
+  annotationCount: number;
+  serviceDeviceIds: string[];
+  startupConfigDeviceIds: string[];
+}
+
+export interface ActivityCommandRule {
+  id: string;
+  label: string;
+  deviceId?: string;
+  command: string;
+  points: number;
+}
+
+export interface ActivityCommandSequence {
+  id: string;
+  label: string;
+  deviceId?: string;
+  commands: string[];
+  points: number;
+}
+
+export interface ActivityCommandOutputAssertion {
+  id: string;
+  label: string;
+  deviceId?: string;
+  commands: string[];
+  expectedText: string;
+  points: number;
+}
+
+export interface ActivityInterfaceExpectation {
+  id: string;
+  label: string;
+  deviceId: string;
+  portId: string;
+  ipAddress?: string;
+  subnetMask?: string;
+  mode?: PortMode;
+  vlan?: number;
+  points: number;
+}
+
+export interface ActivityHeaderAssertion {
+  id: string;
+  label: string;
+  protocol?: string;
+  field: string;
+  value: string;
+  points: number;
+}
+
+export interface ActivitySpec {
+  title: string;
+  objectives: string[];
+  requirements: ActivityRequirement[];
+  answerSnapshot?: ActivityAnswerSnapshot;
+  commandRules?: ActivityCommandRule[];
+  commandSequences?: ActivityCommandSequence[];
+  commandOutputAssertions?: ActivityCommandOutputAssertion[];
+  interfaceExpectations?: ActivityInterfaceExpectation[];
+  headerAssertions?: ActivityHeaderAssertion[];
 }
 
 export interface NetworkProject {
@@ -226,6 +328,9 @@ export interface NetworkProject {
   name: string;
   devices: NetworkDevice[];
   links: NetworkLink[];
+  notes?: WorkspaceNote[];
+  drawings?: WorkspaceDrawing[];
+  activity?: ActivitySpec;
   simulationEvents: SimulationEvent[];
   updatedAt: string;
   createdAt: string;

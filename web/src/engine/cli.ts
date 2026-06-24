@@ -157,6 +157,10 @@ export function runCliCommand(device: NetworkDevice, session: CliSession, rawCom
     if (session.mode !== "privileged") return result(device, session, "% Debug commands require privileged EXEC mode.");
     return result(device, { ...session, debugFlags: [] }, "All possible debugging has been turned off");
   }
+  if (lower.startsWith("test ")) {
+    if (session.mode !== "privileged") return result(device, session, "% Test commands require privileged EXEC mode.");
+    return testCommand(device, session, command, lower);
+  }
 
   if (session.mode === "global") return globalCommand(device, session, command, lower);
   if (session.mode === "interface") return interfaceCommand(device, session, command, lower);
@@ -225,7 +229,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
   const base = session.mode === "exec"
       ? ["enable", "setup", "show version", "show boot", "show inventory", "show platform", "show tech-support", "show clock", "show privilege", "show history", "show debugging", "show interfaces", "show ip interface brief", "show ip route", "show route", "show cdp neighbors", "show arp", "ping ", "traceroute ", "terminal length 0", "help"]
     : session.mode === "privileged"
-      ? ["disable", "setup", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show boot", "show inventory", "show platform", "show module", "show environment", "show tech-support", "show clock", "clock set 12:34:56 Jun 19 2026", "show privilege", "show history", "show debugging", "show logging", "show service logs", "show service logs http", "show service logs ftp", "show service logs email", "show service logs tftp", "show service logs syslog", "show services", "show services enabled", "show services disabled", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show spanning-tree", "show interfaces", "show interfaces counters", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip ssh", "show ip route", "show ip route summary", "show ip route connected", "show ip route interface ", "show ip route gateway ", "show ip route local", "show ip route static", "show route", "show ip protocols", "show ip protocols ospf", "show ip protocols eigrp", "show ip protocols static", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show vlan summary", "show vlan id ", "show vlan name ", "show mac address-table", "show mac address-table address ", "show mac address-table dynamic", "show mac address-table interface ", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show arp ", "show ip dhcp binding", "show ip dhcp binding ", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp pool ", "show ip dhcp server statistics", "show hosts", "show hosts ", "show access-list", "show ip access-lists", "show nat", "debug ip icmp", "debug ip packet", "debug ip dhcp server events", "debug spanning-tree events", "undebug all", "clear arp", "clear arp-cache", "clear arp 192.168.1.10", "clear logging", "clear service logs", "clear service logs http", "clear service logs ftp", "clear service logs email", "clear service logs tftp", "clear service logs syslog", "clear mac address-table", "clear mac address-table dynamic", "clear mac address-table dynamic interface ", "clear mac address-table vlan ", "clear ip dhcp binding", "clear ip dhcp binding *", "clear ip dhcp conflict *", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
+      ? ["disable", "setup", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show boot", "show inventory", "show platform", "show module", "show environment", "show tech-support", "show clock", "clock set 12:34:56 Jun 19 2026", "show privilege", "show history", "show debugging", "show logging", "show service logs", "show service logs http", "show service logs ftp", "show service logs email", "show service logs tftp", "show service logs syslog", "show services", "show services enabled", "show services disabled", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show cable-diagnostics tdr", "show spanning-tree", "show interfaces", "show interfaces counters", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip ssh", "show ip route", "show ip route summary", "show ip route connected", "show ip route interface ", "show ip route gateway ", "show ip route local", "show ip route static", "show route", "show ip protocols", "show ip protocols ospf", "show ip protocols eigrp", "show ip protocols static", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show vlan summary", "show vlan id ", "show vlan name ", "show mac address-table", "show mac address-table address ", "show mac address-table dynamic", "show mac address-table interface ", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show arp ", "show ip dhcp binding", "show ip dhcp binding ", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp pool ", "show ip dhcp server statistics", "show hosts", "show hosts ", "show access-list", "show ip access-lists", "show nat", "test cable-diagnostics tdr interface ", "debug ip icmp", "debug ip packet", "debug ip dhcp server events", "debug spanning-tree events", "undebug all", "clear arp", "clear arp-cache", "clear arp 192.168.1.10", "clear logging", "clear service logs", "clear service logs http", "clear service logs ftp", "clear service logs email", "clear service logs tftp", "clear service logs syslog", "clear mac address-table", "clear mac address-table dynamic", "clear mac address-table dynamic interface ", "clear mac address-table vlan ", "clear ip dhcp binding", "clear ip dhcp binding *", "clear ip dhcp conflict *", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
         ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "username admin secret cisco", "no username ", "interface ", "int ", "interface range fa0/1 - 2", "default interface ", "vlan ", "no vlan ", "spanning-tree vlan 1 root primary", "no spanning-tree vlan 1 root primary", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "ip route ", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-name lab.local", "no ip domain-name", "ip name-server 8.8.8.8", "no ip name-server ", "ip ssh version 2", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "crypto key zeroize rsa", "logging host 192.168.1.100", "logging trap warnings", "logging buffered", "no logging console", "ip dhcp excluded-address 192.168.1.1 192.168.1.20", "ip dhcp pool ", "no ip dhcp excluded-address ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "no ip nat inside source static ", "ip access-list standard ", "ip access-list extended ", "no ip access-list extended ", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service password-encryption", "no service password-encryption", "service dhcp", "no service dhcp", "service dns", "no service dns", "service http", "no service http", "service ftp", "no service ftp", "service email", "no service email", "service tftp", "no service tftp", "service syslog", "no service syslog", "do show ip route", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
@@ -241,7 +245,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
                   : session.aclType === "standard"
                     ? ["permit any", "permit host ", "permit 192.168.1.0 0.0.0.255", "deny any", "deny host ", "no 10", "do show access-lists", "end", "exit", "help"]
                     : ["permit ip any any", "deny ip any any", "permit tcp any host 192.168.1.10 eq 80", "permit icmp any any", "no 10", "do show access-lists", "end", "exit", "help"];
-  return unique([...base, ...device.ports.flatMap((port) => [`interface ${port.name}`, `int ${shortPortAlias(port.name)}`, `show interface ${port.name}`, `show interface ${port.name} counters`, `show interface ${port.name} status`, `show interface ${port.name} switchport`])]);
+  return unique([...base, ...device.ports.flatMap((port) => [`interface ${port.name}`, `int ${shortPortAlias(port.name)}`, `show interface ${port.name}`, `show interface ${port.name} counters`, `show interface ${port.name} status`, `show interface ${port.name} switchport`, `show cable-diagnostics tdr interface ${port.name}`, `test cable-diagnostics tdr interface ${port.name}`])]);
 }
 
 function abbreviatedCandidateMatch(query: string, candidate: string): boolean {
@@ -289,6 +293,7 @@ function expandCliHead(command: string, session: CliSession): string {
   if (isAbbrev(first, "copy", 2) && rest.length) return expandCopyCommand(rest);
   if (first === "dir") return rest.length ? `dir ${rest.join(" ")}` : "dir";
   if (isAbbrev(first, "show", 2) && rest.length) return expandShowCommand(rest);
+  if (isAbbrev(first, "test", 2)) return expandTestCommand(rest);
   if (isAbbrev(first, "interface", 3) || first === "int") return `interface ${rest.join(" ")}`;
   if (isAbbrev(first, "hostname", 4)) return `hostname ${rest.join(" ")}`;
   if (isAbbrev(first, "username", 4)) return `username ${rest.join(" ")}`;
@@ -332,6 +337,14 @@ function expandTerminalCommand(rest: string[]): string {
   if (isAbbrev(lowerRest[0], "no")) return "terminal no monitor";
   if (isAbbrev(lowerRest[0], "monitor")) return "terminal monitor";
   return `terminal ${rest.join(" ")}`;
+}
+
+function expandTestCommand(rest: string[]): string {
+  const lowerRest = rest.map((token) => token.toLowerCase());
+  if (isAbbrev(lowerRest[0], "cable-diagnostics", 5) && isAbbrev(lowerRest[1], "tdr", 1) && (isAbbrev(lowerRest[2], "interface", 3) || lowerRest[2] === "int")) {
+    return `test cable-diagnostics tdr interface ${rest.slice(3).join(" ")}`;
+  }
+  return `test ${rest.join(" ")}`;
 }
 
 function expandEnableCommand(rest: string[]): string {
@@ -529,6 +542,7 @@ function expandShowCommand(rest: string[]): string {
   if (isAbbrev(first, "processes", 3) && isAbbrev(second, "cpu")) return "show processes cpu";
   if (isAbbrev(first, "memory", 3)) return "show memory";
   if (isAbbrev(first, "controllers", 4)) return rest.length > 1 ? `show controllers ${rest.slice(1).join(" ")}` : "show controllers";
+  if (isAbbrev(first, "cable-diagnostics", 5) && isAbbrev(second, "tdr", 1)) return ["show cable-diagnostics tdr", ...rest.slice(2)].join(" ").trim();
   if (isAbbrev(first, "spanning-tree", 2)) return ["show spanning-tree", ...rest.slice(1)].join(" ").trim();
   if (isAbbrev(first, "users", 2)) return ["show users", ...rest.slice(1)].join(" ").trim();
   if (isAbbrev(first, "line", 2)) return ["show line", ...rest.slice(1)].join(" ").trim();
@@ -652,6 +666,7 @@ const privilegedShowCommands = [
   "show startup-config",
   "show access-list",
   "show access-lists",
+  "show cable-diagnostics",
   "show ip nat",
   "show nat"
 ];
@@ -1913,6 +1928,7 @@ function showCommand(device: NetworkDevice, lower: string, session?: CliSession)
   if (lower === "show processes cpu") return "CPU utilization for five seconds: 1%/0%; one minute: 1%; five minutes: 1%";
   if (lower === "show memory") return "Processor Pool Total: 262144 Used: 98304 Free: 163840\nI/O Pool Total: 65536 Used: 8192 Free: 57344";
   if (lower === "show controllers" || lower.startsWith("show controllers ")) return controllersStatus(device, lower.slice("show controllers".length).trim());
+  if (lower === "show cable-diagnostics tdr" || lower.startsWith("show cable-diagnostics tdr ")) return cableDiagnosticsTdr(device, lower.slice("show cable-diagnostics tdr".length).trim());
   if (lower === "show users" || lower === "show users all") return showUsers(device, session);
   if (lower === "show line" || lower.startsWith("show line ")) return lineStatus(device, lower.slice("show line".length).trim());
   if (lower === "show terminal") return [
@@ -2000,6 +2016,14 @@ function showCommand(device: NetworkDevice, lower: string, session?: CliSession)
   if (lower.startsWith("show access-list ")) return accessListStatus(device, lower.slice("show access-list ".length).trim());
   if (lower === "show nat") return natTranslations(device);
   return "% Unsupported show command.";
+}
+
+function testCommand(device: NetworkDevice, session: CliSession, command: string, lower: string): CliResult {
+  if (lower.startsWith("test cable-diagnostics tdr interface ")) {
+    const name = command.slice("test cable-diagnostics tdr interface ".length).trim();
+    return result(device, session, cableDiagnosticsTest(device, name));
+  }
+  return result(device, session, invalidInput(command));
 }
 
 function clearCommand(device: NetworkDevice, session: CliSession, lower: string): CliResult {
@@ -2311,6 +2335,48 @@ function controllersStatus(device: NetworkDevice, filter = ""): string {
     `  Cable state: ${port.linkId ? "connected" : "not connected"}`,
     `  Interface reset count: 0`
   ].join("\n")).join("\n\n");
+}
+
+function cableDiagnosticsTest(device: NetworkDevice, name: string): string {
+  const port = findPort(device, name);
+  if (!port) return `% Interface ${name || "<missing>"} not found.`;
+  if (!tdrCapable(port)) return `% TDR is not supported on ${port.name}.`;
+  return [
+    `TDR test started on ${port.name}.`,
+    "A cable diagnostic test can take a few seconds to complete.",
+    `Use 'show cable-diagnostics tdr interface ${port.name}' to display the result.`,
+    "",
+    cableDiagnosticsTdr(device, `interface ${port.name}`)
+  ].join("\n");
+}
+
+function cableDiagnosticsTdr(device: NetworkDevice, filter = ""): string {
+  const target = filter.replace(/^(interface|int)\s+/i, "").trim();
+  const selectedPort = target ? findPort(device, target) : undefined;
+  if (target && !selectedPort) return `% Interface ${target} not found.`;
+  const ports = selectedPort ? [selectedPort] : device.ports.filter((port) => port.kind !== "console");
+  if (!ports.length) return "% No interfaces found.";
+  return [
+    "Interface              Speed    Local pair Pair length        Remote pair Pair status",
+    ...ports.map((port) => cableDiagnosticsRow(device, port))
+  ].join("\n");
+}
+
+function cableDiagnosticsRow(device: NetworkDevice, port: NetworkPort): string {
+  const result = tdrResult(device, port);
+  return `${port.name.padEnd(22)}${result.speed.padEnd(9)}${result.localPair.padEnd(11)}${result.length.padEnd(19)}${result.remotePair.padEnd(12)}${result.status}`;
+}
+
+function tdrResult(device: NetworkDevice, port: NetworkPort): { speed: string; localPair: string; length: string; remotePair: string; status: string } {
+  if (!tdrCapable(port)) return { speed: "-", localPair: "-", length: "-", remotePair: "-", status: "Not supported" };
+  const speed = port.speed && port.speed !== "auto" ? `${port.speed}M` : port.kind === "gigabit-ethernet" ? "1000M" : "100M";
+  if (!device.powerOn || !port.adminUp) return { speed, localPair: "Pair A", length: "N/A", remotePair: "Pair B", status: "Not completed" };
+  if (!port.linkId) return { speed, localPair: "Pair A", length: "0 m", remotePair: "Pair B", status: "Open" };
+  return { speed, localPair: "Pair A", length: "5 +/- 2 m", remotePair: "Pair B", status: "Normal" };
+}
+
+function tdrCapable(port: NetworkPort): boolean {
+  return port.kind === "ethernet" || port.kind === "fast-ethernet" || port.kind === "gigabit-ethernet";
 }
 
 function runningConfig(device: NetworkDevice): string {
@@ -2958,7 +3024,7 @@ function help(mode: CliMode): string {
   if (mode === "line") return "password <value>, login, login local, no login, transport input <all|ssh|telnet|none>, exec-timeout <min> <sec>, logging synchronous, exit";
   if (mode === "router") return "network <network> [wildcard-mask], version <n>, auto-summary, no auto-summary, passive-interface default|<name>, no passive-interface default|<name>, default-information originate [always], redistribute static, exit";
   if (mode === "acl") return "permit|deny <protocol> <source> <destination>, permit|deny <source> [wildcard], no <sequence>, exit";
-  return "enable, setup, configure terminal, clock set, show clock, show run, show version, show boot, show platform, show environment, show tech-support, show services, show interfaces, show interfaces counters, show interfaces description, show interfaces switchport, show interfaces trunk, show ip interface, show ip interface brief, show interfaces status, show vlan brief, show ip route, show ip route summary, show ip protocols, show ip ospf neighbor, show ip eigrp neighbors, show ip rip database, show ip dhcp pool, show hosts, show access-list, show nat, show cdp neighbors, show arp, show ip dhcp binding, clear arp, clear mac address-table, clear ip dhcp binding, write memory, reload, write erase";
+  return "enable, setup, configure terminal, clock set, show clock, show run, show version, show boot, show platform, show environment, show tech-support, show services, show interfaces, show interfaces counters, show interfaces description, show interfaces switchport, show interfaces trunk, show cable-diagnostics tdr, test cable-diagnostics tdr interface <name>, show ip interface, show ip interface brief, show interfaces status, show vlan brief, show ip route, show ip route summary, show ip protocols, show ip ospf neighbor, show ip eigrp neighbors, show ip rip database, show ip dhcp pool, show hosts, show access-list, show nat, show cdp neighbors, show arp, show ip dhcp binding, clear arp, clear mac address-table, clear ip dhcp binding, write memory, reload, write erase";
 }
 
 function searchHelp(term: string): string {
@@ -2997,6 +3063,9 @@ function searchHelp(term: string): string {
     "show ip route",
     "show ip route summary",
     "show controllers",
+    "show cable-diagnostics tdr",
+    "show cable-diagnostics tdr interface <name>",
+    "test cable-diagnostics tdr interface <name>",
     "show ip protocols",
     "show ip ospf",
     "show ip ospf neighbor",

@@ -6,6 +6,7 @@ engine-rust/target
 engine-rust/pkg
 server-go/bin
 .env
+/server
 .DS_Store
 __pycache__
 *.pyc

@@ -2,13 +2,14 @@ import { defaultConfig } from "../data/deviceCatalog";
 import { isIpv4 } from "../engine/ip";
 import { recalc } from "../engine/topology";
 import { createId } from "../utils/id";
-import type { CableType, DeviceConfig, DeviceKind, LinkStatus, NetworkDevice, NetworkLink, NetworkPort, NetworkProject, PortKind, PortMode, RuntimeState, SimulationEvent } from "../types/network";
+import type { ActivityAnswerSnapshot, ActivityCommandOutputAssertion, ActivityCommandRule, ActivityCommandSequence, ActivityHeaderAssertion, ActivityInterfaceExpectation, ActivityRequirementKind, CableType, DeviceConfig, DeviceKind, LinkStatus, NetworkDevice, NetworkLink, NetworkPort, NetworkProject, PortKind, PortMode, RuntimeState, SimulationEvent } from "../types/network";
 
 const deviceKinds: DeviceKind[] = ["router", "switch", "firewall", "pc", "server", "wireless", "hub"];
 const portKinds: PortKind[] = ["ethernet", "fast-ethernet", "gigabit-ethernet", "serial", "console", "fiber", "wireless"];
 const portModes: PortMode[] = ["access", "trunk", "routed"];
 const cableTypes: CableType[] = ["auto", "console", "copper-straight", "copper-cross", "fiber", "serial-dce", "serial-dte", "wireless"];
 const linkStatuses: LinkStatus[] = ["up", "down", "blocked"];
+const activityRequirementKinds: ActivityRequirementKind[] = ["device-count", "link-count", "annotation-count", "delivered-pdu-count", "saved-config-count", "service-count", "tdr-normal-count"];
 const defaultLogging: NonNullable<DeviceConfig["logging"]> = { console: true, buffered: true, hosts: [], trap: "informational" };
 
 function isDeviceKind(value: unknown): value is DeviceKind {
@@ -100,6 +101,9 @@ export function normalizeProject(project: NetworkProject): NetworkProject {
       ports: device.ports.map((port) => ({ ...port, linkId: linkByPort.get(`${device.id}:${port.id}`)?.id }))
     })),
     links,
+    notes: normalizeWorkspaceNotes(project.notes),
+    drawings: normalizeWorkspaceDrawings(project.drawings),
+    activity: normalizeActivity(project.activity),
     simulationEvents: simulationEvents.map(normalizeSimulationEvent),
     createdAt: project.createdAt || now,
     updatedAt: project.updatedAt || now
@@ -431,6 +435,244 @@ function normalizeLink(link: NetworkLink): NetworkLink {
   };
 }
 
+function normalizeWorkspaceNotes(notes: NetworkProject["notes"]): NonNullable<NetworkProject["notes"]> {
+  if (!Array.isArray(notes)) return [];
+  return notes
+    .filter((note) => note && typeof note.text === "string")
+    .map((note) => ({
+      id: note.id || createId("note"),
+      text: note.text.slice(0, 240),
+      position: {
+        x: Number.isFinite(note.position?.x) ? Math.max(0, Math.min(2400, note.position.x)) : 120,
+        y: Number.isFinite(note.position?.y) ? Math.max(0, Math.min(1600, note.position.y)) : 120
+      },
+      color: note.color === "blue" || note.color === "green" || note.color === "rose" ? note.color : "yellow"
+    }));
+}
+
+function normalizeWorkspaceDrawings(drawings: NetworkProject["drawings"]): NonNullable<NetworkProject["drawings"]> {
+  if (!Array.isArray(drawings)) return [];
+  return drawings
+    .filter((drawing) => drawing && (drawing.kind === "rectangle" || drawing.kind === "ellipse" || drawing.kind === "line" || drawing.kind === "freehand"))
+    .map((drawing) => {
+      const width = Number.isFinite(drawing.width) ? drawing.width : drawing.kind === "line" || drawing.kind === "freehand" ? 260 : 300;
+      const height = Number.isFinite(drawing.height) ? drawing.height : drawing.kind === "line" || drawing.kind === "freehand" ? 120 : 170;
+      const minWidth = drawing.kind === "line" || drawing.kind === "freehand" ? 28 : 32;
+      const minHeight = drawing.kind === "line" || drawing.kind === "freehand" ? 8 : 32;
+      const normalizedWidth = Math.max(minWidth, Math.min(1200, Math.round(width)));
+      const normalizedHeight = Math.max(minHeight, Math.min(900, Math.round(height)));
+      return {
+        id: drawing.id || createId("draw"),
+        kind: drawing.kind,
+        label: typeof drawing.label === "string" ? drawing.label.slice(0, 80) : "",
+        position: {
+          x: Number.isFinite(drawing.position?.x) ? Math.max(0, Math.min(2400, drawing.position.x)) : 120,
+          y: Number.isFinite(drawing.position?.y) ? Math.max(0, Math.min(1600, drawing.position.y)) : 120
+        },
+        width: normalizedWidth,
+        height: normalizedHeight,
+        points: drawing.kind === "freehand" ? normalizeWorkspaceDrawingPoints(drawing.points, normalizedWidth, normalizedHeight) : undefined,
+        color: drawing.color === "blue" || drawing.color === "green" || drawing.color === "rose" ? drawing.color : "amber",
+        strokeStyle: drawing.strokeStyle === "dashed" ? "dashed" : "solid",
+        fill: drawing.kind === "line" || drawing.kind === "freehand" ? false : drawing.fill !== false
+      };
+    });
+}
+
+function normalizeWorkspaceDrawingPoints(points: unknown, width: number, height: number): Array<{ x: number; y: number }> {
+  if (!Array.isArray(points)) return defaultWorkspaceDrawingPoints(width, height);
+  const normalized = points
+    .filter((point): point is { x: number; y: number } => {
+      const value = point as { x?: unknown; y?: unknown } | null;
+      return Number.isFinite(value?.x) && Number.isFinite(value?.y);
+    })
+    .map((point) => ({
+      x: Math.max(0, Math.min(width, Math.round(point.x))),
+      y: Math.max(0, Math.min(height, Math.round(point.y)))
+    }))
+    .slice(0, 300);
+  return normalized.length >= 2 ? normalized : defaultWorkspaceDrawingPoints(width, height);
+}
+
+function defaultWorkspaceDrawingPoints(width: number, height: number): Array<{ x: number; y: number }> {
+  return [
+    { x: 0, y: Math.round(height * 0.62) },
+    { x: Math.round(width * 0.24), y: Math.round(height * 0.28) },
+    { x: Math.round(width * 0.52), y: Math.round(height * 0.7) },
+    { x: Math.round(width * 0.78), y: Math.round(height * 0.38) },
+    { x: width, y: Math.round(height * 0.58) }
+  ];
+}
+
+function normalizeActivity(activity: NetworkProject["activity"]): NonNullable<NetworkProject["activity"]> {
+  return {
+    title: typeof activity?.title === "string" ? activity.title.trim().slice(0, 100) : "",
+    objectives: Array.isArray(activity?.objectives)
+      ? activity.objectives
+        .filter((objective) => typeof objective === "string" && objective.trim())
+        .map((objective) => objective.trim().slice(0, 180))
+        .slice(0, 12)
+      : [],
+    requirements: Array.isArray(activity?.requirements)
+      ? activity.requirements
+        .filter((requirement) => requirement && activityRequirementKinds.includes(requirement.kind))
+        .map((requirement) => ({
+          id: requirement.id || createId("act_req"),
+          kind: requirement.kind,
+          label: (typeof requirement.label === "string" && requirement.label.trim() ? requirement.label.trim() : activityRequirementKindLabel(requirement.kind)).slice(0, 80),
+          target: Math.max(1, Math.min(999, Math.round(Number.isFinite(requirement.target) ? requirement.target : 1))),
+          points: Math.max(1, Math.min(100, Math.round(Number.isFinite(requirement.points) ? requirement.points : 5)))
+        }))
+        .slice(0, 24)
+      : [],
+    answerSnapshot: normalizeActivityAnswerSnapshot(activity?.answerSnapshot),
+    commandRules: normalizeActivityCommandRules(activity?.commandRules),
+    commandSequences: normalizeActivityCommandSequences(activity?.commandSequences),
+    commandOutputAssertions: normalizeActivityCommandOutputAssertions(activity?.commandOutputAssertions),
+    interfaceExpectations: normalizeActivityInterfaceExpectations(activity?.interfaceExpectations),
+    headerAssertions: normalizeActivityHeaderAssertions(activity?.headerAssertions)
+  };
+}
+
+function normalizeActivityInterfaceExpectations(expectations: ActivityInterfaceExpectation[] | undefined): ActivityInterfaceExpectation[] {
+  if (!Array.isArray(expectations)) return [];
+  return expectations
+    .filter((expectation) => expectation && typeof expectation.deviceId === "string" && typeof expectation.portId === "string")
+    .map((expectation) => {
+      const vlan = Number.isInteger(expectation.vlan) ? expectation.vlan : undefined;
+      return {
+        id: expectation.id || createId("act_int"),
+        label: (typeof expectation.label === "string" && expectation.label.trim() ? expectation.label.trim() : "Interface expectation").slice(0, 80),
+        deviceId: expectation.deviceId,
+        portId: expectation.portId,
+        ipAddress: typeof expectation.ipAddress === "string" && expectation.ipAddress.trim() ? expectation.ipAddress.trim().slice(0, 40) : undefined,
+        subnetMask: typeof expectation.subnetMask === "string" && expectation.subnetMask.trim() ? expectation.subnetMask.trim().slice(0, 40) : undefined,
+        mode: isPortMode(expectation.mode) ? expectation.mode : undefined,
+        vlan: vlan === undefined ? undefined : Math.max(1, Math.min(4094, vlan)),
+        points: Math.max(1, Math.min(100, Math.round(Number.isFinite(expectation.points) ? expectation.points : 5)))
+      };
+    })
+    .slice(0, 80);
+}
+
+function normalizeActivityHeaderAssertions(assertions: ActivityHeaderAssertion[] | undefined): ActivityHeaderAssertion[] {
+  if (!Array.isArray(assertions)) return [];
+  return assertions
+    .filter((assertion) => assertion && typeof assertion.field === "string" && assertion.field.trim() && typeof assertion.value === "string" && assertion.value.trim())
+    .map((assertion) => ({
+      id: assertion.id || createId("act_hdr"),
+      label: (typeof assertion.label === "string" && assertion.label.trim() ? assertion.label.trim() : `${assertion.field}: ${assertion.value}`).slice(0, 80),
+      protocol: typeof assertion.protocol === "string" && assertion.protocol.trim() ? assertion.protocol.trim().toUpperCase().slice(0, 24) : undefined,
+      field: assertion.field.trim().slice(0, 48),
+      value: assertion.value.trim().slice(0, 120),
+      points: Math.max(1, Math.min(100, Math.round(Number.isFinite(assertion.points) ? assertion.points : 5)))
+    }))
+    .slice(0, 80);
+}
+
+function normalizeActivityCommandRules(rules: ActivityCommandRule[] | undefined): ActivityCommandRule[] {
+  if (!Array.isArray(rules)) return [];
+  return rules
+    .filter((rule) => rule && typeof rule.command === "string" && rule.command.trim())
+    .map((rule) => ({
+      id: rule.id || createId("act_cmd"),
+      label: (typeof rule.label === "string" && rule.label.trim() ? rule.label.trim() : rule.command.trim()).slice(0, 80),
+      deviceId: typeof rule.deviceId === "string" && rule.deviceId.trim() ? rule.deviceId.trim() : undefined,
+      command: rule.command.trim().replace(/\s+/g, " ").slice(0, 120),
+      points: Math.max(1, Math.min(100, Math.round(Number.isFinite(rule.points) ? rule.points : 5)))
+    }))
+    .slice(0, 40);
+}
+
+function normalizeActivityCommandSequences(sequences: ActivityCommandSequence[] | undefined): ActivityCommandSequence[] {
+  if (!Array.isArray(sequences)) return [];
+  return sequences
+    .filter((sequence) => sequence && Array.isArray(sequence.commands) && sequence.commands.some((command) => typeof command === "string" && command.trim()))
+    .map((sequence) => {
+      const commands = sequence.commands
+        .filter((command) => typeof command === "string" && command.trim())
+        .map((command) => command.trim().replace(/\s+/g, " ").slice(0, 120))
+        .slice(0, 20);
+      return {
+        id: sequence.id || createId("act_seq"),
+        label: (typeof sequence.label === "string" && sequence.label.trim() ? sequence.label.trim() : commands.join(" -> ")).slice(0, 80),
+        deviceId: typeof sequence.deviceId === "string" && sequence.deviceId.trim() ? sequence.deviceId.trim() : undefined,
+        commands,
+        points: Math.max(1, Math.min(100, Math.round(Number.isFinite(sequence.points) ? sequence.points : 10)))
+      };
+    })
+    .slice(0, 24);
+}
+
+function normalizeActivityCommandOutputAssertions(assertions: ActivityCommandOutputAssertion[] | undefined): ActivityCommandOutputAssertion[] {
+  if (!Array.isArray(assertions)) return [];
+  return assertions
+    .filter((assertion) => assertion && Array.isArray(assertion.commands) && typeof assertion.expectedText === "string" && assertion.expectedText.trim())
+    .map((assertion) => {
+      const commands = assertion.commands
+        .filter((command) => typeof command === "string" && command.trim())
+        .map((command) => command.trim().replace(/\s+/g, " ").slice(0, 120))
+        .slice(0, 20);
+      return {
+        id: assertion.id || createId("act_out"),
+        label: (typeof assertion.label === "string" && assertion.label.trim() ? assertion.label.trim() : `${commands.at(-1) ?? "CLI"} contains ${assertion.expectedText}`).slice(0, 80),
+        deviceId: typeof assertion.deviceId === "string" && assertion.deviceId.trim() ? assertion.deviceId.trim() : undefined,
+        commands,
+        expectedText: assertion.expectedText.trim().slice(0, 160),
+        points: Math.max(1, Math.min(100, Math.round(Number.isFinite(assertion.points) ? assertion.points : 10)))
+      };
+    })
+    .filter((assertion) => assertion.commands.length > 0)
+    .slice(0, 24);
+}
+
+function normalizeActivityAnswerSnapshot(snapshot: ActivityAnswerSnapshot | undefined): ActivityAnswerSnapshot | undefined {
+  if (!snapshot || typeof snapshot !== "object") return undefined;
+  const value = snapshot as NonNullable<NonNullable<NetworkProject["activity"]>["answerSnapshot"]>;
+  const devices = Array.isArray(value.devices)
+    ? value.devices
+      .filter((device) => device && typeof device.id === "string" && isDeviceKind(device.kind))
+      .map((device) => ({
+        id: device.id,
+        label: typeof device.label === "string" ? device.label.slice(0, 80) : device.id,
+        kind: device.kind,
+        model: typeof device.model === "string" ? device.model.slice(0, 80) : ""
+      }))
+      .slice(0, 200)
+    : [];
+  const links = Array.isArray(value.links)
+    ? value.links
+      .filter((link) => link && typeof link.id === "string" && typeof link.endpointADeviceId === "string" && typeof link.endpointBDeviceId === "string")
+      .map((link) => ({
+        id: link.id,
+        type: normalizeCableType(link.type),
+        endpointADeviceId: link.endpointADeviceId,
+        endpointBDeviceId: link.endpointBDeviceId
+      }))
+      .slice(0, 300)
+    : [];
+  return {
+    capturedAt: typeof value.capturedAt === "string" ? value.capturedAt : new Date().toISOString(),
+    devices,
+    links,
+    annotationCount: Math.max(0, Math.min(999, Math.round(Number.isFinite(value.annotationCount) ? value.annotationCount : 0))),
+    serviceDeviceIds: Array.isArray(value.serviceDeviceIds) ? value.serviceDeviceIds.filter((id) => typeof id === "string").slice(0, 200) : [],
+    startupConfigDeviceIds: Array.isArray(value.startupConfigDeviceIds) ? value.startupConfigDeviceIds.filter((id) => typeof id === "string").slice(0, 200) : []
+  };
+}
+
+function activityRequirementKindLabel(kind: ActivityRequirementKind): string {
+  return ({
+    "device-count": "Required devices",
+    "link-count": "Required links",
+    "annotation-count": "Workspace annotations",
+    "delivered-pdu-count": "Delivered PDU events",
+    "saved-config-count": "Saved network configs",
+    "service-count": "Enabled service devices",
+    "tdr-normal-count": "Normal TDR copper links"
+  })[kind];
+}
+
 function normalizeSimulationEvent(event: SimulationEvent): SimulationEvent {
   const rawStatus = (event as { status?: string }).status;
   const legacySummary = (event as { summary?: string }).summary;
@@ -458,6 +700,21 @@ function normalizeSimulationEvent(event: SimulationEvent): SimulationEvent {
     type: event.type || "EVENT",
     info: event.info || legacySummary || "",
     status,
-    osiLayers
+    osiLayers,
+    headers: normalizePduHeaders(event.headers)
   };
+}
+
+function normalizePduHeaders(headers: SimulationEvent["headers"]): SimulationEvent["headers"] {
+  if (!Array.isArray(headers)) return undefined;
+  const normalized = headers
+    .filter((header) => header && typeof header.layer === "string" && typeof header.field === "string" && typeof header.value === "string")
+    .map((header) => ({
+      layer: header.layer.trim().slice(0, 32),
+      field: header.field.trim().slice(0, 48),
+      value: header.value.trim().slice(0, 120)
+    }))
+    .filter((header) => header.layer && header.field)
+    .slice(0, 24);
+  return normalized.length ? normalized : undefined;
 }

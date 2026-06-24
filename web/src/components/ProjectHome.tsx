@@ -195,6 +195,17 @@ function filterProjects(projects: NetworkProject[], query: string, sort: Project
 function projectSearchText(project: NetworkProject): string {
   return [
     project.name,
+    project.activity?.title ?? "",
+    ...(project.activity?.objectives ?? []),
+    ...(project.activity?.requirements ?? []).flatMap((requirement) => [requirement.label, requirement.kind]),
+    ...(project.activity?.commandRules ?? []).flatMap((rule) => [rule.label, rule.command]),
+    ...(project.activity?.commandSequences ?? []).flatMap((sequence) => [sequence.label, ...sequence.commands]),
+    ...(project.activity?.commandOutputAssertions ?? []).flatMap((assertion) => [assertion.label, ...assertion.commands, assertion.expectedText]),
+    ...(project.activity?.interfaceExpectations ?? []).flatMap((expectation) => [expectation.label, expectation.ipAddress ?? "", expectation.subnetMask ?? "", expectation.mode ?? "", String(expectation.vlan ?? "")]),
+    ...(project.activity?.headerAssertions ?? []).flatMap((assertion) => [assertion.label, assertion.protocol ?? "", assertion.field, assertion.value]),
+    ...(project.activity?.answerSnapshot?.devices ?? []).flatMap((device) => [device.label, device.kind, device.model]),
+    ...(project.notes ?? []).map((note) => note.text),
+    ...(project.drawings ?? []).flatMap((drawing) => [drawing.label, drawing.kind, drawing.color]),
     ...project.devices.flatMap((device) => [
       device.label,
       device.model,
