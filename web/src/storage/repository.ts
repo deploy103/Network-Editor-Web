@@ -1,4 +1,4 @@
-import { apiDeleteProject, apiLogin, apiLogout, apiProjects, apiSaveProject, apiSignup, currentApiUser, isApiEnabled } from "./apiClient";
+import { apiDeleteProject, apiLogin, apiLogout, apiProjects, apiSaveProject, apiSignup, currentApiUser, isApiEnabled, markApiSessionActive } from "./apiClient";
 import * as local from "./localStore";
 import type { NetworkProject, User } from "../types/network";
 
@@ -23,9 +23,9 @@ export async function signup(input: {
   return local.signup(input);
 }
 
-export async function login(username: string, password: string): Promise<User> {
-  if (isApiEnabled()) return apiLogin(username, password);
-  return local.login(username, password);
+export async function login(username: string, password: string, remember = false): Promise<User> {
+  if (isApiEnabled()) return apiLogin(username, password, remember);
+  return local.login(username, password, remember);
 }
 
 export function logout(): void {
@@ -34,6 +34,11 @@ export function logout(): void {
     return;
   }
   local.logout();
+}
+
+export function markSessionActive(): User | null {
+  if (isApiEnabled()) return markApiSessionActive();
+  return local.markSessionActive();
 }
 
 export async function loadProjects(ownerId: string): Promise<NetworkProject[]> {

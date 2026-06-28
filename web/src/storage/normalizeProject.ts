@@ -1,5 +1,5 @@
-import { defaultConfig } from "../data/deviceCatalog";
-import { isIpv4 } from "../engine/ip";
+import { defaultConfig, getDeviceModel, getModuleSpec } from "../data/deviceCatalog";
+import { isIpv4, isSubnetMask, maskToPrefix } from "../engine/ip";
 import { recalc } from "../engine/topology";
 import { createId } from "../utils/id";
 import type { ActivityAnswerSnapshot, ActivityCommandOutputAssertion, ActivityCommandRule, ActivityCommandSequence, ActivityHeaderAssertion, ActivityInterfaceExpectation, ActivityRequirementKind, CableType, DeviceConfig, DeviceKind, LinkStatus, NetworkDevice, NetworkLink, NetworkPort, NetworkProject, PortKind, PortMode, RuntimeState, SimulationEvent } from "../types/network";
@@ -9,7 +9,33 @@ const portKinds: PortKind[] = ["ethernet", "fast-ethernet", "gigabit-ethernet", 
 const portModes: PortMode[] = ["access", "trunk", "routed"];
 const cableTypes: CableType[] = ["auto", "console", "copper-straight", "copper-cross", "fiber", "serial-dce", "serial-dte", "wireless"];
 const linkStatuses: LinkStatus[] = ["up", "down", "blocked"];
-const activityRequirementKinds: ActivityRequirementKind[] = ["device-count", "link-count", "annotation-count", "delivered-pdu-count", "saved-config-count", "service-count", "tdr-normal-count"];
+const activityRequirementKinds: ActivityRequirementKind[] = [
+  "device-count",
+  "link-count",
+  "annotation-count",
+  "delivered-pdu-count",
+  "saved-config-count",
+  "service-count",
+  "tdr-normal-count",
+  "vlan-count",
+  "trunk-port-count",
+  "routed-port-count",
+  "svi-count",
+  "static-route-count",
+  "dynamic-routing-count",
+  "acl-rule-count",
+  "nat-rule-count",
+  "prefix-list-count",
+  "pbr-route-map-count",
+  "dhcp-pool-count",
+  "dhcp-snooping-device-count",
+  "port-security-port-count",
+  "etherchannel-port-count",
+  "first-hop-redundancy-count",
+  "wireless-infrastructure-count",
+  "wireless-client-count",
+  "ip-sla-track-count"
+];
 const defaultLogging: NonNullable<DeviceConfig["logging"]> = { console: true, buffered: true, hosts: [], trap: "informational" };
 
 function isDeviceKind(value: unknown): value is DeviceKind {
@@ -18,6 +44,10 @@ function isDeviceKind(value: unknown): value is DeviceKind {
 
 function isPortMode(value: unknown): value is PortMode {
   return typeof value === "string" && portModes.includes(value as PortMode);
+}
+
+function validVlan(value: unknown): value is number {
+  return Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 4094;
 }
 
 function normalizePortKind(value: unknown): PortKind {
@@ -129,6 +159,7 @@ function normalizeDevice(device: NetworkDevice): NetworkDevice {
   };
   const kind: DeviceKind = isDeviceKind(device.kind) ? device.kind : isDeviceKind(legacy.type) ? legacy.type : "pc";
   const hostname = device.config?.hostname || device.label || "장비";
+  const modelId = device.modelId || legacy.catalogId || "pc-pt";
   const modules = Array.isArray(device.modules)
     ? device.modules
     : Array.isArray(legacy.moduleSlots)
@@ -140,7 +171,7 @@ function normalizeDevice(device: NetworkDevice): NetworkDevice {
     ...device,
     id: device.id || createId("dev"),
     kind,
-    modelId: device.modelId || legacy.catalogId || "pc-pt",
+    modelId,
     model: device.model || legacy.modelName || "장비",
     label: device.label || hostname,
     position: {
@@ -149,10 +180,27 @@ function normalizeDevice(device: NetworkDevice): NetworkDevice {
     },
     powerOn: device.powerOn !== false,
     ports: Array.isArray(device.ports) ? device.ports.map(normalizePort) : [],
-    modules,
+    modules: normalizeDeviceModules(modules, modelId),
     config: normalizeConfig(device.config, hostname, kind),
     runtime: normalizeRuntime(device.runtime)
   };
+}
+
+function normalizeDeviceModules(modules: NetworkDevice["modules"], modelId: string): NetworkDevice["modules"] {
+  let modelSlots: string[] = [];
+  try {
+    modelSlots = getDeviceModel(modelId).modules.map((slot) => slot.id);
+  } catch {
+    modelSlots = [];
+  }
+  return modules.map((module) => {
+    const spec = getModuleSpec(module.moduleId);
+    if (!spec || module.occupiedSlotIds?.length) return module;
+    const startIndex = modelSlots.indexOf(module.slotId);
+    if (startIndex < 0) return module;
+    const occupiedSlotIds = modelSlots.slice(startIndex, startIndex + (spec.widthSlots ?? 1));
+    return { ...module, occupiedSlotIds };
+  });
 }
 
 function normalizePort(port: NetworkPort): NetworkPort {
@@ -177,18 +225,97 @@ function normalizePort(port: NetworkPort): NetworkPort {
     nativeVlan: Number.isInteger(port.nativeVlan) ? port.nativeVlan : 1,
     ipAddress: port.ipAddress || legacy.interfaceConfig?.ipAddress || "",
     subnetMask: port.subnetMask || legacy.interfaceConfig?.subnetMask || "",
+    secondaryIpAddresses: normalizeSecondaryIpAddresses(port.secondaryIpAddresses),
+    parentPortId: typeof port.parentPortId === "string" && port.parentPortId ? port.parentPortId : undefined,
+    subinterfaceVlan: validVlan(port.subinterfaceVlan) ? port.subinterfaceVlan : undefined,
+    encapsulationDot1qNative: port.encapsulationDot1qNative === true,
     gateway: port.gateway || legacy.interfaceConfig?.gateway || "",
     dnsServer: port.dnsServer || legacy.interfaceConfig?.dns || "",
     adminUp: port.adminUp !== false && legacy.status !== "administratively-down",
     ipCapable: Boolean(port.ipCapable || mode === "routed" || port.ipAddress || legacy.interfaceConfig?.ipAddress),
     stpPortfast: port.stpPortfast === true,
     bpduGuard: port.bpduGuard === true,
+    stpCost: Number.isInteger(port.stpCost) && port.stpCost! >= 1 ? Math.min(200000000, port.stpCost!) : undefined,
+    stpPriority: Number.isInteger(port.stpPriority) && port.stpPriority! >= 0 ? Math.min(240, Math.floor(port.stpPriority! / 16) * 16) : undefined,
+    cdpEnabled: port.cdpEnabled !== false,
+    lldpTransmit: port.lldpTransmit === true,
+    lldpReceive: port.lldpReceive === true,
+    dhcpSnoopingTrusted: port.dhcpSnoopingTrusted === true,
+    dhcpSnoopingRateLimit: Number.isInteger(port.dhcpSnoopingRateLimit) && port.dhcpSnoopingRateLimit! > 0 ? Math.min(2048, port.dhcpSnoopingRateLimit!) : undefined,
+    voiceVlan: validVlan(port.voiceVlan) ? port.voiceVlan : undefined,
+    portSecurity: normalizePortSecurity(port.portSecurity),
+    channelGroup: normalizeChannelGroup(port.channelGroup),
     accessGroupIn: port.accessGroupIn || "",
     accessGroupOut: port.accessGroupOut || "",
+    policyRouteMap: typeof port.policyRouteMap === "string" ? port.policyRouteMap : "",
     helperAddresses: Array.isArray(port.helperAddresses) ? port.helperAddresses.filter(Boolean) : [],
     switchportNonegotiate: port.switchportNonegotiate === true,
-    natRole: port.natRole === "inside" || port.natRole === "outside" ? port.natRole : undefined
+    natRole: port.natRole === "inside" || port.natRole === "outside" ? port.natRole : undefined,
+    hsrpGroups: normalizeHsrpGroups(port.hsrpGroups),
+    vrrpGroups: normalizeVrrpGroups(port.vrrpGroups)
   };
+}
+
+function normalizeHsrpGroups(groups: NetworkPort["hsrpGroups"]): NonNullable<NetworkPort["hsrpGroups"]> {
+  if (!Array.isArray(groups)) return [];
+  const byGroup = new Map<number, NonNullable<NetworkPort["hsrpGroups"]>[number]>();
+  for (const group of groups) {
+    const groupNumber = Number(group?.group);
+    if (!Number.isInteger(groupNumber) || groupNumber < 0 || groupNumber > 4095) continue;
+    const priority = Number(group.priority);
+    const trackDecrement = Number(group.trackDecrement);
+    byGroup.set(groupNumber, {
+      group: groupNumber,
+      virtualIp: typeof group.virtualIp === "string" && isIpv4(group.virtualIp) ? group.virtualIp : "",
+      priority: Number.isInteger(priority) ? Math.max(0, Math.min(255, priority)) : 100,
+      preempt: group.preempt === true,
+      version: group.version === "2" ? "2" : "1",
+      trackInterface: typeof group.trackInterface === "string" && group.trackInterface.trim() ? group.trackInterface.trim() : undefined,
+      trackObject: Number.isInteger(group.trackObject) && group.trackObject! >= 1 && group.trackObject! <= 1000 ? group.trackObject : undefined,
+      trackDecrement: Number.isInteger(trackDecrement) ? Math.max(1, Math.min(255, trackDecrement)) : undefined
+    });
+  }
+  return [...byGroup.values()].sort((left, right) => left.group - right.group);
+}
+
+function normalizeVrrpGroups(groups: NetworkPort["vrrpGroups"]): NonNullable<NetworkPort["vrrpGroups"]> {
+  if (!Array.isArray(groups)) return [];
+  const byGroup = new Map<number, NonNullable<NetworkPort["vrrpGroups"]>[number]>();
+  for (const group of groups) {
+    const groupNumber = Number(group?.group);
+    if (!Number.isInteger(groupNumber) || groupNumber < 1 || groupNumber > 255) continue;
+    const priority = Number(group.priority);
+    const advertiseInterval = Number(group.advertiseInterval);
+    const trackObject = Number(group.trackObject);
+    const trackDecrement = Number(group.trackDecrement);
+    byGroup.set(groupNumber, {
+      group: groupNumber,
+      virtualIp: typeof group.virtualIp === "string" && isIpv4(group.virtualIp) ? group.virtualIp : "",
+      priority: Number.isInteger(priority) ? Math.max(1, Math.min(254, priority)) : 100,
+      preempt: group.preempt !== false,
+      version: group.version === "3" ? "3" : "2",
+      advertiseInterval: Number.isInteger(advertiseInterval) ? Math.max(1, Math.min(255, advertiseInterval)) : 1,
+      trackObject: Number.isInteger(trackObject) && trackObject >= 1 && trackObject <= 1000 ? trackObject : undefined,
+      trackDecrement: Number.isInteger(trackDecrement) ? Math.max(1, Math.min(255, trackDecrement)) : undefined
+    });
+  }
+  return [...byGroup.values()].sort((left, right) => left.group - right.group);
+}
+
+function normalizeSecondaryIpAddresses(addresses: NetworkPort["secondaryIpAddresses"]): NonNullable<NetworkPort["secondaryIpAddresses"]> {
+  if (!Array.isArray(addresses)) return [];
+  const seen = new Set<string>();
+  const normalized: NonNullable<NetworkPort["secondaryIpAddresses"]> = [];
+  for (const address of addresses) {
+    const ipAddress = address?.ipAddress ?? "";
+    const subnetMask = address?.subnetMask ?? "";
+    if (!isIpv4(ipAddress) || !isSubnetMask(subnetMask) || maskToPrefix(subnetMask) === 0) continue;
+    const key = `${ipAddress}/${subnetMask}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push({ ipAddress, subnetMask });
+  }
+  return normalized;
 }
 
 function normalizeConfig(config: DeviceConfig | undefined, hostname: string, kind: DeviceKind): DeviceConfig {
@@ -218,14 +345,100 @@ function normalizeConfig(config: DeviceConfig | undefined, hostname: string, kin
     dnsRecords: normalizeDnsRecords(config?.dnsRecords, base.dnsRecords),
     nameServers: normalizeNameServers(config?.nameServers),
     accessRules: normalizeAccessRules(config?.accessRules ?? legacy?.firewallRules),
-    natRules: Array.isArray(config?.natRules) ? config.natRules : [],
+    natRules: normalizeNatRules(config?.natRules),
+    prefixLists: normalizePrefixLists(config?.prefixLists),
+    routeMaps: normalizeRouteMaps(config?.routeMaps),
+    ipSlaOperations: normalizeIpSlaOperations(config?.ipSlaOperations),
+    trackObjects: normalizeTrackObjects(config?.trackObjects),
     stpRootPrimaryVlans: normalizeVlanList(config?.stpRootPrimaryVlans),
+    stpRootSecondaryVlans: normalizeVlanList(config?.stpRootSecondaryVlans),
+    stpMode: config?.stpMode === "rapid-pvst" ? "rapid-pvst" : "pvst",
+    errdisableRecovery: normalizeErrdisableRecovery(config?.errdisableRecovery),
+    cdp: normalizeCdpConfig(config?.cdp),
+    lldp: normalizeLldpConfig(config?.lldp),
+    dhcpSnooping: normalizeDhcpSnooping(config?.dhcpSnooping),
+    vtp: normalizeVtpConfig(config?.vtp),
     localUsers: normalizeLocalUsers(config?.localUsers),
     lineConfigs: normalizeLineConfigs(config?.lineConfigs),
     routingProtocols: normalizeRoutingProtocols(config?.routingProtocols),
     services,
     wireless: normalizeWireless(base.wireless, legacy?.wireless)
   };
+}
+
+function normalizePortSecurity(value: NetworkPort["portSecurity"] | undefined): NonNullable<NetworkPort["portSecurity"]> {
+  const violation = value?.violation === "protect" || value?.violation === "restrict" || value?.violation === "shutdown"
+    ? value.violation
+    : "shutdown";
+  const maximum = Number.isInteger(value?.maximum) ? Math.min(132, Math.max(1, value!.maximum)) : 1;
+  return {
+    enabled: value?.enabled === true,
+    maximum,
+    violation,
+    sticky: value?.sticky === true,
+    secureMacAddresses: Array.isArray(value?.secureMacAddresses) ? value.secureMacAddresses.filter(Boolean) : []
+  };
+}
+
+function normalizeCdpConfig(value: DeviceConfig["cdp"] | undefined): NonNullable<DeviceConfig["cdp"]> {
+  const timer = Number.isInteger(value?.timer) ? Math.min(254, Math.max(5, value!.timer)) : 60;
+  const holdtime = Number.isInteger(value?.holdtime) ? Math.min(255, Math.max(10, value!.holdtime)) : 180;
+  return {
+    enabled: value?.enabled !== false,
+    timer,
+    holdtime,
+    version: value?.version === "1" ? "1" : "2"
+  };
+}
+
+function normalizeLldpConfig(value: DeviceConfig["lldp"] | undefined): NonNullable<DeviceConfig["lldp"]> {
+  const timer = Number.isInteger(value?.timer) ? Math.min(65534, Math.max(5, value!.timer)) : 30;
+  const holdtime = Number.isInteger(value?.holdtime) ? Math.min(65535, Math.max(10, value!.holdtime)) : 120;
+  const reinitDelay = Number.isInteger(value?.reinitDelay) ? Math.min(10, Math.max(1, value!.reinitDelay)) : 2;
+  return {
+    enabled: value?.enabled === true,
+    timer,
+    holdtime,
+    reinitDelay
+  };
+}
+
+function normalizeDhcpSnooping(value: DeviceConfig["dhcpSnooping"] | undefined): NonNullable<DeviceConfig["dhcpSnooping"]> {
+  return {
+    enabled: value?.enabled === true,
+    vlans: normalizeVlanList(value?.vlans),
+    verifyMacAddress: value?.verifyMacAddress !== false
+  };
+}
+
+function normalizeVtpConfig(value: DeviceConfig["vtp"] | undefined): NonNullable<DeviceConfig["vtp"]> {
+  const mode = value?.mode === "client" || value?.mode === "transparent" || value?.mode === "off" ? value.mode : "server";
+  const version = value?.version === "1" || value?.version === "3" ? value.version : "2";
+  const revision = Number.isInteger(value?.revision) ? Math.max(0, Math.min(999999, value!.revision)) : 0;
+  return {
+    mode,
+    domain: typeof value?.domain === "string" ? value.domain.replace(/[^a-zA-Z0-9_.-]/g, "").slice(0, 32) : "",
+    version,
+    password: value?.password ? String(value.password).slice(0, 64) : undefined,
+    pruning: value?.pruning === true,
+    revision
+  };
+}
+
+function normalizeErrdisableRecovery(value: DeviceConfig["errdisableRecovery"] | undefined): NonNullable<DeviceConfig["errdisableRecovery"]> {
+  const interval = Number.isInteger(value?.interval) ? Math.min(86400, Math.max(30, value!.interval)) : 300;
+  return {
+    bpduguard: value?.bpduguard === true,
+    interval
+  };
+}
+
+function normalizeChannelGroup(value: NetworkPort["channelGroup"] | undefined): NetworkPort["channelGroup"] | undefined {
+  if (!value || !Number.isInteger(value.id) || value.id < 1 || value.id > 48) return undefined;
+  const mode = value.mode === "on" || value.mode === "active" || value.mode === "passive" || value.mode === "desirable" || value.mode === "auto"
+    ? value.mode
+    : "on";
+  return { id: value.id, mode };
 }
 
 function normalizeLocalUsers(users: DeviceConfig["localUsers"] | undefined): NonNullable<DeviceConfig["localUsers"]> {
@@ -249,7 +462,9 @@ function normalizeStaticRoutes(routes: DeviceConfig["staticRoutes"] | undefined)
       id: route.id || createId("route"),
       network: route.network || legacy.destination || "0.0.0.0",
       mask: route.mask || "0.0.0.0",
-      nextHop: route.nextHop || "0.0.0.0"
+      nextHop: route.nextHop || "0.0.0.0",
+      distance: Number.isInteger(route.distance) && route.distance! >= 1 && route.distance! <= 255 ? route.distance : undefined,
+      trackId: Number.isInteger(route.trackId) && route.trackId! >= 1 && route.trackId! <= 1000 ? route.trackId : undefined
     };
   });
 }
@@ -327,6 +542,8 @@ function normalizeAccessRules(rules: DeviceConfig["accessRules"] | Array<{ id?: 
       interfaceName: legacy.interfaceName || legacy.listId || "outside",
       listName: legacy.listName || legacy.listId || "",
       listType: legacy.listType || inferAccessListType(legacy.listName || legacy.listId || legacy.interfaceName || "", rule.protocol, rule.destination),
+      sequence: Number.isInteger(legacy.sequence) && legacy.sequence! > 0 ? Math.min(2147483647, legacy.sequence!) : undefined,
+      remark: typeof legacy.remark === "string" && legacy.remark.trim() ? legacy.remark.trim().slice(0, 100) : undefined,
       hits: Number.isInteger(legacy.hits) ? legacy.hits : 0
     };
   });
@@ -341,6 +558,138 @@ function inferAccessListType(name: string, protocol: unknown, destination: unkno
 
 function normalizeAccessProtocol(value: unknown): DeviceConfig["accessRules"][number]["protocol"] {
   return value === "icmp" || value === "tcp" || value === "udp" || value === "http" || value === "ftp" || value === "dns" || value === "dhcp" ? value : "ip";
+}
+
+function normalizeNatRules(rules: DeviceConfig["natRules"] | undefined): DeviceConfig["natRules"] {
+  if (!Array.isArray(rules)) return [];
+  return rules.map((rule): DeviceConfig["natRules"][number] => ({
+    id: rule.id || createId("nat"),
+    insideLocal: rule.insideLocal || (rule.aclName ? `list ${rule.aclName}` : ""),
+    insideGlobal: rule.insideGlobal || (rule.interfaceName ? `interface ${rule.interfaceName}` : ""),
+    outsideInterface: rule.outsideInterface || rule.interfaceName || "outside",
+    type: rule.type === "overload" || rule.overload ? "overload" : "static",
+    aclName: rule.aclName,
+    interfaceName: rule.interfaceName,
+    overload: rule.overload === true || rule.type === "overload",
+    hits: Number.isInteger(rule.hits) ? rule.hits : 0
+  })).filter((rule) => rule.type === "overload" ? Boolean(rule.aclName && rule.interfaceName) : Boolean(rule.insideLocal && rule.insideGlobal));
+}
+
+function normalizeRouteMaps(routeMaps: DeviceConfig["routeMaps"] | undefined): NonNullable<DeviceConfig["routeMaps"]> {
+  if (!Array.isArray(routeMaps)) return [];
+  const seen = new Set<string>();
+  const normalized: NonNullable<DeviceConfig["routeMaps"]> = [];
+  for (const entry of routeMaps) {
+    const name = typeof entry.name === "string" ? entry.name.trim().slice(0, 64) : "";
+    const sequence = Number.isInteger(entry.sequence) && entry.sequence > 0 ? Math.min(65535, entry.sequence) : 10;
+    if (!name) continue;
+    const key = `${name.toLowerCase()}:${sequence}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push({
+      id: entry.id || createId("rmap"),
+      name,
+      sequence,
+      action: entry.action === "deny" ? "deny" : "permit",
+      description: typeof entry.description === "string" && entry.description.trim() ? entry.description.trim().slice(0, 100) : undefined,
+      matchAccessLists: Array.isArray(entry.matchAccessLists) ? entry.matchAccessLists.map((item) => String(item).trim()).filter(Boolean) : [],
+      matchPrefixLists: Array.isArray(entry.matchPrefixLists) ? entry.matchPrefixLists.map((item) => String(item).trim()).filter(Boolean) : [],
+      setNextHop: typeof entry.setNextHop === "string" && isIpv4(entry.setNextHop) ? entry.setNextHop : undefined,
+      hits: Number.isInteger(entry.hits) ? Math.max(0, entry.hits) : 0
+    });
+  }
+  return normalized.sort((left, right) => left.name.localeCompare(right.name) || left.sequence - right.sequence);
+}
+
+function normalizePrefixLists(prefixLists: DeviceConfig["prefixLists"] | undefined): NonNullable<DeviceConfig["prefixLists"]> {
+  if (!Array.isArray(prefixLists)) return [];
+  const seen = new Set<string>();
+  const normalized: NonNullable<DeviceConfig["prefixLists"]> = [];
+  for (const entry of prefixLists) {
+    const name = typeof entry.name === "string" ? entry.name.trim().slice(0, 64) : "";
+    const sequence = Number.isInteger(entry.sequence) && entry.sequence > 0 ? Math.min(4294967294, entry.sequence) : 5;
+    const prefix = typeof entry.prefix === "string" ? entry.prefix.trim() : "";
+    if (!name || !isPrefix(prefix)) continue;
+    const ge = Number.isInteger(entry.ge) && entry.ge! >= 0 && entry.ge! <= 32 ? entry.ge : undefined;
+    const le = Number.isInteger(entry.le) && entry.le! >= 0 && entry.le! <= 32 ? entry.le : undefined;
+    const key = `${name.toLowerCase()}:${sequence}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push({
+      id: entry.id || createId("plist"),
+      name,
+      sequence,
+      action: entry.action === "deny" ? "deny" : "permit",
+      prefix,
+      ge,
+      le,
+      hits: Number.isInteger(entry.hits) ? Math.max(0, entry.hits) : 0
+    });
+  }
+  return normalized.sort((left, right) => left.name.localeCompare(right.name) || left.sequence - right.sequence);
+}
+
+function isPrefix(value: string): boolean {
+  const [network, prefixText] = value.split("/");
+  const prefix = Number(prefixText);
+  return isIpv4(network) && Number.isInteger(prefix) && prefix >= 0 && prefix <= 32;
+}
+
+function normalizeIpSlaOperations(operations: DeviceConfig["ipSlaOperations"] | undefined): NonNullable<DeviceConfig["ipSlaOperations"]> {
+  if (!Array.isArray(operations)) return [];
+  const byId = new Map<number, NonNullable<DeviceConfig["ipSlaOperations"]>[number]>();
+  for (const operation of operations) {
+    const operationId = Number(operation.operationId);
+    if (!Number.isInteger(operationId) || operationId < 1 || operationId > 2147483647) continue;
+    const frequency = Number(operation.frequency);
+    const timeout = Number(operation.timeout);
+    const threshold = Number(operation.threshold);
+    byId.set(operationId, {
+      id: operation.id || createId("sla"),
+      operationId,
+      type: "icmp-echo",
+      targetIp: typeof operation.targetIp === "string" && isIpv4(operation.targetIp) ? operation.targetIp : "",
+      sourceInterface: typeof operation.sourceInterface === "string" && operation.sourceInterface.trim() ? operation.sourceInterface.trim() : undefined,
+      frequency: Number.isInteger(frequency) ? Math.max(1, Math.min(604800, frequency)) : 60,
+      timeout: Number.isInteger(timeout) ? Math.max(1, Math.min(60000, timeout)) : 5000,
+      threshold: Number.isInteger(threshold) ? Math.max(1, Math.min(60000, threshold)) : 5000,
+      enabled: operation.enabled === true
+    });
+  }
+  return [...byId.values()].sort((left, right) => left.operationId - right.operationId);
+}
+
+function normalizeTrackObjects(objects: DeviceConfig["trackObjects"] | undefined): NonNullable<DeviceConfig["trackObjects"]> {
+  if (!Array.isArray(objects)) return [];
+  const byId = new Map<number, NonNullable<DeviceConfig["trackObjects"]>[number]>();
+  for (const object of objects) {
+    const trackId = Number(object.trackId);
+    if (!Number.isInteger(trackId) || trackId < 1 || trackId > 1000) continue;
+    if (object.type === "interface") {
+      const interfaceName = typeof object.interfaceName === "string" ? object.interfaceName.trim() : "";
+      if (!interfaceName) continue;
+      byId.set(trackId, {
+        id: object.id || createId("track"),
+        trackId,
+        type: "interface",
+        interfaceName,
+        mode: "line-protocol"
+      });
+      continue;
+    }
+    if (object.type === "ip-sla") {
+      const ipSlaOperationId = Number(object.ipSlaOperationId);
+      if (!Number.isInteger(ipSlaOperationId) || ipSlaOperationId < 1) continue;
+      byId.set(trackId, {
+        id: object.id || createId("track"),
+        trackId,
+        type: "ip-sla",
+        ipSlaOperationId,
+        mode: "reachability"
+      });
+    }
+  }
+  return [...byId.values()].sort((left, right) => left.trackId - right.trackId);
 }
 
 function normalizeLineConfigs(lines: DeviceConfig["lineConfigs"] | undefined): DeviceConfig["lineConfigs"] {
@@ -410,6 +759,18 @@ function normalizeRuntime(runtime: RuntimeState | undefined): RuntimeState {
     arpTable: Array.isArray(runtime?.arpTable) ? runtime.arpTable : Object.entries(legacy?.arp ?? {}).map(([ipAddress, macAddress]) => ({ ipAddress, macAddress, portName: "" })),
     macTable: Array.isArray(runtime?.macTable) ? runtime.macTable : Object.entries(legacy?.mac ?? {}).map(([macAddress, entry]) => ({ vlan: entry.vlan ?? 1, macAddress, portName: entry.portId ?? "", type: "dynamic" as const })),
     dhcpLeases: Array.isArray(runtime?.dhcpLeases) ? runtime.dhcpLeases : Object.entries(legacyDhcpLeases).map(([deviceId, ipAddress]) => ({ ipAddress, macAddress: "", deviceId, expiresAt: Date.now() + 86_400_000 })),
+    natTranslations: Array.isArray(runtime?.natTranslations)
+      ? runtime.natTranslations.map((entry) => ({
+        protocol: entry.protocol || "icmp",
+        insideLocal: entry.insideLocal || "",
+        insideGlobal: entry.insideGlobal || "",
+        outsideLocal: entry.outsideLocal || "---",
+        outsideGlobal: entry.outsideGlobal || "---",
+        interfaceName: entry.interfaceName || "",
+        hits: Number.isInteger(entry.hits) ? entry.hits : 0,
+        createdAt: Number.isFinite(entry.createdAt) ? entry.createdAt : Date.now()
+      })).filter((entry) => entry.insideLocal && entry.insideGlobal)
+      : [],
     logs: Array.isArray(runtime?.logs) ? runtime.logs : [],
     clock: typeof runtime?.clock === "string" ? runtime.clock : undefined
   };
@@ -669,7 +1030,25 @@ function activityRequirementKindLabel(kind: ActivityRequirementKind): string {
     "delivered-pdu-count": "Delivered PDU events",
     "saved-config-count": "Saved network configs",
     "service-count": "Enabled service devices",
-    "tdr-normal-count": "Normal TDR copper links"
+    "tdr-normal-count": "Normal TDR copper links",
+    "vlan-count": "Configured VLANs",
+    "trunk-port-count": "Trunk ports",
+    "routed-port-count": "Routed ports",
+    "svi-count": "Configured SVIs",
+    "static-route-count": "Static routes",
+    "dynamic-routing-count": "Dynamic routing processes",
+    "acl-rule-count": "ACL rules",
+    "nat-rule-count": "NAT rules",
+    "prefix-list-count": "Prefix-list entries",
+    "pbr-route-map-count": "PBR route-map entries",
+    "dhcp-pool-count": "DHCP pools",
+    "dhcp-snooping-device-count": "DHCP Snooping devices",
+    "port-security-port-count": "Port-security ports",
+    "etherchannel-port-count": "EtherChannel member ports",
+    "first-hop-redundancy-count": "HSRP/VRRP groups",
+    "wireless-infrastructure-count": "Wireless infrastructure devices",
+    "wireless-client-count": "Wireless client ports",
+    "ip-sla-track-count": "IP SLA track pairs"
   })[kind];
 }
 

@@ -19,6 +19,9 @@ export interface DeviceModel {
   tabs: DeviceTab[];
   ports: PortTemplate[];
   modules: ModuleSlot[];
+  softwareVersion?: string;
+  softwareTrain?: string;
+  iosImage?: string;
 }
 
 export interface ModuleSlot {
@@ -32,6 +35,7 @@ export interface ModuleSpec {
   label: string;
   description: string;
   ports: PortTemplate[];
+  widthSlots?: number;
 }
 
 export interface PortTemplate {
@@ -54,16 +58,60 @@ export interface NetworkPort {
   nativeVlan?: number;
   ipAddress: string;
   subnetMask: string;
+  secondaryIpAddresses?: Array<{ ipAddress: string; subnetMask: string }>;
+  parentPortId?: string;
+  subinterfaceVlan?: number;
+  encapsulationDot1qNative?: boolean;
   gateway: string;
   dnsServer: string;
   adminUp: boolean;
   ipCapable?: boolean;
   stpPortfast?: boolean;
   bpduGuard?: boolean;
+  stpCost?: number;
+  stpPriority?: number;
+  cdpEnabled?: boolean;
+  lldpTransmit?: boolean;
+  lldpReceive?: boolean;
+  dhcpSnoopingTrusted?: boolean;
+  dhcpSnoopingRateLimit?: number;
+  voiceVlan?: number;
+  portSecurity?: {
+    enabled: boolean;
+    maximum: number;
+    violation: "protect" | "restrict" | "shutdown";
+    sticky: boolean;
+    secureMacAddresses: string[];
+  };
+  channelGroup?: {
+    id: number;
+    mode: "on" | "active" | "passive" | "desirable" | "auto";
+  };
   accessGroupIn?: string;
   accessGroupOut?: string;
+  policyRouteMap?: string;
   helperAddresses?: string[];
   natRole?: "inside" | "outside";
+  hsrpGroups?: Array<{
+    group: number;
+    virtualIp: string;
+    priority: number;
+    preempt: boolean;
+    version: "1" | "2";
+    trackInterface?: string;
+    trackObject?: number;
+    trackDecrement?: number;
+  }>;
+  vrrpGroups?: Array<{
+    group: number;
+    virtualIp: string;
+    priority: number;
+    preempt: boolean;
+    version: "2" | "3";
+    advertiseInterval: number;
+    trackObject?: number;
+    trackDecrement?: number;
+  }>;
   switchportNonegotiate?: boolean;
   linkId?: string;
   moduleSlotId?: string;
@@ -78,6 +126,7 @@ export interface NetworkPort {
 export interface DeviceModule {
   slotId: string;
   moduleId: string;
+  occupiedSlotIds?: string[];
 }
 
 export interface StaticRoute {
@@ -85,6 +134,8 @@ export interface StaticRoute {
   network: string;
   mask: string;
   nextHop: string;
+  distance?: number;
+  trackId?: number;
 }
 
 export interface DhcpPool {
@@ -120,6 +171,8 @@ export interface AccessRule {
   interfaceName: string;
   listName?: string;
   listType?: "standard" | "extended";
+  sequence?: number;
+  remark?: string;
   hits: number;
 }
 
@@ -128,7 +181,55 @@ export interface NatRule {
   insideLocal: string;
   insideGlobal: string;
   outsideInterface: string;
+  type?: "static" | "overload";
+  aclName?: string;
+  interfaceName?: string;
+  overload?: boolean;
   hits: number;
+}
+
+export interface RouteMapEntry {
+  id: string;
+  name: string;
+  sequence: number;
+  action: "permit" | "deny";
+  description?: string;
+  matchAccessLists: string[];
+  matchPrefixLists?: string[];
+  setNextHop?: string;
+  hits: number;
+}
+
+export interface PrefixListEntry {
+  id: string;
+  name: string;
+  sequence: number;
+  action: "permit" | "deny";
+  prefix: string;
+  ge?: number;
+  le?: number;
+  hits: number;
+}
+
+export interface IpSlaOperation {
+  id: string;
+  operationId: number;
+  type: "icmp-echo";
+  targetIp: string;
+  sourceInterface?: string;
+  frequency: number;
+  timeout: number;
+  threshold: number;
+  enabled: boolean;
+}
+
+export interface TrackObject {
+  id: string;
+  trackId: number;
+  type: "interface" | "ip-sla";
+  interfaceName?: string;
+  ipSlaOperationId?: number;
+  mode: "line-protocol" | "reachability";
 }
 
 export interface DeviceConfig {
@@ -152,7 +253,25 @@ export interface DeviceConfig {
   nameServers: string[];
   accessRules: AccessRule[];
   natRules: NatRule[];
+  prefixLists?: PrefixListEntry[];
+  routeMaps?: RouteMapEntry[];
+  ipSlaOperations?: IpSlaOperation[];
+  trackObjects?: TrackObject[];
   stpRootPrimaryVlans: number[];
+  stpRootSecondaryVlans: number[];
+  stpMode?: "pvst" | "rapid-pvst";
+  errdisableRecovery?: { bpduguard: boolean; interval: number };
+  cdp?: { enabled: boolean; timer: number; holdtime: number; version: "1" | "2" };
+  lldp?: { enabled: boolean; timer: number; holdtime: number; reinitDelay: number };
+  dhcpSnooping?: { enabled: boolean; vlans: number[]; verifyMacAddress: boolean };
+  vtp?: {
+    mode: "server" | "client" | "transparent" | "off";
+    domain: string;
+    version: "1" | "2" | "3";
+    password?: string;
+    pruning: boolean;
+    revision: number;
+  };
   localUsers?: Array<{ id: string; name: string; secret?: string; password?: string; privilege?: number }>;
   lineConfigs?: Array<{ id: string; kind: "console" | "vty"; range: string; password: string; login: boolean; loginLocal?: boolean; transportInput: string; execTimeout: string; loggingSynchronous: boolean }>;
   routingProtocols?: Array<{ id: string; protocol: "rip" | "ospf" | "eigrp"; processId?: string; networks: string[]; version?: string; routerId?: string; autoSummary: boolean; passiveInterfaces: string[]; passiveInterfaceDefault?: boolean; passiveInterfaceExceptions?: string[]; redistributeStatic: boolean; defaultInformationOriginate?: boolean; defaultInformationAlways?: boolean }>;
@@ -178,6 +297,7 @@ export interface RuntimeState {
   arpTable: Array<{ ipAddress: string; macAddress: string; portName: string }>;
   macTable: Array<{ vlan: number; macAddress: string; portName: string; type: "dynamic" | "static" }>;
   dhcpLeases: Array<{ ipAddress: string; macAddress: string; deviceId: string; expiresAt: number }>;
+  natTranslations?: Array<{ protocol: string; insideLocal: string; insideGlobal: string; outsideLocal: string; outsideGlobal: string; interfaceName: string; hits: number; createdAt: number }>;
   logs: Array<{ id: string; level: "info" | "warning" | "error"; message: string; createdAt: number }>;
   clock?: string;
 }
@@ -245,7 +365,32 @@ export interface WorkspaceDrawing {
   fill: boolean;
 }
 
-export type ActivityRequirementKind = "device-count" | "link-count" | "annotation-count" | "delivered-pdu-count" | "saved-config-count" | "service-count" | "tdr-normal-count";
+export type ActivityRequirementKind =
+  | "device-count"
+  | "link-count"
+  | "annotation-count"
+  | "delivered-pdu-count"
+  | "saved-config-count"
+  | "service-count"
+  | "tdr-normal-count"
+  | "vlan-count"
+  | "trunk-port-count"
+  | "routed-port-count"
+  | "svi-count"
+  | "static-route-count"
+  | "dynamic-routing-count"
+  | "acl-rule-count"
+  | "nat-rule-count"
+  | "prefix-list-count"
+  | "pbr-route-map-count"
+  | "dhcp-pool-count"
+  | "dhcp-snooping-device-count"
+  | "port-security-port-count"
+  | "etherchannel-port-count"
+  | "first-hop-redundancy-count"
+  | "wireless-infrastructure-count"
+  | "wireless-client-count"
+  | "ip-sla-track-count";
 
 export interface ActivityRequirement {
   id: string;

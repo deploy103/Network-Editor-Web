@@ -1,4 +1,4 @@
-import { LogOut, Network, Plus, UserPlus } from "lucide-react";
+import { LogOut, Moon, Network, Plus, Sun, UserPlus } from "lucide-react";
 import { TopologyPreview } from "./ProjectHome";
 import type { User } from "../types/network";
 
@@ -7,13 +7,17 @@ export function LandingPage({
   onLogin,
   onSignup,
   onWorkspace,
-  onLogout
+  onLogout,
+  onThemeToggle,
+  theme
 }: {
   user: User | null;
   onLogin: () => void;
   onSignup: () => void;
   onWorkspace: () => void;
   onLogout: () => void;
+  onThemeToggle: () => void;
+  theme: "light" | "dark";
 }) {
   return (
     <main className="home-shell home-landing">
@@ -26,6 +30,7 @@ export function LandingPage({
           </div>
         </a>
         <div className="home-nav-actions">
+          <button className="icon-button" onClick={onThemeToggle} title={theme === "dark" ? "Light mode" : "Dark mode"} type="button">{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button>
           {user ? (
             <>
               <button className="secondary-action dark" onClick={onWorkspace} type="button">작업공간</button>

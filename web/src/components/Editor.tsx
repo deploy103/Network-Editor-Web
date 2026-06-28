@@ -1,14 +1,25 @@
 import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Cable, CircleDot, CircleHelp, Copy, Cpu, Download, Edit3, FileJson, Info, Mail, Maximize2, Minimize2, Minus, Monitor, MousePointer2, Network, PenLine, Plus, Power, Router, RotateCcw, Save, Search, Server, Settings, Shield, Square, Terminal, Trash2, Wifi, Wrench, X, ZoomIn, ZoomOut } from "lucide-react";
-import { cableCatalog, canPortUseCable, createDevice, deviceCatalog, displayKind, getDeviceModel, getModuleSpec, installModule, removeModule } from "../data/deviceCatalog";
+import { ArrowLeft, Cable, CircleDot, CircleHelp, Copy, Cpu, Download, Edit3, FileJson, Info, Mail, Maximize2, Minimize2, Minus, Monitor, Moon, MousePointer2, Network, PenLine, Plus, Power, Router, RotateCcw, Save, Search, Server, Settings, Shield, Square, Sun, Terminal, Trash2, Wifi, Wrench, X, ZoomIn, ZoomOut } from "lucide-react";
+import { cableCatalog, canPortUseCable, createDevice, deviceCatalog, displayKind, getDeviceModel, getModuleSpec, installModule, installedModuleForSlot, removeModule } from "../data/deviceCatalog";
 import { bootBanner, bootDevice, initialCliSession, initialConsoleSession, runCliCommand, type CliSession } from "../engine/cli";
 import { cliEngine } from "../engine/cliEngine";
+import { buildAddressPlanReportLines } from "../engine/addressPlan";
+import { buildCapacityPlanReportLines } from "../engine/capacityPlan";
+import { buildConfigDriftReportLines } from "../engine/configDrift";
 import { desktopConsoleTargets } from "../engine/desktopTerminal";
 import { diagnoseProject, type NetworkIssueSeverity } from "../engine/diagnostics";
+import { buildFailureImpactReportLines } from "../engine/failureImpact";
 import { ipInSubnet, ipToNumber, isIpv4, isSubnetMask, maskToPrefix, networkAddress } from "../engine/ip";
+import { buildLabWorkbookLines, type WorkbookAudience } from "../engine/labWorkbook";
 import { downloadProject } from "../exporters/packetTracerExport";
+import { buildProjectReportLines } from "../engine/projectReport";
+import { buildRoutingMatrixReportLines } from "../engine/routingMatrix";
+import { buildSecurityMatrixReportLines } from "../engine/securityMatrix";
+import { buildServiceReachabilityReportLines } from "../engine/serviceReachability";
 import { requestDhcp } from "../engine/simulation";
-import { addLink, linkLabel, recalc, removeLink, validateConnection } from "../engine/topology";
+import { addLink, endpoint, linkLabel, recalc, removeLink, validateConnection } from "../engine/topology";
+import { buildVerificationPlanLines } from "../engine/verificationPlan";
+import { buildWirelessSurveyReportLines } from "../engine/wirelessSurvey";
 import { createId } from "../utils/id";
 import { engineLabel, simulatePing } from "../wasm/engine";
 import type { AccessRule, ActivityRequirementKind, CableType, DeviceKind, DeviceTab, ModuleSpec, NatRule, NetworkDevice, NetworkLink, NetworkPort, NetworkProject, SimulationEvent, User, WorkspaceDrawing, WorkspaceDrawingKind, WorkspaceNote } from "../types/network";
@@ -16,7 +27,7 @@ import type { AccessRule, ActivityRequirementKind, CableType, DeviceKind, Device
 const CANVAS_WIDTH = 2400;
 const CANVAS_HEIGHT = 1600;
 const packetMenuLabels = ["파일", "편집", "옵션", "보기", "도구", "확장", "창", "도움말"] as const;
-const quickWorkspaceModelIds = ["router-1941", "switch-2960", "pc-pt", "server-pt", "ap-pt"] as const;
+const quickWorkspaceModelIds = ["router-1941", "switch-2960-24tt", "pc-pt", "server-pt", "ap-pt"] as const;
 const complexPduProtocols = [
   { value: "icmp", label: "ICMP Echo" },
   { value: "dns", label: "DNS Query" },
@@ -33,7 +44,25 @@ const activityRequirementCatalog: Array<{ kind: ActivityRequirementKind; label: 
   { kind: "delivered-pdu-count", label: "전달 PDU 수", detail: "delivered 상태의 PDU 이벤트 수", defaultTarget: 1, defaultPoints: 10 },
   { kind: "saved-config-count", label: "저장된 설정 수", detail: "startup-config가 있는 네트워크 장비 수", defaultTarget: 1, defaultPoints: 5 },
   { kind: "service-count", label: "서비스 장비 수", detail: "하나 이상 서비스가 켜진 장비 수", defaultTarget: 1, defaultPoints: 5 },
-  { kind: "tdr-normal-count", label: "정상 TDR 링크", detail: "양 끝점이 정상으로 진단되는 구리 링크 수", defaultTarget: 1, defaultPoints: 5 }
+  { kind: "tdr-normal-count", label: "정상 TDR 링크", detail: "양 끝점이 정상으로 진단되는 구리 링크 수", defaultTarget: 1, defaultPoints: 5 },
+  { kind: "vlan-count", label: "VLAN 수", detail: "기본 VLAN을 제외하고 이름이 지정된 VLAN 수", defaultTarget: 2, defaultPoints: 5 },
+  { kind: "trunk-port-count", label: "Trunk 포트", detail: "trunk 모드로 설정된 포트 수", defaultTarget: 2, defaultPoints: 5 },
+  { kind: "routed-port-count", label: "Routed 포트", detail: "routed 모드와 IPv4 주소가 설정된 물리/논리 포트 수", defaultTarget: 2, defaultPoints: 5 },
+  { kind: "svi-count", label: "SVI 수", detail: "IPv4 주소가 설정된 VLAN 인터페이스 수", defaultTarget: 1, defaultPoints: 5 },
+  { kind: "static-route-count", label: "정적 경로", detail: "설정된 static route 수", defaultTarget: 1, defaultPoints: 5 },
+  { kind: "dynamic-routing-count", label: "동적 라우팅", detail: "RIP/OSPF/EIGRP 프로세스 수", defaultTarget: 1, defaultPoints: 10 },
+  { kind: "acl-rule-count", label: "ACL 규칙", detail: "standard/extended ACL 규칙 수", defaultTarget: 1, defaultPoints: 5 },
+  { kind: "nat-rule-count", label: "NAT 규칙", detail: "static 또는 overload NAT 규칙 수", defaultTarget: 1, defaultPoints: 5 },
+  { kind: "prefix-list-count", label: "Prefix-list", detail: "prefix-list entry 수", defaultTarget: 1, defaultPoints: 5 },
+  { kind: "pbr-route-map-count", label: "PBR route-map", detail: "set next-hop이 있는 policy route-map entry 수", defaultTarget: 1, defaultPoints: 10 },
+  { kind: "dhcp-pool-count", label: "DHCP 풀", detail: "활성 DHCP pool 수", defaultTarget: 1, defaultPoints: 5 },
+  { kind: "dhcp-snooping-device-count", label: "DHCP Snooping", detail: "DHCP Snooping이 켜진 스위칭 장비 수", defaultTarget: 1, defaultPoints: 5 },
+  { kind: "port-security-port-count", label: "Port Security", detail: "port-security가 활성화된 access 포트 수", defaultTarget: 1, defaultPoints: 5 },
+  { kind: "etherchannel-port-count", label: "EtherChannel", detail: "channel-group에 속한 멤버 포트 수", defaultTarget: 2, defaultPoints: 5 },
+  { kind: "first-hop-redundancy-count", label: "HSRP/VRRP", detail: "HSRP 또는 VRRP 그룹 수", defaultTarget: 1, defaultPoints: 10 },
+  { kind: "wireless-infrastructure-count", label: "무선 인프라", detail: "WLC/AP 같은 무선 인프라 장비 수", defaultTarget: 1, defaultPoints: 5 },
+  { kind: "wireless-client-count", label: "무선 클라이언트", detail: "IP가 설정된 wireless client 포트 수", defaultTarget: 1, defaultPoints: 5 },
+  { kind: "ip-sla-track-count", label: "IP SLA Track", detail: "IP SLA와 track object가 연결된 쌍 수", defaultTarget: 1, defaultPoints: 10 }
 ];
 
 type ComplexPduProtocol = typeof complexPduProtocols[number]["value"];
@@ -70,7 +99,7 @@ function keyboardNudgeDelta(key: string, step: number): { x: number; y: number }
   return null;
 }
 
-export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBack, onChange, onSave }: { project: NetworkProject; user: User; saveError: string; saveStatus: SaveStatus; lastSavedAt: string; onBack: () => void; onChange: (project: NetworkProject) => void; onSave: (project: NetworkProject) => void }) {
+export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBack, onChange, onSave, onThemeToggle, theme }: { project: NetworkProject; user: User; saveError: string; saveStatus: SaveStatus; lastSavedAt: string; onBack: () => void; onChange: (project: NetworkProject) => void; onSave: (project: NetworkProject) => void; onThemeToggle: () => void; theme: "light" | "dark" }) {
   const workspaceRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ id: string; offsetX: number; offsetY: number; startX: number; startY: number; moved: boolean } | null>(null);
@@ -1269,6 +1298,182 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage("Activity Wizard Check Results를 내보냈습니다.");
   }
 
+  function exportProjectReport() {
+    const lines = buildProjectReportLines(project);
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${project.name.replace(/[^a-zA-Z0-9_.-]/g, "_") || "network"}-project-report.md`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
+    setMessage("프로젝트 리포트를 내보냈습니다.");
+  }
+
+  function exportAddressPlanReport() {
+    const lines = buildAddressPlanReportLines(project);
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${project.name.replace(/[^a-zA-Z0-9_.-]/g, "_") || "network"}-address-plan.txt`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
+    setMessage("주소 계획 리포트를 내보냈습니다.");
+  }
+
+  function exportCapacityPlanReport() {
+    const lines = buildCapacityPlanReportLines(project);
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${project.name.replace(/[^a-zA-Z0-9_.-]/g, "_") || "network"}-capacity-plan.txt`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
+    setMessage("Capacity Plan 리포트를 내보냈습니다.");
+  }
+
+  function exportRoutingMatrixReport() {
+    const lines = buildRoutingMatrixReportLines(project);
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${project.name.replace(/[^a-zA-Z0-9_.-]/g, "_") || "network"}-routing-matrix.txt`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
+    setMessage("Routing Matrix 리포트를 내보냈습니다.");
+  }
+
+  function exportConfigDriftReport() {
+    const lines = buildConfigDriftReportLines(project);
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${project.name.replace(/[^a-zA-Z0-9_.-]/g, "_") || "network"}-config-drift.txt`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
+    setMessage("Configuration Drift 리포트를 내보냈습니다.");
+  }
+
+  function exportFailureImpactReport() {
+    const lines = buildFailureImpactReportLines(project);
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${project.name.replace(/[^a-zA-Z0-9_.-]/g, "_") || "network"}-failure-impact.txt`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
+    setMessage("Failure Impact 리포트를 내보냈습니다.");
+  }
+
+  function exportServiceReachabilityReport() {
+    const lines = buildServiceReachabilityReportLines(project);
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${project.name.replace(/[^a-zA-Z0-9_.-]/g, "_") || "network"}-service-reachability.txt`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
+    setMessage("Service Reachability 리포트를 내보냈습니다.");
+  }
+
+  function exportSecurityMatrixReport() {
+    const lines = buildSecurityMatrixReportLines(project);
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${project.name.replace(/[^a-zA-Z0-9_.-]/g, "_") || "network"}-security-matrix.txt`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
+    setMessage("Security Matrix 리포트를 내보냈습니다.");
+  }
+
+  function exportWirelessSurveyReport() {
+    const lines = buildWirelessSurveyReportLines(project);
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${project.name.replace(/[^a-zA-Z0-9_.-]/g, "_") || "network"}-wireless-survey.txt`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
+    setMessage("Wireless Survey 리포트를 내보냈습니다.");
+  }
+
+  function exportVerificationPlan() {
+    const lines = buildVerificationPlanLines(project);
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${project.name.replace(/[^a-zA-Z0-9_.-]/g, "_") || "network"}-verification-plan.txt`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
+    setMessage("Verification Plan을 내보냈습니다.");
+  }
+
+  function exportLabWorkbook(audience: WorkbookAudience) {
+    const lines = buildLabWorkbookLines(project, audience);
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${project.name.replace(/[^a-zA-Z0-9_.-]/g, "_") || "network"}-${audience}-workbook.md`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 0);
+    setMessage(`${audience === "instructor" ? "강사용" : "학습자용"} 랩 워크북을 내보냈습니다.`);
+  }
+
   function nudgeSelected(dx: number, dy: number): boolean {
     if (selectedCable || selectedModel || pduMode || complexPduMode || noteMode || drawingMode || deviceWindowId || activityWindowOpen || connectionDraft) return false;
     if (selectedDeviceId) {
@@ -1724,6 +1929,18 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
         { label: "저장", action: () => { onSave(project); setMessage("프로젝트 저장을 요청했습니다."); } },
         { label: "JSON 내보내기", action: () => downloadProject(project, "json") },
         { label: "PTWEB 내보내기", action: () => { downloadProject(project, "ptweb"); setMessage(".ptweb 프로젝트 파일을 내보냈습니다. Cisco Packet Tracer .pkt 바이너리 내보내기는 지원하지 않습니다."); } },
+        { label: "프로젝트 리포트 내보내기", action: exportProjectReport },
+        { label: "주소 계획 내보내기", action: exportAddressPlanReport },
+        { label: "Capacity Plan 내보내기", action: exportCapacityPlanReport },
+        { label: "Routing Matrix 내보내기", action: exportRoutingMatrixReport },
+        { label: "Configuration Drift 내보내기", action: exportConfigDriftReport },
+        { label: "Failure Impact 내보내기", action: exportFailureImpactReport },
+        { label: "Service Reachability 내보내기", action: exportServiceReachabilityReport },
+        { label: "Security Matrix 내보내기", action: exportSecurityMatrixReport },
+        { label: "Wireless Survey 내보내기", action: exportWirelessSurveyReport },
+        { label: "Verification Plan 내보내기", action: exportVerificationPlan },
+        { label: "학습자 워크북 내보내기", action: () => exportLabWorkbook("student") },
+        { label: "강사용 워크북 내보내기", action: () => exportLabWorkbook("instructor") },
         { label: "프로젝트로 돌아가기", action: onBack }
       ];
     }
@@ -1762,6 +1979,18 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
         { label: "프로젝트 복구", action: repairCurrentProject },
         { label: "진단 실행", action: () => setMessage(`프로젝트 수준 이슈 ${diagnoseProject(project).length}개`) },
         { label: "Activity Wizard", action: openActivityWizard },
+        { label: "프로젝트 리포트 내보내기", action: exportProjectReport },
+        { label: "주소 계획 내보내기", action: exportAddressPlanReport },
+        { label: "Capacity Plan 내보내기", action: exportCapacityPlanReport },
+        { label: "Routing Matrix 내보내기", action: exportRoutingMatrixReport },
+        { label: "Configuration Drift 내보내기", action: exportConfigDriftReport },
+        { label: "Failure Impact 내보내기", action: exportFailureImpactReport },
+        { label: "Service Reachability 내보내기", action: exportServiceReachabilityReport },
+        { label: "Security Matrix 내보내기", action: exportSecurityMatrixReport },
+        { label: "Wireless Survey 내보내기", action: exportWirelessSurveyReport },
+        { label: "Verification Plan 내보내기", action: exportVerificationPlan },
+        { label: "학습자 워크북 내보내기", action: () => exportLabWorkbook("student") },
+        { label: "강사용 워크북 내보내기", action: () => exportLabWorkbook("instructor") },
         { label: "진단 리포트 내보내기", action: exportDiagnosticReport },
         { label: "Activity Check 내보내기", action: exportActivityReport },
         { label: "시뮬레이션 이벤트 CSV 내보내기", action: exportSimulationEvents, disabled: project.simulationEvents.length === 0 },
@@ -1821,7 +2050,9 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
           <button className="icon-button" onClick={() => { onSave(project); setMessage("프로젝트 저장을 요청했습니다."); }} title="저장" type="button"><Save size={18} /></button>
           <button className="icon-button" onClick={() => downloadProject(project, "json")} title="JSON 내보내기" type="button"><FileJson size={18} /></button>
           <button className="icon-button" onClick={() => { downloadProject(project, "ptweb"); setMessage(".ptweb 프로젝트 파일을 내보냈습니다. Cisco Packet Tracer .pkt 바이너리 내보내기는 지원하지 않습니다."); }} title="PTWEB 프로젝트 내보내기 (Cisco .pkt 아님)" type="button"><Download size={18} /></button>
+          <button className="icon-button" onClick={exportProjectReport} title="프로젝트 리포트 내보내기" type="button"><Info size={18} /></button>
           <button className="icon-button" onClick={openActivityWizard} title="Activity Wizard / Check Results" type="button"><CircleHelp size={18} /></button>
+          <button className="icon-button" onClick={onThemeToggle} title={theme === "dark" ? "Light mode" : "Dark mode"} type="button">{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button>
           <button className="icon-button" onClick={() => setZoom((value) => Math.min(1.9, value + 0.1))} title="확대" type="button"><ZoomIn size={18} /></button>
           <button className="icon-button" onClick={fitTopologyToView} title="전체 보기" type="button"><Maximize2 size={18} /></button>
           <button
@@ -3380,7 +3611,58 @@ function activityRequirementCurrentValue(project: NetworkProject, kind: Activity
     return project.devices.filter((device) => (device.kind === "router" || device.kind === "switch" || device.kind === "firewall" || device.kind === "wireless") && device.config.startupConfig.length > 0).length;
   }
   if (kind === "tdr-normal-count") return project.links.filter((link) => linkCableDiagnosticSummary(project, link).summary === "TDR Normal/Normal").length;
-  return project.devices.filter((device) => enabledServices(device).length > 0).length;
+  if (kind === "service-count") return project.devices.filter((device) => enabledServices(device).length > 0).length;
+  if (kind === "vlan-count") return activityConfiguredVlanCount(project);
+  if (kind === "trunk-port-count") return activityPortCount(project, (port) => port.mode === "trunk");
+  if (kind === "routed-port-count") return activityPortCount(project, (port) => port.mode === "routed" && isIpv4(port.ipAddress));
+  if (kind === "svi-count") return activityPortCount(project, (port) => port.name.toLowerCase().startsWith("vlan") && isIpv4(port.ipAddress));
+  if (kind === "static-route-count") return activitySum(project, (device) => device.config.staticRoutes.filter((route) => route.network && route.mask && route.nextHop).length);
+  if (kind === "dynamic-routing-count") return activitySum(project, (device) => device.config.routingProtocols?.length ?? 0);
+  if (kind === "acl-rule-count") return activitySum(project, (device) => device.config.accessRules.length);
+  if (kind === "nat-rule-count") return activitySum(project, (device) => device.config.natRules.length);
+  if (kind === "prefix-list-count") return activitySum(project, (device) => device.config.prefixLists?.length ?? 0);
+  if (kind === "pbr-route-map-count") return activitySum(project, (device) => (device.config.routeMaps ?? []).filter((entry) => Boolean(entry.setNextHop)).length);
+  if (kind === "dhcp-pool-count") return activitySum(project, (device) => device.config.dhcpPools.filter((pool) => pool.enabled).length);
+  if (kind === "dhcp-snooping-device-count") return project.devices.filter((device) => Boolean(device.config.dhcpSnooping?.enabled)).length;
+  if (kind === "port-security-port-count") return activityPortCount(project, (port) => port.portSecurity?.enabled === true);
+  if (kind === "etherchannel-port-count") return activityPortCount(project, (port) => Boolean(port.channelGroup));
+  if (kind === "first-hop-redundancy-count") return activityPortCount(project, (port) => (port.hsrpGroups?.length ?? 0) + (port.vrrpGroups?.length ?? 0));
+  if (kind === "wireless-infrastructure-count") return project.devices.filter((device) => device.kind === "wireless").length;
+  if (kind === "wireless-client-count") return activityPortCount(project, (port, device) => device.kind !== "wireless" && port.kind === "wireless" && isIpv4(port.ipAddress));
+  if (kind === "ip-sla-track-count") return activitySum(project, (device) => {
+    const operationIds = new Set((device.config.ipSlaOperations ?? []).map((operation) => operation.operationId));
+    return (device.config.trackObjects ?? []).filter((track) => track.type === "ip-sla" && track.ipSlaOperationId !== undefined && operationIds.has(track.ipSlaOperationId)).length;
+  });
+  return 0;
+}
+
+function activityConfiguredVlanCount(project: NetworkProject): number {
+  const ids = new Set<number>();
+  for (const device of project.devices) {
+    for (const vlan of device.config.vlans) {
+      if (vlan.id !== 1 && vlan.name.trim()) ids.add(vlan.id);
+    }
+    for (const port of device.ports) {
+      if (port.vlan && port.vlan !== 1) ids.add(port.vlan);
+      for (const vlan of port.allowedVlans ?? []) {
+        if (vlan !== 1) ids.add(vlan);
+      }
+      if (port.nativeVlan && port.nativeVlan !== 1) ids.add(port.nativeVlan);
+      if (port.subinterfaceVlan && port.subinterfaceVlan !== 1) ids.add(port.subinterfaceVlan);
+    }
+  }
+  return ids.size;
+}
+
+function activityPortCount(project: NetworkProject, predicate: (port: NetworkPort, device: NetworkDevice) => boolean | number): number {
+  return project.devices.reduce((total, device) => total + device.ports.reduce((portTotal, port) => {
+    const result = predicate(port, device);
+    return portTotal + (typeof result === "number" ? result : result ? 1 : 0);
+  }, 0), 0);
+}
+
+function activitySum(project: NetworkProject, counter: (device: NetworkDevice) => number): number {
+  return project.devices.reduce((total, device) => total + counter(device), 0);
 }
 
 function activityRequirementKindLabel(kind: ActivityRequirementKind): string {
@@ -4766,6 +5048,60 @@ function isIpCapable(device: NetworkDevice, port: NetworkPort): boolean {
   return Boolean(port.ipCapable || port.mode === "routed" || device.kind === "pc" || device.kind === "server");
 }
 
+function parseIntegerDraft(value: string, min: number, max: number): number | null {
+  const parsed = Number(value.trim());
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) return null;
+  return parsed;
+}
+
+function parseOptionalIntegerDraft(value: string, min: number, max: number): number | null | undefined {
+  if (!value.trim()) return undefined;
+  return parseIntegerDraft(value, min, max);
+}
+
+function nextAvailableNumber(values: number[], min: number, max: number): number {
+  const used = new Set(values.filter((value) => Number.isInteger(value)));
+  for (let value = min; value <= max; value += 1) {
+    if (!used.has(value)) return value;
+  }
+  return min;
+}
+
+function parseNameListDraft(value: string): string[] {
+  const names = value
+    .split(/[,\s]+/)
+    .map((item) => item.trim().slice(0, 64))
+    .filter(Boolean);
+  return names.filter((item, index) => names.findIndex((candidate) => candidate.toLowerCase() === item.toLowerCase()) === index).slice(0, 12);
+}
+
+function parseCommaListDraft(value: string): string[] {
+  const entries = value
+    .split(",")
+    .map((item) => item.trim().slice(0, 96))
+    .filter(Boolean);
+  return entries.filter((item, index) => entries.findIndex((candidate) => candidate.toLowerCase() === item.toLowerCase()) === index).slice(0, 24);
+}
+
+function configNameDraft(value: string): string {
+  return value.trim().replace(/[^a-zA-Z0-9_.:-]/g, "").slice(0, 64);
+}
+
+function ipv4PrefixLength(value: string): number | null {
+  const [network, prefixText] = value.trim().split("/");
+  const prefix = Number(prefixText);
+  if (!isIpv4(network) || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) return null;
+  return prefix;
+}
+
+type IpSlaRow = NonNullable<NetworkDevice["config"]["ipSlaOperations"]>[number];
+type TrackRow = NonNullable<NetworkDevice["config"]["trackObjects"]>[number];
+type HsrpRow = NonNullable<NetworkPort["hsrpGroups"]>[number];
+type VrrpRow = NonNullable<NetworkPort["vrrpGroups"]>[number];
+type PrefixListRow = NonNullable<NetworkDevice["config"]["prefixLists"]>[number];
+type RouteMapRow = NonNullable<NetworkDevice["config"]["routeMaps"]>[number];
+type RoutingProtocolRow = NonNullable<NetworkDevice["config"]["routingProtocols"]>[number];
+
 function repairProject(project: NetworkProject): { project: NetworkProject; message: string } {
   let changes = 0;
   const validDeviceIds = new Set(project.devices.map((device) => device.id));
@@ -4964,7 +5300,7 @@ function PhysicalTab({ device, project, onUpdate, onProjectChange }: { device: N
   }, [device.id, device.ports.length, selectedPortId]);
 
   function selectCompatibleModule(moduleId: string) {
-    const slot = model.modules.find((candidate) => candidate.accepts.includes(moduleId) && !device.modules.some((module) => module.slotId === candidate.id));
+    const slot = model.modules.find((candidate) => candidate.accepts.includes(moduleId) && !installedModuleForSlot(device, candidate.id));
     if (!slot) {
       setNotice("사용 가능한 호환 슬롯이 없습니다.");
       return;
@@ -5077,16 +5413,17 @@ function PhysicalTab({ device, project, onUpdate, onProjectChange }: { device: N
               <small>{device.powerOn ? "모듈 변경 전 전원을 끄세요" : "모듈 변경 가능"}</small>
             </header>
             {model.modules.map((slot) => {
-              const installed = device.modules.find((module) => module.slotId === slot.id);
+              const installed = installedModuleForSlot(device, slot.id);
               const installedSpec = installed ? getModuleSpec(installed.moduleId) : null;
+              const occupiedByPrimary = installed && installed.slotId !== slot.id;
               return (
                 <div className="module-slot" key={slot.id}>
                   <div>
                     <strong>{slot.label}</strong>
-                    <span>{installedSpec ? `${installedSpec.label}: ${installedSpec.description}` : "비어 있음"}</span>
+                    <span>{installedSpec ? `${installedSpec.label}: ${installedSpec.description}${occupiedByPrimary ? ` (${installed.slotId}에서 점유)` : ""}` : "비어 있음"}</span>
                   </div>
                   {installed ? (
-                    <button className="secondary-action" disabled={device.powerOn} onClick={() => remove(slot.id)} type="button">제거</button>
+                    <button className="secondary-action" disabled={device.powerOn || occupiedByPrimary} onClick={() => remove(slot.id)} type="button">{occupiedByPrimary ? "점유됨" : "제거"}</button>
                   ) : (
                     <>
                       <select disabled={device.powerOn} value={slotSelections[slot.id] ?? slot.accepts[0]} onChange={(event) => setSlotSelections({ ...slotSelections, [slot.id]: event.target.value })}>
@@ -5123,6 +5460,7 @@ function PhysicalTab({ device, project, onUpdate, onProjectChange }: { device: N
 
 function shortPortName(name: string): string {
   return name
+    .replace("TenGigabitEthernet", "Te")
     .replace("FastEthernet", "Fa")
     .replace("GigabitEthernet", "Gi")
     .replace("Serial", "Se")
@@ -5194,12 +5532,39 @@ function physicalSerialLabel(project: NetworkProject, device: NetworkDevice, por
 function ConfigTab({ device, onUpdate, onDhcp }: { device: NetworkDevice; onUpdate: (device: NetworkDevice) => void; onDhcp: () => void }) {
   const dataPorts = device.ports.filter((item) => item.kind !== "console");
   const [selectedPortId, setSelectedPortId] = useState(dataPorts[0]?.id ?? "");
-  const [routeDraft, setRouteDraft] = useState({ network: "", mask: "", nextHop: "" });
+  const [routeDraft, setRouteDraft] = useState({ network: "", mask: "", nextHop: "", distance: "", trackId: "" });
   const [vlanDraft, setVlanDraft] = useState({ id: "10", name: "Users" });
   const [aclDraft, setAclDraft] = useState<Omit<AccessRule, "id" | "hits">>({ action: "permit", protocol: "ip", source: "any", destination: "any", interfaceName: "" });
   const [natDraft, setNatDraft] = useState<Omit<NatRule, "id" | "hits">>({ insideLocal: "", insideGlobal: "", outsideInterface: "" });
+  const [slaDraft, setSlaDraft] = useState({ operationId: "1", targetIp: "", sourceInterface: "", frequency: "60", timeout: "5000", threshold: "5000" });
+  const [trackDraft, setTrackDraft] = useState<{ trackId: string; type: TrackRow["type"]; interfaceName: string; ipSlaOperationId: string }>({ trackId: "1", type: "ip-sla", interfaceName: dataPorts[0]?.name ?? "", ipSlaOperationId: "1" });
+  const [hsrpDraft, setHsrpDraft] = useState<{ group: string; virtualIp: string; priority: string; version: HsrpRow["version"]; preempt: boolean; trackObject: string; trackDecrement: string }>({ group: "1", virtualIp: "", priority: "100", version: "1", preempt: false, trackObject: "", trackDecrement: "10" });
+  const [vrrpDraft, setVrrpDraft] = useState<{ group: string; virtualIp: string; priority: string; version: VrrpRow["version"]; preempt: boolean; advertiseInterval: string; trackObject: string; trackDecrement: string }>({ group: "1", virtualIp: "", priority: "100", version: "2", preempt: true, advertiseInterval: "1", trackObject: "", trackDecrement: "10" });
+  const [prefixDraft, setPrefixDraft] = useState<{ name: string; sequence: string; action: PrefixListRow["action"]; prefix: string; ge: string; le: string }>({ name: "PL-DEFAULT", sequence: "5", action: "permit", prefix: "0.0.0.0/0", ge: "", le: "" });
+  const [routeMapDraft, setRouteMapDraft] = useState<{ name: string; sequence: string; action: RouteMapRow["action"]; description: string; matchAccessLists: string; matchPrefixLists: string; setNextHop: string }>({ name: "PBR-IN", sequence: "10", action: "permit", description: "", matchAccessLists: "", matchPrefixLists: "PL-DEFAULT", setNextHop: "" });
+  const [routingDraft, setRoutingDraft] = useState<{ protocol: RoutingProtocolRow["protocol"]; processId: string; network: string; version: string; routerId: string }>({ protocol: "ospf", processId: "1", network: "", version: "2", routerId: "" });
   const [configNotice, setConfigNotice] = useState("");
   const port = dataPorts.find((item) => item.id === selectedPortId) ?? dataPorts[0];
+  const ipSlaOperations = [...(device.config.ipSlaOperations ?? [])].sort((left, right) => left.operationId - right.operationId);
+  const trackObjects = [...(device.config.trackObjects ?? [])].sort((left, right) => left.trackId - right.trackId);
+  const prefixLists = [...(device.config.prefixLists ?? [])].sort((left, right) => left.name.localeCompare(right.name) || left.sequence - right.sequence);
+  const routeMaps = [...(device.config.routeMaps ?? [])].sort((left, right) => left.name.localeCompare(right.name) || left.sequence - right.sequence);
+  const routingProtocols = [...(device.config.routingProtocols ?? [])].sort((left, right) => left.protocol.localeCompare(right.protocol) || (left.processId ?? "").localeCompare(right.processId ?? ""));
+  const prefixListNames = prefixLists.map((entry) => entry.name).filter((name, index, list) => list.findIndex((item) => item.toLowerCase() === name.toLowerCase()) === index);
+  const routeMapNames = routeMaps.map((entry) => entry.name).filter((name, index, list) => list.findIndex((item) => item.toLowerCase() === name.toLowerCase()) === index);
+  const accessListNames = device.config.accessRules
+    .map((rule) => rule.listName || rule.interfaceName)
+    .filter((name): name is string => Boolean(name))
+    .filter((name, index, list) => list.findIndex((item) => item.toLowerCase() === name.toLowerCase()) === index);
+  const interfaceNames = dataPorts.map((item) => item.name);
+  const cdpConfig = { enabled: true, timer: 60, holdtime: 180, version: "2" as const, ...(device.config.cdp ?? {}) };
+  const lldpConfig = { enabled: false, timer: 30, holdtime: 120, reinitDelay: 2, ...(device.config.lldp ?? {}) };
+  const dhcpSnoopingConfig = { enabled: false, vlans: [] as number[], verifyMacAddress: true, ...(device.config.dhcpSnooping ?? {}) };
+  const vtpConfig = { mode: "server" as const, domain: "", version: "2" as const, pruning: false, revision: 0, ...(device.config.vtp ?? {}) };
+  const errdisableRecovery = { bpduguard: false, interval: 300, ...(device.config.errdisableRecovery ?? {}) };
+  const selectedPortSecurity = { enabled: false, maximum: 1, violation: "shutdown" as const, sticky: false, secureMacAddresses: [], ...(port?.portSecurity ?? {}) };
+  const selectedPortSupportsFhrp = Boolean(port && isIpCapable(device, port) && (device.kind === "router" || device.kind === "switch" || device.kind === "firewall"));
+  const selectedPortSupportsPbr = Boolean(port && isIpCapable(device, port) && (device.kind === "router" || device.kind === "switch" || device.kind === "firewall"));
 
   useEffect(() => {
     if (!dataPorts.some((item) => item.id === selectedPortId)) setSelectedPortId(dataPorts[0]?.id ?? "");
@@ -5217,23 +5582,43 @@ function ConfigTab({ device, onUpdate, onDhcp }: { device: NetworkDevice; onUpda
     });
   }
 
+  function updateConfig(patch: Partial<NetworkDevice["config"]>) {
+    onUpdate({ ...device, config: { ...device.config, ...patch } });
+  }
+
+  function updateSelectedPortSecurity(patch: Partial<NonNullable<NetworkPort["portSecurity"]>>) {
+    if (!port) return;
+    const current = { enabled: false, maximum: 1, violation: "shutdown" as const, sticky: false, secureMacAddresses: [], ...(port.portSecurity ?? {}) };
+    updatePort(port.id, { portSecurity: { ...current, ...patch } });
+  }
+
   function addRoute() {
     const network = routeDraft.network.trim();
     const mask = routeDraft.mask.trim();
     const nextHop = routeDraft.nextHop.trim();
+    const distance = parseOptionalIntegerDraft(routeDraft.distance, 1, 255);
+    const trackId = parseOptionalIntegerDraft(routeDraft.trackId, 1, 1000);
     if (!isIpv4(network) || !isSubnetMask(mask) || !isIpv4(nextHop)) {
       setConfigNotice("정적 라우트는 유효한 IPv4 네트워크, 연속 subnet mask, 다음 홉을 사용해야 합니다.");
+      return;
+    }
+    if (distance === null) {
+      setConfigNotice("정적 라우트 distance는 1부터 255 사이여야 합니다.");
+      return;
+    }
+    if (trackId === null || (trackId !== undefined && !trackObjects.some((track) => track.trackId === trackId))) {
+      setConfigNotice("정적 라우트 track은 존재하는 track object여야 합니다.");
       return;
     }
     onUpdate({
       ...device,
       config: {
         ...device.config,
-        staticRoutes: [...device.config.staticRoutes, { id: createId("route"), network, mask, nextHop }]
+        staticRoutes: [...device.config.staticRoutes, { id: createId("route"), network, mask, nextHop, distance, trackId }]
       }
     });
     setConfigNotice(`${network} 정적 라우트를 추가했습니다.`);
-    setRouteDraft({ network: "", mask: "", nextHop: "" });
+    setRouteDraft({ network: "", mask: "", nextHop: "", distance: "", trackId: "" });
   }
 
   function updateRoute(routeId: string, patch: Partial<NetworkDevice["config"]["staticRoutes"][number]>) {
@@ -5244,6 +5629,386 @@ function ConfigTab({ device, onUpdate, onDhcp }: { device: NetworkDevice; onUpda
         staticRoutes: device.config.staticRoutes.map((route) => route.id === routeId ? { ...route, ...patch } : route)
       }
     });
+  }
+
+  function addIpSlaOperation() {
+    const operationId = parseIntegerDraft(slaDraft.operationId, 1, 2147483647);
+    const frequency = parseIntegerDraft(slaDraft.frequency, 1, 604800);
+    const timeout = parseIntegerDraft(slaDraft.timeout, 1, 60000);
+    const threshold = parseIntegerDraft(slaDraft.threshold, 1, 60000);
+    const targetIp = slaDraft.targetIp.trim();
+    const sourceInterface = slaDraft.sourceInterface.trim();
+    if (operationId === null) {
+      setConfigNotice("IP SLA operation ID는 1 이상의 정수여야 합니다.");
+      return;
+    }
+    if (ipSlaOperations.some((operation) => operation.operationId === operationId)) {
+      setConfigNotice(`IP SLA ${operationId}는 이미 존재합니다.`);
+      return;
+    }
+    if (!isIpv4(targetIp)) {
+      setConfigNotice("IP SLA 대상은 유효한 IPv4 주소여야 합니다.");
+      return;
+    }
+    if (sourceInterface && !interfaceNames.includes(sourceInterface)) {
+      setConfigNotice("IP SLA source-interface는 장비의 인터페이스 이름이어야 합니다.");
+      return;
+    }
+    if (frequency === null || timeout === null || threshold === null) {
+      setConfigNotice("IP SLA frequency는 1-604800초, timeout/threshold는 1-60000ms 범위여야 합니다.");
+      return;
+    }
+    const nextOperation: IpSlaRow = {
+      id: createId("sla"),
+      operationId,
+      type: "icmp-echo",
+      targetIp,
+      sourceInterface: sourceInterface || undefined,
+      frequency,
+      timeout,
+      threshold,
+      enabled: true
+    };
+    const nextOperations = [...ipSlaOperations, nextOperation].sort((left, right) => left.operationId - right.operationId);
+    onUpdate({ ...device, config: { ...device.config, ipSlaOperations: nextOperations } });
+    setSlaDraft({ ...slaDraft, operationId: String(nextAvailableNumber(nextOperations.map((operation) => operation.operationId), 1, 2147483647)), targetIp: "" });
+    setConfigNotice(`IP SLA ${operationId}를 추가했습니다.`);
+  }
+
+  function updateIpSlaOperation(operationId: string, patch: Partial<IpSlaRow>) {
+    onUpdate({
+      ...device,
+      config: {
+        ...device.config,
+        ipSlaOperations: ipSlaOperations.map((operation) => operation.id === operationId ? { ...operation, ...patch } : operation)
+      }
+    });
+  }
+
+  function removeIpSlaOperation(operationId: number) {
+    const dependentTrackIds = new Set(trackObjects.filter((track) => track.type === "ip-sla" && track.ipSlaOperationId === operationId).map((track) => track.trackId));
+    const nextTrackObjects = trackObjects.filter((track) => !dependentTrackIds.has(track.trackId));
+    onUpdate({
+      ...device,
+      ports: device.ports.map((item) => cleanPortTrackReferences(item, dependentTrackIds)),
+      config: {
+        ...device.config,
+        ipSlaOperations: ipSlaOperations.filter((operation) => operation.operationId !== operationId),
+        trackObjects: nextTrackObjects,
+        staticRoutes: device.config.staticRoutes.map((route) => route.trackId && dependentTrackIds.has(route.trackId) ? { ...route, trackId: undefined } : route)
+      }
+    });
+    setConfigNotice(`IP SLA ${operationId}와 관련 track 참조를 삭제했습니다.`);
+  }
+
+  function addTrackObject() {
+    const trackId = parseIntegerDraft(trackDraft.trackId, 1, 1000);
+    if (trackId === null) {
+      setConfigNotice("Track object ID는 1부터 1000 사이여야 합니다.");
+      return;
+    }
+    if (trackObjects.some((track) => track.trackId === trackId)) {
+      setConfigNotice(`Track ${trackId}는 이미 존재합니다.`);
+      return;
+    }
+    const nextTrack = buildTrackObject(trackId, trackDraft);
+    if (!nextTrack) return;
+    const nextTrackObjects = [...trackObjects, nextTrack].sort((left, right) => left.trackId - right.trackId);
+    onUpdate({ ...device, config: { ...device.config, trackObjects: nextTrackObjects } });
+    setTrackDraft({ ...trackDraft, trackId: String(nextAvailableNumber(nextTrackObjects.map((track) => track.trackId), 1, 1000)) });
+    setConfigNotice(`Track ${trackId}를 추가했습니다.`);
+  }
+
+  function buildTrackObject(trackId: number, draft: { type: TrackRow["type"]; interfaceName: string; ipSlaOperationId: string }): TrackRow | null {
+    if (draft.type === "interface") {
+      const interfaceName = draft.interfaceName.trim() || port?.name || "";
+      if (!interfaceName || !interfaceNames.includes(interfaceName)) {
+        setConfigNotice("Interface track은 장비의 인터페이스를 선택해야 합니다.");
+        return null;
+      }
+      return { id: createId("track"), trackId, type: "interface", interfaceName, mode: "line-protocol" };
+    }
+    const ipSlaOperationId = parseIntegerDraft(draft.ipSlaOperationId, 1, 2147483647);
+    if (ipSlaOperationId === null || !ipSlaOperations.some((operation) => operation.operationId === ipSlaOperationId)) {
+      setConfigNotice("IP SLA track은 존재하는 IP SLA operation을 선택해야 합니다.");
+      return null;
+    }
+    return { id: createId("track"), trackId, type: "ip-sla", ipSlaOperationId, mode: "reachability" };
+  }
+
+  function updateTrackObject(rowId: string, patch: Partial<TrackRow>) {
+    onUpdate({
+      ...device,
+      config: {
+        ...device.config,
+        trackObjects: trackObjects.map((track) => track.id === rowId ? { ...track, ...patch } : track)
+      }
+    });
+  }
+
+  function removeTrackObject(trackId: number) {
+    const removed = new Set([trackId]);
+    onUpdate({
+      ...device,
+      ports: device.ports.map((item) => cleanPortTrackReferences(item, removed)),
+      config: {
+        ...device.config,
+        trackObjects: trackObjects.filter((track) => track.trackId !== trackId),
+        staticRoutes: device.config.staticRoutes.map((route) => route.trackId === trackId ? { ...route, trackId: undefined } : route)
+      }
+    });
+    setConfigNotice(`Track ${trackId} 참조를 정리했습니다.`);
+  }
+
+  function cleanPortTrackReferences(item: NetworkPort, removedTrackIds: Set<number>): NetworkPort {
+    return {
+      ...item,
+      hsrpGroups: (item.hsrpGroups ?? []).map((group) => group.trackObject && removedTrackIds.has(group.trackObject) ? { ...group, trackObject: undefined, trackDecrement: undefined } : group),
+      vrrpGroups: (item.vrrpGroups ?? []).map((group) => group.trackObject && removedTrackIds.has(group.trackObject) ? { ...group, trackObject: undefined, trackDecrement: undefined } : group)
+    };
+  }
+
+  function addHsrpGroup() {
+    if (!port) return;
+    const group = parseIntegerDraft(hsrpDraft.group, 0, 4095);
+    const priority = parseIntegerDraft(hsrpDraft.priority, 0, 255);
+    const trackObject = parseOptionalIntegerDraft(hsrpDraft.trackObject, 1, 1000);
+    const trackDecrement = parseOptionalIntegerDraft(hsrpDraft.trackDecrement, 1, 255);
+    const virtualIp = hsrpDraft.virtualIp.trim();
+    if (group === null || priority === null || trackObject === null || trackDecrement === null) {
+      setConfigNotice("HSRP group은 0-4095, priority는 0-255, track/decrement는 유효 범위를 사용해야 합니다.");
+      return;
+    }
+    if (!isIpv4(virtualIp)) {
+      setConfigNotice("HSRP virtual IP는 유효한 IPv4 주소여야 합니다.");
+      return;
+    }
+    if (trackObject !== undefined && !trackObjects.some((track) => track.trackId === trackObject)) {
+      setConfigNotice("HSRP track은 존재하는 track object여야 합니다.");
+      return;
+    }
+    if ((port.hsrpGroups ?? []).some((item) => item.group === group)) {
+      setConfigNotice(`HSRP group ${group}는 이미 존재합니다.`);
+      return;
+    }
+    const nextGroup: HsrpRow = { group, virtualIp, priority, version: hsrpDraft.version, preempt: hsrpDraft.preempt, trackObject, trackDecrement: trackObject ? trackDecrement ?? 10 : undefined };
+    updatePort(port.id, { hsrpGroups: [...(port.hsrpGroups ?? []), nextGroup].sort((left, right) => left.group - right.group) });
+    setHsrpDraft({ ...hsrpDraft, group: String(nextAvailableNumber([...(port.hsrpGroups ?? []).map((item) => item.group), group], 0, 4095)), virtualIp: "" });
+    setConfigNotice(`HSRP group ${group}를 추가했습니다.`);
+  }
+
+  function updateHsrpGroup(groupNumber: number, patch: Partial<HsrpRow>) {
+    if (!port) return;
+    updatePort(port.id, { hsrpGroups: (port.hsrpGroups ?? []).map((group) => group.group === groupNumber ? { ...group, ...patch } : group) });
+  }
+
+  function addVrrpGroup() {
+    if (!port) return;
+    const group = parseIntegerDraft(vrrpDraft.group, 1, 255);
+    const priority = parseIntegerDraft(vrrpDraft.priority, 1, 254);
+    const advertiseInterval = parseIntegerDraft(vrrpDraft.advertiseInterval, 1, 255);
+    const trackObject = parseOptionalIntegerDraft(vrrpDraft.trackObject, 1, 1000);
+    const trackDecrement = parseOptionalIntegerDraft(vrrpDraft.trackDecrement, 1, 255);
+    const virtualIp = vrrpDraft.virtualIp.trim();
+    if (group === null || priority === null || advertiseInterval === null || trackObject === null || trackDecrement === null) {
+      setConfigNotice("VRRP group은 1-255, priority는 1-254, timer/track/decrement는 유효 범위를 사용해야 합니다.");
+      return;
+    }
+    if (!isIpv4(virtualIp)) {
+      setConfigNotice("VRRP virtual IP는 유효한 IPv4 주소여야 합니다.");
+      return;
+    }
+    if (trackObject !== undefined && !trackObjects.some((track) => track.trackId === trackObject)) {
+      setConfigNotice("VRRP track은 존재하는 track object여야 합니다.");
+      return;
+    }
+    if ((port.vrrpGroups ?? []).some((item) => item.group === group)) {
+      setConfigNotice(`VRRP group ${group}는 이미 존재합니다.`);
+      return;
+    }
+    const nextGroup: VrrpRow = { group, virtualIp, priority, version: vrrpDraft.version, preempt: vrrpDraft.preempt, advertiseInterval, trackObject, trackDecrement: trackObject ? trackDecrement ?? 10 : undefined };
+    updatePort(port.id, { vrrpGroups: [...(port.vrrpGroups ?? []), nextGroup].sort((left, right) => left.group - right.group) });
+    setVrrpDraft({ ...vrrpDraft, group: String(nextAvailableNumber([...(port.vrrpGroups ?? []).map((item) => item.group), group], 1, 255)), virtualIp: "" });
+    setConfigNotice(`VRRP group ${group}를 추가했습니다.`);
+  }
+
+  function updateVrrpGroup(groupNumber: number, patch: Partial<VrrpRow>) {
+    if (!port) return;
+    updatePort(port.id, { vrrpGroups: (port.vrrpGroups ?? []).map((group) => group.group === groupNumber ? { ...group, ...patch } : group) });
+  }
+
+  function addRoutingProtocol() {
+    const protocol = routingDraft.protocol;
+    const processId = protocol === "rip" ? undefined : configNameDraft(routingDraft.processId) || "1";
+    const routerId = routingDraft.routerId.trim();
+    if (routerId && !isIpv4(routerId)) {
+      setConfigNotice("Router ID는 유효한 IPv4 형식이어야 합니다.");
+      return;
+    }
+    if (routingProtocols.some((entry) => entry.protocol === protocol && (entry.processId ?? "") === (processId ?? ""))) {
+      setConfigNotice(`${protocol.toUpperCase()} ${processId ?? ""} process는 이미 존재합니다.`);
+      return;
+    }
+    const nextProtocol: RoutingProtocolRow = {
+      id: createId("routing"),
+      protocol,
+      processId,
+      networks: parseCommaListDraft(routingDraft.network),
+      version: protocol === "rip" ? routingDraft.version || "2" : undefined,
+      routerId: routerId || undefined,
+      autoSummary: false,
+      passiveInterfaces: [],
+      passiveInterfaceDefault: false,
+      passiveInterfaceExceptions: [],
+      redistributeStatic: false,
+      defaultInformationOriginate: false,
+      defaultInformationAlways: false
+    };
+    onUpdate({ ...device, config: { ...device.config, routingProtocols: [...routingProtocols, nextProtocol] } });
+    setConfigNotice(`${protocol.toUpperCase()} ${processId ?? ""} process를 추가했습니다.`);
+  }
+
+  function updateRoutingProtocol(rowId: string, patch: Partial<RoutingProtocolRow>) {
+    onUpdate({
+      ...device,
+      config: {
+        ...device.config,
+        routingProtocols: routingProtocols.map((entry) => entry.id === rowId ? { ...entry, ...patch } : entry)
+      }
+    });
+  }
+
+  function removeRoutingProtocol(rowId: string) {
+    const removed = routingProtocols.find((entry) => entry.id === rowId);
+    onUpdate({
+      ...device,
+      config: {
+        ...device.config,
+        routingProtocols: routingProtocols.filter((entry) => entry.id !== rowId)
+      }
+    });
+    if (removed) setConfigNotice(`${removed.protocol.toUpperCase()} ${removed.processId ?? ""} process를 삭제했습니다.`);
+  }
+
+  function addPrefixListEntry() {
+    const name = configNameDraft(prefixDraft.name);
+    const sequence = parseIntegerDraft(prefixDraft.sequence, 1, 4294967294);
+    const prefix = prefixDraft.prefix.trim();
+    const prefixLength = ipv4PrefixLength(prefix);
+    const ge = parseOptionalIntegerDraft(prefixDraft.ge, 0, 32);
+    const le = parseOptionalIntegerDraft(prefixDraft.le, 0, 32);
+    if (!name) {
+      setConfigNotice("Prefix-list 이름이 필요합니다.");
+      return;
+    }
+    if (sequence === null || prefixLength === null || ge === null || le === null) {
+      setConfigNotice("Prefix-list는 seq 1 이상, IPv4 prefix, ge/le 0-32 범위를 사용해야 합니다.");
+      return;
+    }
+    if ((ge !== undefined && ge < prefixLength) || (le !== undefined && le < prefixLength) || (ge !== undefined && le !== undefined && ge > le)) {
+      setConfigNotice("Prefix-list ge/le 값은 prefix length 이상이고 ge가 le보다 클 수 없습니다.");
+      return;
+    }
+    if (prefixLists.some((entry) => entry.name.toLowerCase() === name.toLowerCase() && entry.sequence === sequence)) {
+      setConfigNotice(`${name} seq ${sequence}는 이미 존재합니다.`);
+      return;
+    }
+    const entry: PrefixListRow = { id: createId("plist"), name, sequence, action: prefixDraft.action, prefix, ge, le, hits: 0 };
+    const nextPrefixLists = [...prefixLists, entry].sort((left, right) => left.name.localeCompare(right.name) || left.sequence - right.sequence);
+    onUpdate({ ...device, config: { ...device.config, prefixLists: nextPrefixLists } });
+    setPrefixDraft({ ...prefixDraft, name, sequence: String(nextAvailableNumber(nextPrefixLists.filter((item) => item.name.toLowerCase() === name.toLowerCase()).map((item) => item.sequence), 5, 4294967294)) });
+    setConfigNotice(`${name} seq ${sequence} prefix-list를 추가했습니다.`);
+  }
+
+  function updatePrefixListEntry(rowId: string, patch: Partial<PrefixListRow>) {
+    onUpdate({
+      ...device,
+      config: {
+        ...device.config,
+        prefixLists: prefixLists.map((entry) => entry.id === rowId ? { ...entry, ...patch } : entry)
+      }
+    });
+  }
+
+  function removePrefixListEntry(rowId: string) {
+    const removed = prefixLists.find((entry) => entry.id === rowId);
+    if (!removed) return;
+    const nextPrefixLists = prefixLists.filter((entry) => entry.id !== rowId);
+    const listStillExists = nextPrefixLists.some((entry) => entry.name.toLowerCase() === removed.name.toLowerCase());
+    onUpdate({
+      ...device,
+      config: {
+        ...device.config,
+        prefixLists: nextPrefixLists,
+        routeMaps: listStillExists ? routeMaps : routeMaps.map((entry) => ({
+          ...entry,
+          matchPrefixLists: (entry.matchPrefixLists ?? []).filter((name) => name.toLowerCase() !== removed.name.toLowerCase())
+        }))
+      }
+    });
+    setConfigNotice(`${removed.name} seq ${removed.sequence} prefix-list를 삭제했습니다.`);
+  }
+
+  function addRouteMapEntry() {
+    const name = configNameDraft(routeMapDraft.name);
+    const sequence = parseIntegerDraft(routeMapDraft.sequence, 1, 65535);
+    const setNextHop = routeMapDraft.setNextHop.trim();
+    const matchAccessLists = parseNameListDraft(routeMapDraft.matchAccessLists);
+    const matchPrefixLists = parseNameListDraft(routeMapDraft.matchPrefixLists);
+    if (!name) {
+      setConfigNotice("Route-map 이름이 필요합니다.");
+      return;
+    }
+    if (sequence === null) {
+      setConfigNotice("Route-map sequence는 1부터 65535 사이여야 합니다.");
+      return;
+    }
+    if (setNextHop && !isIpv4(setNextHop)) {
+      setConfigNotice("Route-map next-hop은 유효한 IPv4 주소여야 합니다.");
+      return;
+    }
+    if (routeMaps.some((entry) => entry.name.toLowerCase() === name.toLowerCase() && entry.sequence === sequence)) {
+      setConfigNotice(`${name} seq ${sequence}는 이미 존재합니다.`);
+      return;
+    }
+    const entry: RouteMapRow = {
+      id: createId("rmap"),
+      name,
+      sequence,
+      action: routeMapDraft.action,
+      description: routeMapDraft.description.trim().slice(0, 100) || undefined,
+      matchAccessLists,
+      matchPrefixLists,
+      setNextHop: setNextHop || undefined,
+      hits: 0
+    };
+    const nextRouteMaps = [...routeMaps, entry].sort((left, right) => left.name.localeCompare(right.name) || left.sequence - right.sequence);
+    onUpdate({ ...device, config: { ...device.config, routeMaps: nextRouteMaps } });
+    setRouteMapDraft({ ...routeMapDraft, name, sequence: String(nextAvailableNumber(nextRouteMaps.filter((item) => item.name.toLowerCase() === name.toLowerCase()).map((item) => item.sequence), 10, 65535)), description: "" });
+    setConfigNotice(`${name} seq ${sequence} route-map을 추가했습니다.`);
+  }
+
+  function updateRouteMapEntry(rowId: string, patch: Partial<RouteMapRow>) {
+    onUpdate({
+      ...device,
+      config: {
+        ...device.config,
+        routeMaps: routeMaps.map((entry) => entry.id === rowId ? { ...entry, ...patch } : entry)
+      }
+    });
+  }
+
+  function removeRouteMapEntry(rowId: string) {
+    const removed = routeMaps.find((entry) => entry.id === rowId);
+    if (!removed) return;
+    const nextRouteMaps = routeMaps.filter((entry) => entry.id !== rowId);
+    const mapStillExists = nextRouteMaps.some((entry) => entry.name.toLowerCase() === removed.name.toLowerCase());
+    onUpdate({
+      ...device,
+      ports: mapStillExists ? device.ports : device.ports.map((item) => item.policyRouteMap?.toLowerCase() === removed.name.toLowerCase() ? { ...item, policyRouteMap: "" } : item),
+      config: { ...device.config, routeMaps: nextRouteMaps }
+    });
+    setConfigNotice(`${removed.name} seq ${removed.sequence} route-map을 삭제했습니다.`);
   }
 
   function addVlan() {
@@ -5309,7 +6074,12 @@ function ConfigTab({ device, onUpdate, onDhcp }: { device: NetworkDevice; onUpda
       <div className="config-shortcuts">
         <button onClick={() => scrollConfig("interface")} type="button">인터페이스</button>
         {(device.kind === "router" || device.kind === "switch" || device.kind === "firewall") && <button onClick={() => scrollConfig("routes")} type="button">라우팅</button>}
+        {(device.kind === "router" || device.kind === "switch" || device.kind === "firewall") && <button onClick={() => scrollConfig("routing-protocols")} type="button">동적 라우팅</button>}
+        {(device.kind === "router" || device.kind === "switch" || device.kind === "firewall") && <button onClick={() => scrollConfig("pbr")} type="button">PBR</button>}
+        {(device.kind === "router" || device.kind === "switch" || device.kind === "firewall") && <button onClick={() => scrollConfig("sla-track")} type="button">SLA/Track</button>}
+        {(device.kind === "router" || device.kind === "switch" || device.kind === "firewall") && <button onClick={() => scrollConfig("fhrp")} type="button">FHRP</button>}
         {(device.kind === "switch" || device.kind === "router" || device.kind === "firewall") && <button onClick={() => scrollConfig("vlans")} type="button">VLAN</button>}
+        {(device.kind === "switch" || device.kind === "router" || device.kind === "firewall") && <button onClick={() => scrollConfig("switching")} type="button">스위칭 제어</button>}
         {(device.kind === "wireless" || device.ports.some((item) => item.kind === "wireless")) && <button onClick={() => scrollConfig("wireless")} type="button">무선</button>}
         {device.kind === "firewall" && <button onClick={() => scrollConfig("security")} type="button">보안</button>}
         <button onClick={() => scrollConfig("runtime")} type="button">런타임</button>
@@ -5328,6 +6098,10 @@ function ConfigTab({ device, onUpdate, onDhcp }: { device: NetworkDevice; onUpda
               <label>게이트웨이<input value={port.gateway} onChange={(event) => updatePort(port.id, { gateway: event.target.value.trim() })} placeholder="192.168.1.254" /></label>
               <label>DNS<input value={port.dnsServer} onChange={(event) => updatePort(port.id, { dnsServer: event.target.value.trim() })} placeholder="8.8.8.8" /></label>
               {(device.kind === "router" || device.kind === "switch" || device.kind === "firewall") && <label>DHCP Helper<input value={(port.helperAddresses ?? []).join(",")} onChange={(event) => updatePort(port.id, { helperAddresses: parseIpList(event.target.value) })} placeholder="10.10.10.10" /></label>}
+              {selectedPortSupportsPbr && <label>Policy Route Map<select value={port.policyRouteMap ?? ""} onChange={(event) => updatePort(port.id, { policyRouteMap: event.target.value })}>
+                <option value="">없음</option>
+                {routeMapNames.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select></label>}
             </>
           ) : <small>Layer 2 스위치 포트는 인터페이스 IP 대신 VLAN 설정을 사용합니다.</small>}
           <label>모드<select value={port.mode} onChange={(event) => updatePort(port.id, modePatch(event.target.value as NetworkPort["mode"]))}>
@@ -5337,6 +6111,51 @@ function ConfigTab({ device, onUpdate, onDhcp }: { device: NetworkDevice; onUpda
           </select></label>
           {port.mode === "access" && <label>Access VLAN<input value={port.vlan} onChange={(event) => updatePort(port.id, { vlan: boundedNumber(event.target.value, 1, 4094) })} type="number" /></label>}
           {port.mode === "trunk" && <label>허용 VLAN<input value={port.allowedVlans.join(",")} onChange={(event) => updatePort(port.id, { allowedVlans: parseVlanList(event.target.value) })} placeholder="1,10,20" /></label>}
+          {(device.kind === "router" || device.kind === "switch" || device.kind === "firewall") && (
+            <div className="config-subsection">
+              <header><strong>인터페이스 고급</strong><small>{port.name}</small></header>
+              <div className="inline-grid interface-advanced-grid">
+                <label className="toggle"><input checked={port.cdpEnabled !== false} onChange={(event) => updatePort(port.id, { cdpEnabled: event.target.checked })} type="checkbox" />CDP</label>
+                <label className="toggle"><input checked={port.lldpTransmit === true} onChange={(event) => updatePort(port.id, { lldpTransmit: event.target.checked })} type="checkbox" />LLDP TX</label>
+                <label className="toggle"><input checked={port.lldpReceive === true} onChange={(event) => updatePort(port.id, { lldpReceive: event.target.checked })} type="checkbox" />LLDP RX</label>
+                <label className="toggle"><input checked={port.dhcpSnoopingTrusted === true} onChange={(event) => updatePort(port.id, { dhcpSnoopingTrusted: event.target.checked })} type="checkbox" />DHCP trust</label>
+                <input value={port.dhcpSnoopingRateLimit ?? ""} onChange={(event) => updatePort(port.id, { dhcpSnoopingRateLimit: event.target.value ? boundedNumber(event.target.value, 1, 2048) : undefined })} placeholder="snoop rate" type="number" />
+                <button className="secondary-action" onClick={() => updatePort(port.id, { dhcpSnoopingTrusted: false, dhcpSnoopingRateLimit: undefined })} type="button">Snoop 초기화</button>
+              </div>
+              <div className="inline-grid interface-advanced-grid">
+                <label className="toggle"><input checked={port.stpPortfast === true} disabled={port.mode === "routed"} onChange={(event) => updatePort(port.id, { stpPortfast: event.target.checked })} type="checkbox" />PortFast</label>
+                <label className="toggle"><input checked={port.bpduGuard === true} disabled={port.mode === "routed"} onChange={(event) => updatePort(port.id, { bpduGuard: event.target.checked })} type="checkbox" />BPDU Guard</label>
+                <input disabled={port.mode === "routed"} value={port.voiceVlan ?? ""} onChange={(event) => updatePort(port.id, { voiceVlan: event.target.value ? boundedNumber(event.target.value, 1, 4094) : undefined })} placeholder="voice vlan" type="number" />
+                <label className="toggle"><input checked={port.switchportNonegotiate === true} disabled={port.mode === "routed"} onChange={(event) => updatePort(port.id, { switchportNonegotiate: event.target.checked })} type="checkbox" />nonegotiate</label>
+                <input value={port.channelGroup?.id ?? ""} onChange={(event) => updatePort(port.id, { channelGroup: event.target.value ? { id: boundedNumber(event.target.value, 1, 128), mode: port.channelGroup?.mode ?? "active" } : undefined })} placeholder="channel" type="number" />
+                <select value={port.channelGroup?.mode ?? "active"} onChange={(event) => updatePort(port.id, { channelGroup: { id: port.channelGroup?.id ?? 1, mode: event.target.value as NonNullable<NetworkPort["channelGroup"]>["mode"] } })}>
+                  <option value="active">active</option>
+                  <option value="passive">passive</option>
+                  <option value="on">on</option>
+                  <option value="desirable">desirable</option>
+                  <option value="auto">auto</option>
+                </select>
+              </div>
+              <div className="inline-grid interface-advanced-grid">
+                <input value={port.accessGroupIn ?? ""} onChange={(event) => updatePort(port.id, { accessGroupIn: event.target.value.trim() })} placeholder="ACL in" />
+                <input value={port.accessGroupOut ?? ""} onChange={(event) => updatePort(port.id, { accessGroupOut: event.target.value.trim() })} placeholder="ACL out" />
+                <select value={port.natRole ?? ""} onChange={(event) => updatePort(port.id, { natRole: event.target.value ? event.target.value as NetworkPort["natRole"] : undefined })}>
+                  <option value="">NAT 없음</option>
+                  <option value="inside">inside</option>
+                  <option value="outside">outside</option>
+                </select>
+                <label className="toggle"><input checked={selectedPortSecurity.enabled} disabled={port.mode === "routed"} onChange={(event) => updateSelectedPortSecurity({ enabled: event.target.checked })} type="checkbox" />port-security</label>
+                <input disabled={!selectedPortSecurity.enabled || port.mode === "routed"} value={selectedPortSecurity.maximum} onChange={(event) => updateSelectedPortSecurity({ enabled: true, maximum: boundedNumber(event.target.value, 1, 132) })} placeholder="max" type="number" />
+                <select disabled={!selectedPortSecurity.enabled || port.mode === "routed"} value={selectedPortSecurity.violation} onChange={(event) => updateSelectedPortSecurity({ enabled: true, violation: event.target.value as NonNullable<NetworkPort["portSecurity"]>["violation"] })}>
+                  <option value="protect">protect</option>
+                  <option value="restrict">restrict</option>
+                  <option value="shutdown">shutdown</option>
+                </select>
+                <label className="toggle"><input checked={selectedPortSecurity.sticky} disabled={!selectedPortSecurity.enabled || port.mode === "routed"} onChange={(event) => updateSelectedPortSecurity({ enabled: true, sticky: event.target.checked })} type="checkbox" />sticky</label>
+                <input disabled={!selectedPortSecurity.enabled || port.mode === "routed"} value={selectedPortSecurity.secureMacAddresses.join(",")} onChange={(event) => updateSelectedPortSecurity({ enabled: true, secureMacAddresses: parseCommaListDraft(event.target.value).slice(0, 16) })} placeholder="secure MAC" />
+              </div>
+            </div>
+          )}
           <label>Duplex<select value={port.duplex ?? "auto"} onChange={(event) => updatePort(port.id, { duplex: event.target.value as NetworkPort["duplex"] })}>
             <option value="auto">auto</option>
             <option value="full">full</option>
@@ -5346,24 +6165,253 @@ function ConfigTab({ device, onUpdate, onDhcp }: { device: NetworkDevice; onUpda
           <label>MTU<input value={port.mtu ?? 1500} onChange={(event) => updatePort(port.id, { mtu: boundedNumber(event.target.value, 576, 9216) })} type="number" /></label>
           <label>Bandwidth<input value={port.bandwidth ?? ""} onChange={(event) => updatePort(port.id, { bandwidth: event.target.value ? boundedNumber(event.target.value, 1, 10000000) : undefined })} placeholder="100000" type="number" /></label>
           {port.kind === "serial" && <label>클럭 레이트<input value={port.clockRate ?? ""} onChange={(event) => updatePort(port.id, { clockRate: event.target.value ? boundedNumber(event.target.value, 1200, 8000000) : undefined })} placeholder="64000" type="number" /></label>}
+          {selectedPortSupportsFhrp && (
+            <div className="config-subsection" id={`${device.id}-config-fhrp`}>
+              <header><strong>HSRP</strong><small>{(port.hsrpGroups ?? []).length}</small></header>
+              <div className="inline-grid fhrp-grid">
+                <input value={hsrpDraft.group} onChange={(event) => setHsrpDraft({ ...hsrpDraft, group: event.target.value })} placeholder="group" type="number" />
+                <input value={hsrpDraft.virtualIp} onChange={(event) => setHsrpDraft({ ...hsrpDraft, virtualIp: event.target.value })} placeholder="virtual IP" />
+                <input value={hsrpDraft.priority} onChange={(event) => setHsrpDraft({ ...hsrpDraft, priority: event.target.value })} placeholder="priority" type="number" />
+                <select value={hsrpDraft.version} onChange={(event) => setHsrpDraft({ ...hsrpDraft, version: event.target.value as HsrpRow["version"] })}><option value="1">v1</option><option value="2">v2</option></select>
+                <select value={hsrpDraft.trackObject} onChange={(event) => setHsrpDraft({ ...hsrpDraft, trackObject: event.target.value })}>
+                  <option value="">track 없음</option>
+                  {trackObjects.map((track) => <option key={track.id} value={track.trackId}>Track {track.trackId}</option>)}
+                </select>
+                <label className="toggle"><input checked={hsrpDraft.preempt} onChange={(event) => setHsrpDraft({ ...hsrpDraft, preempt: event.target.checked })} type="checkbox" />preempt</label>
+                <button className="secondary-action" onClick={addHsrpGroup} type="button">HSRP 추가</button>
+              </div>
+              {(port.hsrpGroups ?? []).map((group) => (
+                <div className="editable-route-row fhrp-row" key={`hsrp-${group.group}`}>
+                  <strong>Group {group.group}</strong>
+                  <label>Virtual IP<input value={group.virtualIp} onChange={(event) => updateHsrpGroup(group.group, { virtualIp: event.target.value.trim() })} /></label>
+                  <label>Priority<input value={group.priority} onChange={(event) => updateHsrpGroup(group.group, { priority: boundedNumber(event.target.value, 0, 255) })} type="number" /></label>
+                  <label>Version<select value={group.version} onChange={(event) => updateHsrpGroup(group.group, { version: event.target.value as HsrpRow["version"] })}><option value="1">v1</option><option value="2">v2</option></select></label>
+                  <label>Track Object<select value={group.trackObject ?? ""} onChange={(event) => updateHsrpGroup(group.group, { trackObject: event.target.value ? boundedNumber(event.target.value, 1, 1000) : undefined, trackInterface: event.target.value ? undefined : group.trackInterface, trackDecrement: event.target.value ? group.trackDecrement ?? 10 : undefined })}>
+                    <option value="">없음</option>
+                    {trackObjects.map((track) => <option key={track.id} value={track.trackId}>Track {track.trackId}</option>)}
+                  </select></label>
+                  <label>Track Interface<select value={group.trackInterface ?? ""} onChange={(event) => updateHsrpGroup(group.group, { trackInterface: event.target.value || undefined, trackObject: event.target.value ? undefined : group.trackObject, trackDecrement: event.target.value ? group.trackDecrement ?? 10 : group.trackDecrement })}>
+                    <option value="">없음</option>
+                    {interfaceNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                  </select></label>
+                  <label>Decrement<input value={group.trackDecrement ?? ""} onChange={(event) => updateHsrpGroup(group.group, { trackDecrement: event.target.value ? boundedNumber(event.target.value, 1, 255) : undefined })} type="number" /></label>
+                  <label className="toggle"><input checked={group.preempt} onChange={(event) => updateHsrpGroup(group.group, { preempt: event.target.checked })} type="checkbox" />preempt</label>
+                  <button className="secondary-action" onClick={() => updatePort(port.id, { hsrpGroups: (port.hsrpGroups ?? []).filter((item) => item.group !== group.group) })} type="button">삭제</button>
+                </div>
+              ))}
+              <header><strong>VRRP</strong><small>{(port.vrrpGroups ?? []).length}</small></header>
+              <div className="inline-grid fhrp-grid">
+                <input value={vrrpDraft.group} onChange={(event) => setVrrpDraft({ ...vrrpDraft, group: event.target.value })} placeholder="group" type="number" />
+                <input value={vrrpDraft.virtualIp} onChange={(event) => setVrrpDraft({ ...vrrpDraft, virtualIp: event.target.value })} placeholder="virtual IP" />
+                <input value={vrrpDraft.priority} onChange={(event) => setVrrpDraft({ ...vrrpDraft, priority: event.target.value })} placeholder="priority" type="number" />
+                <select value={vrrpDraft.version} onChange={(event) => setVrrpDraft({ ...vrrpDraft, version: event.target.value as VrrpRow["version"] })}><option value="2">v2</option><option value="3">v3</option></select>
+                <select value={vrrpDraft.trackObject} onChange={(event) => setVrrpDraft({ ...vrrpDraft, trackObject: event.target.value })}>
+                  <option value="">track 없음</option>
+                  {trackObjects.map((track) => <option key={track.id} value={track.trackId}>Track {track.trackId}</option>)}
+                </select>
+                <label className="toggle"><input checked={vrrpDraft.preempt} onChange={(event) => setVrrpDraft({ ...vrrpDraft, preempt: event.target.checked })} type="checkbox" />preempt</label>
+                <button className="secondary-action" onClick={addVrrpGroup} type="button">VRRP 추가</button>
+              </div>
+              {(port.vrrpGroups ?? []).map((group) => (
+                <div className="editable-route-row fhrp-row" key={`vrrp-${group.group}`}>
+                  <strong>Group {group.group}</strong>
+                  <label>Virtual IP<input value={group.virtualIp} onChange={(event) => updateVrrpGroup(group.group, { virtualIp: event.target.value.trim() })} /></label>
+                  <label>Priority<input value={group.priority} onChange={(event) => updateVrrpGroup(group.group, { priority: boundedNumber(event.target.value, 1, 254) })} type="number" /></label>
+                  <label>Version<select value={group.version} onChange={(event) => updateVrrpGroup(group.group, { version: event.target.value as VrrpRow["version"] })}><option value="2">v2</option><option value="3">v3</option></select></label>
+                  <label>Advertise<input value={group.advertiseInterval} onChange={(event) => updateVrrpGroup(group.group, { advertiseInterval: boundedNumber(event.target.value, 1, 255) })} type="number" /></label>
+                  <label>Track Object<select value={group.trackObject ?? ""} onChange={(event) => updateVrrpGroup(group.group, { trackObject: event.target.value ? boundedNumber(event.target.value, 1, 1000) : undefined, trackDecrement: event.target.value ? group.trackDecrement ?? 10 : undefined })}>
+                    <option value="">없음</option>
+                    {trackObjects.map((track) => <option key={track.id} value={track.trackId}>Track {track.trackId}</option>)}
+                  </select></label>
+                  <label>Decrement<input value={group.trackDecrement ?? ""} onChange={(event) => updateVrrpGroup(group.group, { trackDecrement: event.target.value ? boundedNumber(event.target.value, 1, 255) : undefined })} type="number" /></label>
+                  <label className="toggle"><input checked={group.preempt} onChange={(event) => updateVrrpGroup(group.group, { preempt: event.target.checked })} type="checkbox" />preempt</label>
+                  <button className="secondary-action" onClick={() => updatePort(port.id, { vrrpGroups: (port.vrrpGroups ?? []).filter((item) => item.group !== group.group) })} type="button">삭제</button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {(device.kind === "pc" || device.kind === "server") && <button className="secondary-action" onClick={onDhcp} type="button">DHCP 갱신</button>}
       {(device.kind === "router" || device.kind === "switch" || device.kind === "firewall") && (
         <div className="config-group" id={`${device.id}-config-routes`}>
           <header><strong>정적 라우트</strong><small>{device.config.staticRoutes.length}</small></header>
-          <div className="inline-grid">
+          <div className="inline-grid route-grid">
             <input value={routeDraft.network} onChange={(event) => setRouteDraft({ ...routeDraft, network: event.target.value })} placeholder="네트워크" />
             <input value={routeDraft.mask} onChange={(event) => setRouteDraft({ ...routeDraft, mask: event.target.value })} placeholder="마스크" />
             <input value={routeDraft.nextHop} onChange={(event) => setRouteDraft({ ...routeDraft, nextHop: event.target.value })} placeholder="다음 홉" />
+            <input value={routeDraft.distance} onChange={(event) => setRouteDraft({ ...routeDraft, distance: event.target.value })} placeholder="distance" type="number" />
+            <select value={routeDraft.trackId} onChange={(event) => setRouteDraft({ ...routeDraft, trackId: event.target.value })}>
+              <option value="">track 없음</option>
+              {trackObjects.map((track) => <option key={track.id} value={track.trackId}>Track {track.trackId}</option>)}
+            </select>
             <button className="secondary-action" onClick={addRoute} type="button">추가</button>
           </div>
           {device.config.staticRoutes.map((route) => (
-            <div className="editable-route-row" key={route.id}>
+            <div className="editable-route-row route-grid-row" key={route.id}>
               <label>네트워크<input value={route.network} onChange={(event) => updateRoute(route.id, { network: event.target.value.trim() })} /></label>
               <label>마스크<input value={route.mask} onChange={(event) => updateRoute(route.id, { mask: event.target.value.trim() })} /></label>
               <label>다음 홉<input value={route.nextHop} onChange={(event) => updateRoute(route.id, { nextHop: event.target.value.trim() })} /></label>
+              <label>Distance<input value={route.distance ?? ""} onChange={(event) => updateRoute(route.id, { distance: event.target.value ? boundedNumber(event.target.value, 1, 255) : undefined })} type="number" /></label>
+              <label>Track<select value={route.trackId ?? ""} onChange={(event) => updateRoute(route.id, { trackId: event.target.value ? boundedNumber(event.target.value, 1, 1000) : undefined })}>
+                <option value="">없음</option>
+                {trackObjects.map((track) => <option key={track.id} value={track.trackId}>Track {track.trackId}</option>)}
+              </select></label>
               <button className="secondary-action" onClick={() => onUpdate({ ...device, config: { ...device.config, staticRoutes: device.config.staticRoutes.filter((item) => item.id !== route.id) } })} type="button">삭제</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {(device.kind === "router" || device.kind === "switch" || device.kind === "firewall") && (
+        <div className="config-group" id={`${device.id}-config-routing-protocols`}>
+          <header><strong>동적 라우팅</strong><small>{routingProtocols.length}</small></header>
+          <div className="inline-grid routing-grid">
+            <select value={routingDraft.protocol} onChange={(event) => setRoutingDraft({ ...routingDraft, protocol: event.target.value as RoutingProtocolRow["protocol"] })}><option value="rip">RIP</option><option value="ospf">OSPF</option><option value="eigrp">EIGRP</option></select>
+            <input disabled={routingDraft.protocol === "rip"} value={routingDraft.protocol === "rip" ? "" : routingDraft.processId} onChange={(event) => setRoutingDraft({ ...routingDraft, processId: event.target.value })} placeholder="process" />
+            <input value={routingDraft.network} onChange={(event) => setRoutingDraft({ ...routingDraft, network: event.target.value })} placeholder="network statement" />
+            <select disabled={routingDraft.protocol !== "rip"} value={routingDraft.version} onChange={(event) => setRoutingDraft({ ...routingDraft, version: event.target.value })}><option value="1">RIPv1</option><option value="2">RIPv2</option></select>
+            <input value={routingDraft.routerId} onChange={(event) => setRoutingDraft({ ...routingDraft, routerId: event.target.value })} placeholder="router-id" />
+            <button className="secondary-action" onClick={addRoutingProtocol} type="button">프로토콜 추가</button>
+          </div>
+          {routingProtocols.map((protocol) => (
+            <div className="editable-route-row routing-row" key={protocol.id}>
+              <strong>{protocol.protocol.toUpperCase()} {protocol.processId ?? ""}</strong>
+              <label>Networks<input value={protocol.networks.join(",")} onChange={(event) => updateRoutingProtocol(protocol.id, { networks: parseCommaListDraft(event.target.value) })} /></label>
+              {protocol.protocol === "rip" ? (
+                <label>Version<select value={protocol.version ?? "2"} onChange={(event) => updateRoutingProtocol(protocol.id, { version: event.target.value })}><option value="1">RIPv1</option><option value="2">RIPv2</option></select></label>
+              ) : (
+                <label>Router ID<input value={protocol.routerId ?? ""} onChange={(event) => updateRoutingProtocol(protocol.id, { routerId: event.target.value.trim() || undefined })} /></label>
+              )}
+              <label>Passive<input value={protocol.passiveInterfaces.join(",")} onChange={(event) => updateRoutingProtocol(protocol.id, { passiveInterfaces: parseCommaListDraft(event.target.value) })} /></label>
+              <label>Exceptions<input value={(protocol.passiveInterfaceExceptions ?? []).join(",")} onChange={(event) => updateRoutingProtocol(protocol.id, { passiveInterfaceExceptions: parseCommaListDraft(event.target.value) })} /></label>
+              <label className="toggle"><input checked={protocol.passiveInterfaceDefault === true} onChange={(event) => updateRoutingProtocol(protocol.id, { passiveInterfaceDefault: event.target.checked, passiveInterfaceExceptions: event.target.checked ? protocol.passiveInterfaceExceptions ?? [] : [] })} type="checkbox" />passive default</label>
+              <label className="toggle"><input checked={protocol.autoSummary} onChange={(event) => updateRoutingProtocol(protocol.id, { autoSummary: event.target.checked })} type="checkbox" />auto summary</label>
+              <label className="toggle"><input checked={protocol.redistributeStatic} onChange={(event) => updateRoutingProtocol(protocol.id, { redistributeStatic: event.target.checked })} type="checkbox" />redistribute static</label>
+              <label className="toggle"><input checked={protocol.defaultInformationOriginate === true} onChange={(event) => updateRoutingProtocol(protocol.id, { defaultInformationOriginate: event.target.checked, defaultInformationAlways: event.target.checked ? protocol.defaultInformationAlways : false })} type="checkbox" />default originate</label>
+              <label className="toggle"><input checked={protocol.defaultInformationAlways === true} disabled={!protocol.defaultInformationOriginate} onChange={(event) => updateRoutingProtocol(protocol.id, { defaultInformationAlways: event.target.checked })} type="checkbox" />always</label>
+              <button className="secondary-action" onClick={() => removeRoutingProtocol(protocol.id)} type="button">삭제</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {(device.kind === "router" || device.kind === "switch" || device.kind === "firewall") && (
+        <div className="config-group" id={`${device.id}-config-pbr`}>
+          <header><strong>Prefix-list</strong><small>{prefixLists.length}</small></header>
+          <div className="inline-grid pbr-grid">
+            <input value={prefixDraft.name} onChange={(event) => setPrefixDraft({ ...prefixDraft, name: event.target.value })} placeholder="name" />
+            <input value={prefixDraft.sequence} onChange={(event) => setPrefixDraft({ ...prefixDraft, sequence: event.target.value })} placeholder="seq" type="number" />
+            <select value={prefixDraft.action} onChange={(event) => setPrefixDraft({ ...prefixDraft, action: event.target.value as PrefixListRow["action"] })}><option value="permit">permit</option><option value="deny">deny</option></select>
+            <input value={prefixDraft.prefix} onChange={(event) => setPrefixDraft({ ...prefixDraft, prefix: event.target.value })} placeholder="10.0.0.0/8" />
+            <input value={prefixDraft.ge} onChange={(event) => setPrefixDraft({ ...prefixDraft, ge: event.target.value })} placeholder="ge" type="number" />
+            <input value={prefixDraft.le} onChange={(event) => setPrefixDraft({ ...prefixDraft, le: event.target.value })} placeholder="le" type="number" />
+            <button className="secondary-action" onClick={addPrefixListEntry} type="button">Prefix 추가</button>
+          </div>
+          {prefixLists.map((entry) => (
+            <div className="editable-route-row prefix-row" key={entry.id}>
+              <strong>{entry.name} seq {entry.sequence}</strong>
+              <label>Action<select value={entry.action} onChange={(event) => updatePrefixListEntry(entry.id, { action: event.target.value as PrefixListRow["action"] })}><option value="permit">permit</option><option value="deny">deny</option></select></label>
+              <label>Prefix<input value={entry.prefix} onChange={(event) => updatePrefixListEntry(entry.id, { prefix: event.target.value.trim() })} /></label>
+              <label>GE<input value={entry.ge ?? ""} onChange={(event) => updatePrefixListEntry(entry.id, { ge: event.target.value ? boundedNumber(event.target.value, 0, 32) : undefined })} type="number" /></label>
+              <label>LE<input value={entry.le ?? ""} onChange={(event) => updatePrefixListEntry(entry.id, { le: event.target.value ? boundedNumber(event.target.value, 0, 32) : undefined })} type="number" /></label>
+              <small>{entry.hits}회 적중</small>
+              <button className="secondary-action" onClick={() => removePrefixListEntry(entry.id)} type="button">삭제</button>
+            </div>
+          ))}
+          <header><strong>Route-map</strong><small>{routeMaps.length}</small></header>
+          <div className="inline-grid route-map-grid">
+            <input value={routeMapDraft.name} onChange={(event) => setRouteMapDraft({ ...routeMapDraft, name: event.target.value })} placeholder="name" />
+            <input value={routeMapDraft.sequence} onChange={(event) => setRouteMapDraft({ ...routeMapDraft, sequence: event.target.value })} placeholder="seq" type="number" />
+            <select value={routeMapDraft.action} onChange={(event) => setRouteMapDraft({ ...routeMapDraft, action: event.target.value as RouteMapRow["action"] })}><option value="permit">permit</option><option value="deny">deny</option></select>
+            <input value={routeMapDraft.matchAccessLists} onChange={(event) => setRouteMapDraft({ ...routeMapDraft, matchAccessLists: event.target.value })} placeholder="match ACL" />
+            <input value={routeMapDraft.matchPrefixLists} onChange={(event) => setRouteMapDraft({ ...routeMapDraft, matchPrefixLists: event.target.value })} placeholder="match prefix-list" />
+            <input value={routeMapDraft.setNextHop} onChange={(event) => setRouteMapDraft({ ...routeMapDraft, setNextHop: event.target.value })} placeholder="set next-hop" />
+            <button className="secondary-action" onClick={addRouteMapEntry} type="button">Route-map 추가</button>
+          </div>
+          <datalist id={`${device.id}-access-list-names`}>
+            {accessListNames.map((name) => <option key={name} value={name} />)}
+          </datalist>
+          <datalist id={`${device.id}-prefix-list-names`}>
+            {prefixListNames.map((name) => <option key={name} value={name} />)}
+          </datalist>
+          {routeMaps.map((entry) => (
+            <div className="editable-route-row route-map-row" key={entry.id}>
+              <strong>{entry.name} seq {entry.sequence}</strong>
+              <label>Action<select value={entry.action} onChange={(event) => updateRouteMapEntry(entry.id, { action: event.target.value as RouteMapRow["action"] })}><option value="permit">permit</option><option value="deny">deny</option></select></label>
+              <label>Description<input value={entry.description ?? ""} onChange={(event) => updateRouteMapEntry(entry.id, { description: event.target.value.trim().slice(0, 100) || undefined })} /></label>
+              <label>Match ACL<input list={`${device.id}-access-list-names`} value={entry.matchAccessLists.join(",")} onChange={(event) => updateRouteMapEntry(entry.id, { matchAccessLists: parseNameListDraft(event.target.value) })} /></label>
+              <label>Match Prefix<input list={`${device.id}-prefix-list-names`} value={(entry.matchPrefixLists ?? []).join(",")} onChange={(event) => updateRouteMapEntry(entry.id, { matchPrefixLists: parseNameListDraft(event.target.value) })} /></label>
+              <label>Next-hop<input value={entry.setNextHop ?? ""} onChange={(event) => updateRouteMapEntry(entry.id, { setNextHop: event.target.value.trim() || undefined })} /></label>
+              <small>{entry.hits}회 적중</small>
+              <button className="secondary-action" onClick={() => removeRouteMapEntry(entry.id)} type="button">삭제</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {(device.kind === "router" || device.kind === "switch" || device.kind === "firewall") && (
+        <div className="config-group" id={`${device.id}-config-sla-track`}>
+          <header><strong>IP SLA</strong><small>{ipSlaOperations.length}</small></header>
+          <div className="inline-grid sla-grid">
+            <input value={slaDraft.operationId} onChange={(event) => setSlaDraft({ ...slaDraft, operationId: event.target.value })} placeholder="operation" type="number" />
+            <input value={slaDraft.targetIp} onChange={(event) => setSlaDraft({ ...slaDraft, targetIp: event.target.value })} placeholder="target IP" />
+            <select value={slaDraft.sourceInterface} onChange={(event) => setSlaDraft({ ...slaDraft, sourceInterface: event.target.value })}>
+              <option value="">source 없음</option>
+              {interfaceNames.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+            <input value={slaDraft.frequency} onChange={(event) => setSlaDraft({ ...slaDraft, frequency: event.target.value })} placeholder="frequency" type="number" />
+            <input value={slaDraft.timeout} onChange={(event) => setSlaDraft({ ...slaDraft, timeout: event.target.value })} placeholder="timeout" type="number" />
+            <input value={slaDraft.threshold} onChange={(event) => setSlaDraft({ ...slaDraft, threshold: event.target.value })} placeholder="threshold" type="number" />
+            <button className="secondary-action" onClick={addIpSlaOperation} type="button">SLA 추가</button>
+          </div>
+          {ipSlaOperations.map((operation) => (
+            <div className="editable-route-row sla-row" key={operation.id}>
+              <strong>SLA {operation.operationId}</strong>
+              <label>Target<input value={operation.targetIp} onChange={(event) => updateIpSlaOperation(operation.id, { targetIp: event.target.value.trim() })} /></label>
+              <label>Source<select value={operation.sourceInterface ?? ""} onChange={(event) => updateIpSlaOperation(operation.id, { sourceInterface: event.target.value || undefined })}>
+                <option value="">없음</option>
+                {interfaceNames.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select></label>
+              <label>Frequency<input value={operation.frequency} onChange={(event) => updateIpSlaOperation(operation.id, { frequency: boundedNumber(event.target.value, 1, 604800) })} type="number" /></label>
+              <label>Timeout<input value={operation.timeout} onChange={(event) => updateIpSlaOperation(operation.id, { timeout: boundedNumber(event.target.value, 1, 60000) })} type="number" /></label>
+              <label>Threshold<input value={operation.threshold} onChange={(event) => updateIpSlaOperation(operation.id, { threshold: boundedNumber(event.target.value, 1, 60000) })} type="number" /></label>
+              <label className="toggle"><input checked={operation.enabled} onChange={(event) => updateIpSlaOperation(operation.id, { enabled: event.target.checked })} type="checkbox" />scheduled</label>
+              <button className="secondary-action" onClick={() => removeIpSlaOperation(operation.operationId)} type="button">삭제</button>
+            </div>
+          ))}
+          <header><strong>Track Object</strong><small>{trackObjects.length}</small></header>
+          <div className="inline-grid track-grid">
+            <input value={trackDraft.trackId} onChange={(event) => setTrackDraft({ ...trackDraft, trackId: event.target.value })} placeholder="track" type="number" />
+            <select value={trackDraft.type} onChange={(event) => setTrackDraft({ ...trackDraft, type: event.target.value as TrackRow["type"] })}><option value="ip-sla">ip sla</option><option value="interface">interface</option></select>
+            {trackDraft.type === "ip-sla" ? (
+              <select value={trackDraft.ipSlaOperationId} onChange={(event) => setTrackDraft({ ...trackDraft, ipSlaOperationId: event.target.value })}>
+                {ipSlaOperations.map((operation) => <option key={operation.id} value={operation.operationId}>SLA {operation.operationId}</option>)}
+              </select>
+            ) : (
+              <select value={trackDraft.interfaceName} onChange={(event) => setTrackDraft({ ...trackDraft, interfaceName: event.target.value })}>
+                {interfaceNames.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+            )}
+            <button className="secondary-action" onClick={addTrackObject} type="button">Track 추가</button>
+          </div>
+          {trackObjects.map((track) => (
+            <div className="editable-route-row track-row" key={track.id}>
+              <strong>Track {track.trackId}</strong>
+              <label>Type<select value={track.type} onChange={(event) => {
+                const type = event.target.value as TrackRow["type"];
+                updateTrackObject(track.id, type === "interface"
+                  ? { type, mode: "line-protocol", interfaceName: track.interfaceName || port?.name || interfaceNames[0] || "", ipSlaOperationId: undefined }
+                  : { type, mode: "reachability", ipSlaOperationId: track.ipSlaOperationId ?? ipSlaOperations[0]?.operationId ?? 1, interfaceName: undefined });
+              }}><option value="ip-sla">ip sla</option><option value="interface">interface</option></select></label>
+              {track.type === "ip-sla" ? (
+                <label>Operation<select value={track.ipSlaOperationId ?? ""} onChange={(event) => updateTrackObject(track.id, { ipSlaOperationId: boundedNumber(event.target.value, 1, 2147483647), mode: "reachability" })}>
+                  {ipSlaOperations.map((operation) => <option key={operation.id} value={operation.operationId}>SLA {operation.operationId}</option>)}
+                </select></label>
+              ) : (
+                <label>Interface<select value={track.interfaceName ?? ""} onChange={(event) => updateTrackObject(track.id, { interfaceName: event.target.value, mode: "line-protocol" })}>
+                  {interfaceNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select></label>
+              )}
+              <small>{track.type === "ip-sla" ? "reachability" : "line-protocol"}</small>
+              <button className="secondary-action" onClick={() => removeTrackObject(track.trackId)} type="button">삭제</button>
             </div>
           ))}
         </div>
@@ -5383,6 +6431,50 @@ function ConfigTab({ device, onUpdate, onDhcp }: { device: NetworkDevice; onUpda
               {vlan.id !== 1 && <button className="secondary-action" onClick={() => onUpdate({ ...device, config: { ...device.config, vlans: device.config.vlans.filter((item) => item.id !== vlan.id) }, ports: device.ports.map((item) => item.vlan === vlan.id ? { ...item, vlan: 1, allowedVlans: item.allowedVlans.filter((allowed) => allowed !== vlan.id) } : item) })} type="button">삭제</button>}
             </div>
           ))}
+        </div>
+      )}
+      {(device.kind === "switch" || device.kind === "router" || device.kind === "firewall") && (
+        <div className="config-group" id={`${device.id}-config-switching`}>
+          <header><strong>스위칭 제어</strong><small>{device.config.stpMode ?? "pvst"}</small></header>
+          <div className="config-subsection">
+            <header><strong>CDP / LLDP</strong><small>{cdpConfig.enabled ? "CDP on" : "CDP off"} / {lldpConfig.enabled ? "LLDP on" : "LLDP off"}</small></header>
+            <div className="inline-grid switching-grid">
+              <label className="toggle"><input checked={cdpConfig.enabled} onChange={(event) => updateConfig({ cdp: { ...cdpConfig, enabled: event.target.checked } })} type="checkbox" />CDP run</label>
+              <select value={cdpConfig.version} onChange={(event) => updateConfig({ cdp: { ...cdpConfig, version: event.target.value as NonNullable<NetworkDevice["config"]["cdp"]>["version"] } })}><option value="1">CDPv1</option><option value="2">CDPv2</option></select>
+              <input value={cdpConfig.timer} onChange={(event) => updateConfig({ cdp: { ...cdpConfig, timer: boundedNumber(event.target.value, 5, 254) } })} placeholder="cdp timer" type="number" />
+              <input value={cdpConfig.holdtime} onChange={(event) => updateConfig({ cdp: { ...cdpConfig, holdtime: boundedNumber(event.target.value, 10, 255) } })} placeholder="cdp hold" type="number" />
+              <label className="toggle"><input checked={lldpConfig.enabled} onChange={(event) => updateConfig({ lldp: { ...lldpConfig, enabled: event.target.checked } })} type="checkbox" />LLDP run</label>
+              <input value={lldpConfig.timer} onChange={(event) => updateConfig({ lldp: { ...lldpConfig, timer: boundedNumber(event.target.value, 5, 65534) } })} placeholder="lldp timer" type="number" />
+              <input value={lldpConfig.holdtime} onChange={(event) => updateConfig({ lldp: { ...lldpConfig, holdtime: boundedNumber(event.target.value, 10, 65535) } })} placeholder="lldp hold" type="number" />
+              <input value={lldpConfig.reinitDelay} onChange={(event) => updateConfig({ lldp: { ...lldpConfig, reinitDelay: boundedNumber(event.target.value, 1, 10) } })} placeholder="reinit" type="number" />
+            </div>
+          </div>
+          <div className="config-subsection">
+            <header><strong>DHCP Snooping</strong><small>{dhcpSnoopingConfig.vlans.join(",") || "-"}</small></header>
+            <div className="inline-grid switching-grid">
+              <label className="toggle"><input checked={dhcpSnoopingConfig.enabled} onChange={(event) => updateConfig({ dhcpSnooping: { ...dhcpSnoopingConfig, enabled: event.target.checked } })} type="checkbox" />snooping</label>
+              <input value={dhcpSnoopingConfig.vlans.join(",")} onChange={(event) => updateConfig({ dhcpSnooping: { ...dhcpSnoopingConfig, vlans: parseVlanList(event.target.value) } })} placeholder="vlans" />
+              <label className="toggle"><input checked={dhcpSnoopingConfig.verifyMacAddress} onChange={(event) => updateConfig({ dhcpSnooping: { ...dhcpSnoopingConfig, verifyMacAddress: event.target.checked } })} type="checkbox" />verify MAC</label>
+              <button className="secondary-action" onClick={() => updateConfig({ dhcpSnooping: { ...dhcpSnoopingConfig, vlans: [] } })} type="button">VLAN 비우기</button>
+            </div>
+          </div>
+          {device.kind === "switch" && (
+            <div className="config-subsection">
+              <header><strong>VTP / STP</strong><small>{vtpConfig.mode}</small></header>
+              <div className="inline-grid switching-grid">
+                <input value={vtpConfig.domain} onChange={(event) => updateConfig({ vtp: { ...vtpConfig, domain: event.target.value.replace(/[^a-zA-Z0-9_.-]/g, "").slice(0, 32) } })} placeholder="vtp domain" />
+                <select value={vtpConfig.mode} onChange={(event) => updateConfig({ vtp: { ...vtpConfig, mode: event.target.value as NonNullable<NetworkDevice["config"]["vtp"]>["mode"] } })}><option value="server">server</option><option value="client">client</option><option value="transparent">transparent</option><option value="off">off</option></select>
+                <select value={vtpConfig.version} onChange={(event) => updateConfig({ vtp: { ...vtpConfig, version: event.target.value as NonNullable<NetworkDevice["config"]["vtp"]>["version"] } })}><option value="1">v1</option><option value="2">v2</option><option value="3">v3</option></select>
+                <label className="toggle"><input checked={vtpConfig.pruning} onChange={(event) => updateConfig({ vtp: { ...vtpConfig, pruning: event.target.checked } })} type="checkbox" />pruning</label>
+                <input value={vtpConfig.password ?? ""} onChange={(event) => updateConfig({ vtp: { ...vtpConfig, password: event.target.value.trim().slice(0, 64) || undefined } })} placeholder="vtp password" />
+                <select value={device.config.stpMode ?? "pvst"} onChange={(event) => updateConfig({ stpMode: event.target.value as NonNullable<NetworkDevice["config"]["stpMode"]> })}><option value="pvst">pvst</option><option value="rapid-pvst">rapid-pvst</option></select>
+                <input value={device.config.stpRootPrimaryVlans.join(",")} onChange={(event) => updateConfig({ stpRootPrimaryVlans: parseVlanList(event.target.value) })} placeholder="root primary" />
+                <input value={device.config.stpRootSecondaryVlans.join(",")} onChange={(event) => updateConfig({ stpRootSecondaryVlans: parseVlanList(event.target.value) })} placeholder="root secondary" />
+                <label className="toggle"><input checked={errdisableRecovery.bpduguard} onChange={(event) => updateConfig({ errdisableRecovery: { ...errdisableRecovery, bpduguard: event.target.checked } })} type="checkbox" />bpduguard recovery</label>
+                <input value={errdisableRecovery.interval} onChange={(event) => updateConfig({ errdisableRecovery: { ...errdisableRecovery, interval: boundedNumber(event.target.value, 30, 86400) } })} placeholder="recovery sec" type="number" />
+              </div>
+            </div>
+          )}
         </div>
       )}
       {(device.kind === "wireless" || device.ports.some((item) => item.kind === "wireless")) && (
@@ -5630,6 +6722,11 @@ function CliTab({ device, project, onUpdate, onProjectChange }: { device: Networ
       setInput("");
       return;
     }
+    if (device.powerOn && isLldpNeighborsCommand(normalizedInput)) {
+      setLines((items) => [...items, `${prompt} ${submittedInput}`, showLldpNeighbors(project, device, isLldpDetailCommand(normalizedInput))].filter(Boolean));
+      setInput("");
+      return;
+    }
     const result = await cliEngine.run(device, session, commandText);
     setSession(result.session);
     onUpdate(result.device);
@@ -5768,29 +6865,68 @@ async function runCliPacketCommand(project: NetworkProject, device: NetworkDevic
 }
 
 function showCdpNeighbors(project: NetworkProject, device: NetworkDevice, detail = false): string {
+  if (device.config.cdp?.enabled === false) return "% CDP is not enabled";
   const rows = project.links
     .filter((link) => link.status === "up" && (link.endpointA.deviceId === device.id || link.endpointB.deviceId === device.id))
-    .map((link) => {
+    .flatMap((link) => {
       const localRef = link.endpointA.deviceId === device.id ? link.endpointA : link.endpointB;
       const peerRef = link.endpointA.deviceId === device.id ? link.endpointB : link.endpointA;
-      const localPort = endpointLabel(project, localRef.deviceId, localRef.portId);
+      const localEndpoint = endpoint(project, localRef);
+      const peerEndpoint = endpoint(project, peerRef);
+      if (!localEndpoint || !peerEndpoint) return [];
+      if (localEndpoint.port.cdpEnabled === false || peerEndpoint.port.cdpEnabled === false || peerEndpoint.device.config.cdp?.enabled === false) return [];
+      const localPort = localEndpoint.port.name;
       const peer = project.devices.find((item) => item.id === peerRef.deviceId);
-      const peerPort = endpointLabel(project, peerRef.deviceId, peerRef.portId);
+      const peerPort = peerEndpoint.port.name;
       if (detail) {
-        return [
+        return [[
           "-------------------------",
           `Device ID: ${peer?.label ?? peerRef.deviceId}`,
           `Entry address(es): ${primaryDeviceIp(peer) || "unassigned"}`,
           `Platform: ${peer?.model ?? "unknown"}, Capabilities: ${peer?.kind ?? "device"}`,
           `Interface: ${localPort}, Port ID (outgoing port): ${peerPort}`,
-          "Holdtime: 120 sec",
+          `Holdtime: ${device.config.cdp?.holdtime ?? 180} sec`,
           `Version: ${peer?.model ?? "Network Editor Web"}`
-        ].join("\n");
+        ].join("\n")];
       }
-      return `${(peer?.label ?? peerRef.deviceId).padEnd(18)}${localPort.padEnd(22)}${(peer?.model ?? "").padEnd(22)}${peerPort}`;
+      return [`${(peer?.label ?? peerRef.deviceId).padEnd(18)}${localPort.padEnd(22)}${(peer?.model ?? "").padEnd(22)}${peerPort}`];
     });
   if (!rows.length) return "CDP 이웃이 없습니다.";
   return detail ? rows.join("\n\n") : ["장비 ID           로컬 인터페이스        플랫폼                포트 ID", ...rows].join("\n");
+}
+
+function showLldpNeighbors(project: NetworkProject, device: NetworkDevice, detail = false): string {
+  if (!device.config.lldp?.enabled) return "% LLDP is not enabled";
+  const rows = project.links
+    .filter((link) => link.status === "up" && (link.endpointA.deviceId === device.id || link.endpointB.deviceId === device.id))
+    .flatMap((link) => {
+      const localRef = link.endpointA.deviceId === device.id ? link.endpointA : link.endpointB;
+      const peerRef = link.endpointA.deviceId === device.id ? link.endpointB : link.endpointA;
+      const localEndpoint = endpoint(project, localRef);
+      const peerEndpoint = endpoint(project, peerRef);
+      if (!localEndpoint || !peerEndpoint) return [];
+      if (!localEndpoint.port.lldpReceive || !peerEndpoint.port.lldpTransmit || !peerEndpoint.device.config.lldp?.enabled) return [];
+      const localPort = localEndpoint.port.name;
+      const peer = peerEndpoint.device;
+      const peerPort = peerEndpoint.port.name;
+      if (detail) {
+        return [[
+          "------------------------------------------------",
+          `Chassis id: ${peer.ports.find((port) => port.kind !== "console")?.macAddress ?? peer.id}`,
+          `Port id: ${peerPort}`,
+          `Port Description: ${peerPort}`,
+          `System Name: ${peer.label}`,
+          `System Description: ${peer.model}`,
+          `Time remaining: ${device.config.lldp?.holdtime ?? 120} seconds`,
+          `System Capabilities: ${peer.kind}`,
+          `Management Address: ${primaryDeviceIp(peer) || "not advertised"}`,
+          `Local Interface: ${localPort}`
+        ].join("\n")];
+      }
+      return [`${peer.label.padEnd(18)}${localPort.padEnd(18)}${String(device.config.lldp?.holdtime ?? 120).padEnd(11)}${peer.kind.padEnd(12)}${peerPort}`];
+    });
+  if (!rows.length) return "LLDP 이웃이 없습니다.";
+  return detail ? rows.join("\n\n") : ["Device ID         Local Intf        Hold-time  Capability  Port ID", ...rows].join("\n");
 }
 
 function isCdpNeighborsCommand(value: string): boolean {
@@ -5802,12 +6938,17 @@ function isCdpDetailCommand(value: string): boolean {
   return value.split(/\s+/)[3]?.startsWith("det") ?? false;
 }
 
-function primaryDeviceIp(device: NetworkDevice | undefined): string {
-  return device?.ports.find((port) => port.ipAddress)?.ipAddress ?? "";
+function isLldpNeighborsCommand(value: string): boolean {
+  const [verb, feature, target] = value.split(/\s+/);
+  return Boolean((verb === "show" || verb === "sho" || verb === "sh") && feature === "lldp" && target && "neighbors".startsWith(target));
 }
 
-function endpointLabel(project: NetworkProject, deviceId: string, portId: string): string {
-  return project.devices.find((device) => device.id === deviceId)?.ports.find((port) => port.id === portId)?.name ?? portId;
+function isLldpDetailCommand(value: string): boolean {
+  return value.split(/\s+/)[3]?.startsWith("det") ?? false;
+}
+
+function primaryDeviceIp(device: NetworkDevice | undefined): string {
+  return device?.ports.find((port) => port.ipAddress)?.ipAddress ?? "";
 }
 
 function remoteAccessState(device: NetworkDevice, protocol: "ssh" | "telnet"): { enabled: boolean; reason: string } {
@@ -5927,6 +7068,11 @@ function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: Ne
     }
     if (terminalTarget.powerOn && isCdpNeighborsCommand(normalizedInput)) {
       setTerminalLines((items) => [...items, `${prompt} ${commandText}`, showCdpNeighbors(project, terminalTarget, isCdpDetailCommand(normalizedInput))].filter(Boolean));
+      setTerminalInput("");
+      return;
+    }
+    if (terminalTarget.powerOn && isLldpNeighborsCommand(normalizedInput)) {
+      setTerminalLines((items) => [...items, `${prompt} ${commandText}`, showLldpNeighbors(project, terminalTarget, isLldpDetailCommand(normalizedInput))].filter(Boolean));
       setTerminalInput("");
       return;
     }
