@@ -3,8 +3,8 @@ import { AuthScreen } from "./components/AuthScreen";
 import { Editor } from "./components/Editor";
 import { LandingPage } from "./components/LandingPage";
 import { ProjectHome } from "./components/ProjectHome";
-import { createRoutedSampleProject } from "./data/sampleProject";
-import { createBlankProject, currentUser, deleteProject, importProject, loadProjects, logout, saveProject } from "./storage/repository";
+import { createSampleProjectFromTemplate, sampleProjectTemplates, type SampleProjectTemplateId } from "./data/sampleProject";
+import { createBlankProject, currentUser, deleteProject, importProject, loadProjects, logout, markSessionActive, saveProject } from "./storage/repository";
 import type { NetworkProject, User } from "./types/network";
 import { createId } from "./utils/id";
 
@@ -14,6 +14,8 @@ type AppRoute =
   | { name: "projects" }
   | { name: "editor"; projectId: string };
 type SaveStatus = "saved" | "pending" | "saving" | "error";
+type AppTheme = "light" | "dark";
+const THEME_KEY = "new-network-editor-theme";
 
 function readRoute(): AppRoute {
   const path = window.location.pathname.replace(/\/+$/, "") || "/";
@@ -25,9 +27,14 @@ function readRoute(): AppRoute {
   return { name: "home" };
 }
 
+function readTheme(): AppTheme {
+  return localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light";
+}
+
 export function App() {
   const [route, setRoute] = useState<AppRoute>(() => readRoute());
   const [user, setUser] = useState<User | null>(() => currentUser());
+  const [theme, setTheme] = useState<AppTheme>(() => readTheme());
   const [project, setProject] = useState<NetworkProject | null>(null);
   const [projects, setProjects] = useState<NetworkProject[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
@@ -39,6 +46,11 @@ export function App() {
   const saveSeq = useRef(0);
   const saveTimer = useRef<number | null>(null);
   const pendingSave = useRef<NetworkProject | null>(null);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
 
   const navigate = useCallback((path: string, replace = false) => {
     const nextPath = path || "/";
@@ -59,6 +71,48 @@ export function App() {
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    let lastTouch = 0;
+    const touchEvents = ["pointerdown", "keydown", "wheel", "touchstart"] as const;
+    function expireSession() {
+      flushPendingSave();
+      logout();
+      setUser(null);
+      setProject(null);
+      setProjects([]);
+      navigate("/login", true);
+      setHomeError("1시간 동안 활동이 없어 다시 로그인해야 합니다.");
+    }
+    function touchSession() {
+      const now = Date.now();
+      if (now - lastTouch < 10_000) return;
+      lastTouch = now;
+      const activeUser = markSessionActive();
+      if (!activeUser) {
+        expireSession();
+        return;
+      }
+      setUser((current) => current?.id === activeUser.id ? current : activeUser);
+    }
+    function checkSession() {
+      if (!currentUser()) expireSession();
+    }
+    for (const eventName of touchEvents) {
+      window.addEventListener(eventName, touchSession, { passive: true });
+    }
+    document.addEventListener("visibilitychange", checkSession);
+    const timer = window.setInterval(checkSession, 30_000);
+    touchSession();
+    return () => {
+      for (const eventName of touchEvents) {
+        window.removeEventListener(eventName, touchSession);
+      }
+      document.removeEventListener("visibilitychange", checkSession);
+      window.clearInterval(timer);
+    };
+  }, [navigate, user]);
 
   useEffect(() => {
     if (user && route.name === "auth") {
@@ -142,14 +196,14 @@ export function App() {
     }
   }
 
-  async function createSampleProject() {
+  async function createSampleProject(templateId: SampleProjectTemplateId = "routed-services") {
     if (!user) {
       navigate("/login");
       return;
     }
     setHomeError("");
     try {
-      const saved = await saveProject(createRoutedSampleProject(user.id));
+      const saved = await saveProject(createSampleProjectFromTemplate(user.id, templateId));
       setProject(saved);
       setSaveStatus("saved");
       setLastSavedAt(new Date(saved.updatedAt).toLocaleTimeString());
@@ -279,6 +333,10 @@ export function App() {
     navigate("/", true);
   }
 
+  function toggleTheme() {
+    setTheme((value) => value === "dark" ? "light" : "dark");
+  }
+
   if (!user) {
     if (route.name === "auth") {
       return (
@@ -290,14 +348,16 @@ export function App() {
           }}
           onBack={() => navigate("/")}
           onModeChange={(mode) => navigate(mode === "login" ? "/login" : "/signup")}
+          onThemeToggle={toggleTheme}
+          theme={theme}
         />
       );
     }
-    return <LandingPage user={null} onLogin={() => navigate("/login")} onSignup={() => navigate("/signup")} onWorkspace={() => navigate("/login")} onLogout={signOut} />;
+    return <LandingPage user={null} onLogin={() => navigate("/login")} onSignup={() => navigate("/signup")} onWorkspace={() => navigate("/login")} onLogout={signOut} onThemeToggle={toggleTheme} theme={theme} />;
   }
 
   if (route.name === "home" || route.name === "auth") {
-    return <LandingPage user={user} onLogin={() => navigate("/projects")} onSignup={() => navigate("/projects")} onWorkspace={() => navigate("/projects")} onLogout={signOut} />;
+    return <LandingPage user={user} onLogin={() => navigate("/projects")} onSignup={() => navigate("/projects")} onWorkspace={() => navigate("/projects")} onLogout={signOut} onThemeToggle={toggleTheme} theme={theme} />;
   }
 
   if (route.name === "projects") {
@@ -313,10 +373,13 @@ export function App() {
         }}
         onCreate={createProject}
         onCreateSample={createSampleProject}
+        sampleTemplates={sampleProjectTemplates}
         onDuplicate={duplicateProject}
         onImport={importProjectFile}
         onDelete={removeProject}
         onLogout={signOut}
+        onThemeToggle={toggleTheme}
+        theme={theme}
       />
     );
   }
@@ -334,10 +397,13 @@ export function App() {
         }}
         onCreate={createProject}
         onCreateSample={createSampleProject}
+        sampleTemplates={sampleProjectTemplates}
         onDuplicate={duplicateProject}
         onImport={importProjectFile}
         onDelete={removeProject}
         onLogout={signOut}
+        onThemeToggle={toggleTheme}
+        theme={theme}
       />
     );
   }
@@ -356,6 +422,8 @@ export function App() {
       }}
       onChange={persistProject}
       onSave={saveProjectNow}
+      onThemeToggle={toggleTheme}
+      theme={theme}
       user={user}
     />
   );

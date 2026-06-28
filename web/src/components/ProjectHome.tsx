@@ -1,12 +1,13 @@
 import { ChangeEvent, useEffect, useRef, useState } from "react";
-import { ArrowRight, Cable, Clock3, Copy, Download, FileJson, LogOut, Monitor, Network, Plus, Router, Search, Server, Shield, Trash2, Upload } from "lucide-react";
+import { ArrowRight, Cable, Clock3, Copy, Download, FileJson, LogOut, Monitor, Moon, Network, Plus, Router, Search, Server, Shield, Sun, Trash2, Upload } from "lucide-react";
 import { downloadProject } from "../exporters/packetTracerExport";
+import type { SampleProjectTemplateId } from "../data/sampleProject";
 import { readImportPreview, type ImportPreview } from "../storage/importPreview";
 import type { NetworkProject, User } from "../types/network";
 
 type ProjectSort = "updated" | "name" | "size";
 
-export function ProjectHome({ user, projects, error, onOpen, onCreate, onCreateSample, onDuplicate, onImport, onDelete, onLogout }: { user: User; projects: NetworkProject[]; error: string; onOpen: (project: NetworkProject) => void; onCreate: () => Promise<void>; onCreateSample: () => Promise<void>; onDuplicate: (projectId: string) => Promise<void>; onImport: (raw: string) => Promise<void>; onDelete: (projectId: string) => Promise<void>; onLogout: () => void }) {
+export function ProjectHome({ user, projects, error, onOpen, onCreate, onCreateSample, sampleTemplates, onDuplicate, onImport, onDelete, onLogout, onThemeToggle, theme }: { user: User; projects: NetworkProject[]; error: string; onOpen: (project: NetworkProject) => void; onCreate: () => Promise<void>; onCreateSample: (templateId?: SampleProjectTemplateId) => Promise<void>; sampleTemplates: Array<{ id: SampleProjectTemplateId; name: string; detail: string }>; onDuplicate: (projectId: string) => Promise<void>; onImport: (raw: string) => Promise<void>; onDelete: (projectId: string) => Promise<void>; onLogout: () => void; onThemeToggle: () => void; theme: "light" | "dark" }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [pending, setPending] = useState(false);
   const [query, setQuery] = useState("");
@@ -14,6 +15,7 @@ export function ProjectHome({ user, projects, error, onOpen, onCreate, onCreateS
   const [deleteTarget, setDeleteTarget] = useState<NetworkProject | null>(null);
   const [importDraft, setImportDraft] = useState<ImportPreview | null>(null);
   const [notice, setNotice] = useState("");
+  const [selectedTemplate, setSelectedTemplate] = useState<SampleProjectTemplateId>(sampleTemplates[0]?.id ?? "routed-services");
   const visibleProjects = filterProjects(projects, query, sort);
   const stats = workspaceStats(projects);
 
@@ -67,6 +69,7 @@ export function ProjectHome({ user, projects, error, onOpen, onCreate, onCreateS
         </a>
         <div className="home-nav-actions">
           <a href="#projects">프로젝트</a>
+          <button className="icon-button" onClick={onThemeToggle} title={theme === "dark" ? "Light mode" : "Dark mode"} type="button">{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button>
           <button className="icon-button" onClick={onLogout} title="로그아웃" type="button"><LogOut size={18} /></button>
         </div>
       </header>
@@ -78,7 +81,7 @@ export function ProjectHome({ user, projects, error, onOpen, onCreate, onCreateS
           <p>라우터와 스위치부터 서버, PC, 방화벽까지 배치하고 포트 상태와 시뮬레이션 이벤트를 바로 확인합니다.</p>
           <div className="home-hero-actions">
             <button className="primary-action" disabled={pending} onClick={() => { void runAction(onCreate); }} type="button"><Plus size={17} />새 네트워크</button>
-            <button className="secondary-action dark" disabled={pending} onClick={() => { void runAction(onCreateSample); }} type="button"><Network size={17} />샘플 랩</button>
+            <button className="secondary-action dark" disabled={pending} onClick={() => { void runAction(() => onCreateSample(selectedTemplate)); }} type="button"><Network size={17} />샘플 랩</button>
           </div>
         </div>
         <TopologyPreview projects={projects.length} />
@@ -93,7 +96,10 @@ export function ProjectHome({ user, projects, error, onOpen, onCreate, onCreateS
           </div>
           <div className="button-row">
             <button className="primary-action" disabled={pending} onClick={() => { void runAction(onCreate); }} type="button"><Plus size={17} />새로 만들기</button>
-            <button className="secondary-action" disabled={pending} onClick={() => { void runAction(onCreateSample); }} type="button"><Network size={17} />샘플</button>
+            <select value={selectedTemplate} onChange={(event) => setSelectedTemplate(event.target.value as SampleProjectTemplateId)} aria-label="샘플 랩 템플릿">
+              {sampleTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+            </select>
+            <button className="secondary-action" disabled={pending} onClick={() => { void runAction(() => onCreateSample(selectedTemplate)); }} type="button"><Network size={17} />샘플</button>
             <button className="secondary-action" disabled={pending} onClick={() => fileInputRef.current?.click()} title="JSON/PTWEB 프로젝트 가져오기 (Cisco .pkt는 지원하지 않음)" type="button"><Upload size={17} />가져오기</button>
             <input accept="application/json,.json,.ptweb" hidden onChange={(event) => { void importFile(event); }} ref={fileInputRef} type="file" />
           </div>
@@ -138,7 +144,7 @@ export function ProjectHome({ user, projects, error, onOpen, onCreate, onCreateS
             <article className="empty-project-state">
               <Network size={28} />
               <strong>아직 프로젝트가 없습니다.</strong>
-              <button className="primary-action" disabled={pending} onClick={() => { void runAction(onCreateSample); }} type="button">샘플 만들기 <ArrowRight size={16} /></button>
+              <button className="primary-action" disabled={pending} onClick={() => { void runAction(() => onCreateSample(selectedTemplate)); }} type="button">샘플 만들기 <ArrowRight size={16} /></button>
             </article>
           )}
           {projects.length > 0 && visibleProjects.length === 0 && (

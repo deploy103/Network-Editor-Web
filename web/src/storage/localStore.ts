@@ -7,6 +7,15 @@ export { createId };
 const USERS_KEY = "new-network-editor-users";
 const PROJECTS_KEY = "new-network-editor-projects";
 const SESSION_KEY = "new-network-editor-session";
+const SESSION_COOKIE_KEY = "new-network-editor-session";
+const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
+
+interface StoredSession {
+  userId: string;
+  remember: boolean;
+  createdAt: number;
+  lastActivityAt: number;
+}
 
 export function nowIso(): string {
   return new Date().toISOString();
@@ -35,11 +44,11 @@ export async function signup(input: {
     passwordHash: await hashPassword(input.password)
   };
   saveUsers([...users, user]);
-  localStorage.setItem(SESSION_KEY, user.id);
+  writeSession(user.id, false);
   return publicUser(user);
 }
 
-export async function login(username: string, password: string): Promise<User> {
+export async function login(username: string, password: string, remember = false): Promise<User> {
   const user = loadUsers().find((item) => item.username.toLowerCase() === username.toLowerCase());
   if (!user || !await verifyPassword(password, user.passwordHash)) {
     throw new Error("아이디 또는 비밀번호가 올바르지 않습니다.");
@@ -48,18 +57,88 @@ export async function login(username: string, password: string): Promise<User> {
     const upgraded = { ...user, passwordHash: await hashPassword(password) };
     saveUsers(loadUsers().map((item) => item.id === user.id ? upgraded : item));
   }
-  localStorage.setItem(SESSION_KEY, user.id);
+  writeSession(user.id, remember);
   return publicUser(user);
 }
 
 export function currentUser(): User | null {
-  const id = localStorage.getItem(SESSION_KEY);
-  const user = loadUsers().find((item) => item.id === id);
+  const session = readSession();
+  const user = session ? loadUsers().find((item) => item.id === session.userId) : null;
   return user ? publicUser(user) : null;
+}
+
+export function markSessionActive(): User | null {
+  const session = readSession();
+  if (!session) return null;
+  const user = loadUsers().find((item) => item.id === session.userId);
+  if (!user) {
+    logout();
+    return null;
+  }
+  writeSession(session.userId, session.remember, session.createdAt);
+  return publicUser(user);
 }
 
 export function logout(): void {
   localStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem(SESSION_KEY);
+  clearSessionCookie();
+}
+
+function writeSession(userId: string, remember: boolean, createdAt = Date.now()): void {
+  const session: StoredSession = { userId, remember, createdAt, lastActivityAt: Date.now() };
+  localStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem(SESSION_KEY);
+  const storage = remember ? localStorage : sessionStorage;
+  storage.setItem(SESSION_KEY, JSON.stringify(session));
+  writeSessionCookie(session);
+}
+
+function readSession(): StoredSession | null {
+  const candidates = [
+    parseSession(sessionStorage.getItem(SESSION_KEY), false),
+    parseSession(localStorage.getItem(SESSION_KEY), true)
+  ].filter((session): session is StoredSession => Boolean(session));
+  if (!candidates.length) return null;
+  const session = candidates.find((item) => !sessionExpired(item));
+  if (session) return session;
+  logout();
+  return null;
+}
+
+function parseSession(raw: string | null, fallbackRemember: boolean): StoredSession | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed === "string") return legacySession(parsed, fallbackRemember);
+    if (!parsed || typeof parsed !== "object") return null;
+    const session = parsed as Partial<StoredSession>;
+    if (!session.userId || typeof session.userId !== "string") return null;
+    const createdAt = typeof session.createdAt === "number" ? session.createdAt : Date.now();
+    const lastActivityAt = typeof session.lastActivityAt === "number" ? session.lastActivityAt : Date.now();
+    return { userId: session.userId, remember: Boolean(session.remember ?? fallbackRemember), createdAt, lastActivityAt };
+  } catch {
+    return legacySession(raw, fallbackRemember);
+  }
+}
+
+function legacySession(userId: string, remember: boolean): StoredSession | null {
+  return userId ? { userId, remember, createdAt: Date.now(), lastActivityAt: Date.now() } : null;
+}
+
+function sessionExpired(session: StoredSession): boolean {
+  return Date.now() - session.lastActivityAt >= SESSION_IDLE_TIMEOUT_MS;
+}
+
+function writeSessionCookie(session: StoredSession): void {
+  if (typeof document === "undefined") return;
+  const maxAge = Math.max(1, Math.floor(SESSION_IDLE_TIMEOUT_MS / 1000));
+  document.cookie = `${SESSION_COOKIE_KEY}=${encodeURIComponent(session.userId)}; path=/; max-age=${maxAge}; SameSite=Lax`;
+}
+
+function clearSessionCookie(): void {
+  if (typeof document === "undefined") return;
+  document.cookie = `${SESSION_COOKIE_KEY}=; path=/; max-age=0; SameSite=Lax`;
 }
 
 export function createBlankProject(ownerId: string): NetworkProject {
