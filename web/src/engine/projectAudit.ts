@@ -1,6 +1,8 @@
 import { diagnoseProject } from "./diagnostics";
 import { ipInSubnet, isIpv4, isSubnetMask, maskToPrefix, networkAddress } from "./ip";
-import type { NetworkDevice, NetworkPort, NetworkProject } from "../types/network";
+import { activeDefaultRoutes, activeStaticRoutes } from "./routeState";
+import { endpoint } from "./topology";
+import type { NetworkDevice, NetworkLink, NetworkPort, NetworkProject } from "../types/network";
 
 export type ProjectAuditSeverity = "pass" | "info" | "warning" | "critical";
 
@@ -102,9 +104,10 @@ function inventoryChecks(project: NetworkProject): ProjectAuditCheck[] {
 function linkChecks(project: NetworkProject): ProjectAuditCheck[] {
   const downLinks = project.links.filter((link) => link.status === "down");
   const blockedLinks = project.links.filter((link) => link.status === "blocked");
+  const inactiveStoredUpLinks = project.links.filter((link) => link.status === "up" && !linkOperational(project, link));
   const orphanedPorts = project.devices.flatMap((device) => device.ports.filter((port) => port.linkId && !project.links.some((link) => link.id === port.linkId)).map((port) => `${device.label} ${port.name}`));
-  const connectedDeviceIds = new Set(project.links.flatMap((link) => [link.endpointA.deviceId, link.endpointB.deviceId]));
-  const isolated = project.devices.filter((device) => !connectedDeviceIds.has(device.id));
+  const connectedDeviceIds = new Set(project.links.filter((link) => linkOperational(project, link)).flatMap((link) => [link.endpointA.deviceId, link.endpointB.deviceId]));
+  const isolated = project.devices.filter((device) => device.powerOn && !connectedDeviceIds.has(device.id));
   return [
     check("links", "Link count", project.links.length > 0 ? "pass" : project.devices.length > 1 ? "critical" : "info", {
       summary: `${project.links.length} links`,
@@ -112,10 +115,10 @@ function linkChecks(project: NetworkProject): ProjectAuditCheck[] {
       evidence: [`devices ${project.devices.length}`],
       recommendation: "Connect endpoints to access devices and connect access/core/security layers as required."
     }),
-    check("links", "Operational links", downLinks.length === 0 && blockedLinks.length === 0 ? "pass" : downLinks.length ? "critical" : "warning", {
-      summary: downLinks.length === 0 && blockedLinks.length === 0 ? "No down or blocked links" : `${downLinks.length} down, ${blockedLinks.length} blocked`,
-      detail: "Down links usually indicate power, admin state, cable type, or incompatible port choices. Blocked links are expected only when STP has redundant paths.",
-      evidence: [...downLinks.map((link) => `down ${link.id}`), ...blockedLinks.map((link) => `blocked ${link.id}`)],
+    check("links", "Operational links", downLinks.length === 0 && blockedLinks.length === 0 && inactiveStoredUpLinks.length === 0 ? "pass" : downLinks.length || inactiveStoredUpLinks.length ? "critical" : "warning", {
+      summary: downLinks.length === 0 && blockedLinks.length === 0 && inactiveStoredUpLinks.length === 0 ? "No down, blocked, or inactive stored-up links" : `${downLinks.length} down, ${blockedLinks.length} blocked, ${inactiveStoredUpLinks.length} inactive stored-up`,
+      detail: "Down or inactive stored-up links usually indicate power, admin state, cable type, stale endpoints, or incompatible port choices. Blocked links are expected only when STP has redundant paths.",
+      evidence: [...downLinks.map((link) => `down ${link.id}`), ...blockedLinks.map((link) => `blocked ${link.id}`), ...inactiveStoredUpLinks.map((link) => `inactive ${link.id}`)],
       recommendation: "Fix down links and verify blocked links are intentional redundant switching paths."
     }),
     check("links", "Endpoint isolation", isolated.length === 0 ? "pass" : "warning", {
@@ -132,6 +135,13 @@ function linkChecks(project: NetworkProject): ProjectAuditCheck[] {
       recommendation: "Run project repair to clear orphaned link IDs."
     })
   ];
+}
+
+function linkOperational(project: NetworkProject, link: NetworkLink): boolean {
+  if (link.status !== "up") return false;
+  const a = endpoint(project, link.endpointA);
+  const b = endpoint(project, link.endpointB);
+  return Boolean(a?.device.powerOn && b?.device.powerOn && a.port.adminUp && b.port.adminUp);
 }
 
 function addressingChecks(project: NetworkProject): ProjectAuditCheck[] {
@@ -189,31 +199,42 @@ function addressingChecks(project: NetworkProject): ProjectAuditCheck[] {
 }
 
 function routingChecks(project: NetworkProject): ProjectAuditCheck[] {
-  const l3Devices = project.devices.filter((device) => isNetworkDevice(device) && device.ports.some((port) => isIpv4(port.ipAddress)));
+  const configuredL3Devices = project.devices.filter((device) => isNetworkDevice(device) && device.ports.some((port) => isIpv4(port.ipAddress)));
+  const l3Devices = configuredL3Devices.filter((device) => device.powerOn && device.ports.some((port) => port.adminUp && isIpv4(port.ipAddress)));
   const networks = uniqueNetworks(project);
-  const routeCount = project.devices.reduce((total, device) => total + device.config.staticRoutes.length, 0);
-  const dynamicCount = project.devices.reduce((total, device) => total + (device.config.routingProtocols?.length ?? 0), 0);
-  const defaultRoutes = project.devices.flatMap((device) => device.config.staticRoutes.filter((route) => route.network === "0.0.0.0" && route.mask === "0.0.0.0").map((route) => `${device.label} via ${route.nextHop}`));
+  const configuredRouteCount = project.devices.reduce((total, device) => total + device.config.staticRoutes.length, 0);
+  const activeRouteCount = project.devices.reduce((total, device) => total + activeStaticRoutes(project, device).length, 0);
+  const dynamicCount = project.devices.reduce((total, device) => total + (device.powerOn ? device.config.routingProtocols?.length ?? 0 : 0), 0);
+  const configuredDefaultRoutes = project.devices.flatMap((device) => device.config.staticRoutes
+    .filter((route) => route.network === "0.0.0.0" && route.mask === "0.0.0.0")
+    .map((route) => `${device.label} via ${route.nextHop}${route.trackId ? ` track ${route.trackId}` : ""}`));
+  const defaultRoutes = project.devices.flatMap((device) => activeDefaultRoutes(project, device).map((route) => `${device.label} via ${route.nextHop}${route.trackId ? ` track ${route.trackId}` : ""}`));
   const trackedRoutes = project.devices.flatMap((device) => device.config.staticRoutes.filter((route) => route.trackId !== undefined).map((route) => ({ device, route })));
   const badTracked = trackedRoutes.filter(({ device, route }) => !device.config.trackObjects?.some((track) => track.trackId === route.trackId));
-  const helperPorts = project.devices.flatMap((device) => device.ports.filter((port) => (port.helperAddresses ?? []).length > 0).map((port) => ({ device, port })));
+  const helperPorts = project.devices.flatMap((device) => device.powerOn ? device.ports.filter((port) => port.adminUp && (port.helperAddresses ?? []).length > 0).map((port) => ({ device, port })) : []);
+  const activeDhcpPoolExists = project.devices.some((device) =>
+    device.powerOn &&
+    device.config.services.dhcp &&
+    device.config.dhcpPools.some((pool) => pool.enabled) &&
+    device.ports.some((port) => port.adminUp && isIpv4(port.ipAddress))
+  );
   return [
     check("routing", "Layer 3 device coverage", networks.length <= 1 || l3Devices.length > 0 ? "pass" : "warning", {
-      summary: `${l3Devices.length} L3 devices for ${networks.length} routed networks`,
-      detail: "Multiple IPv4 networks usually need a router, firewall, or multilayer switch.",
-      evidence: l3Devices.map((device) => device.label),
+      summary: `${l3Devices.length} active L3 devices (${configuredL3Devices.length} configured) for ${networks.length} routed networks`,
+      detail: "Multiple IPv4 networks usually need an active router, firewall, or multilayer switch.",
+      evidence: (l3Devices.length ? l3Devices : configuredL3Devices).map((device) => device.label),
       recommendation: "Add or configure routed interfaces on devices that should connect subnets."
     }),
-    check("routing", "Route coverage", networks.length <= 1 || routeCount + dynamicCount > 0 ? "pass" : "warning", {
-      summary: `${routeCount} static routes, ${dynamicCount} dynamic routing processes`,
-      detail: "When more than one subnet exists, routing information must be present unless all traffic is local.",
+    check("routing", "Route coverage", networks.length <= 1 || activeRouteCount + dynamicCount > 0 ? "pass" : "warning", {
+      summary: `${activeRouteCount} active static routes (${configuredRouteCount} configured), ${dynamicCount} active dynamic routing processes`,
+      detail: "When more than one subnet exists, active routing information must be present unless all traffic is local.",
       evidence: [`networks ${networks.join(", ") || "-"}`],
       recommendation: "Add static routes, default routes, or RIP/OSPF/EIGRP processes for inter-subnet reachability."
     }),
     check("routing", "Default route", networks.length <= 1 || defaultRoutes.length > 0 ? "pass" : "info", {
-      summary: defaultRoutes.length ? `${defaultRoutes.length} default routes` : "No default route",
-      detail: "Default routes are expected at edges, branches, firewalls, and labs with upstream services.",
-      evidence: defaultRoutes,
+      summary: defaultRoutes.length ? `${defaultRoutes.length} active default routes` : configuredDefaultRoutes.length ? "No active default route" : "No default route",
+      detail: "Default routes are expected at edges, branches, firewalls, and labs with upstream services. Tracked defaults only count when their track object is up.",
+      evidence: defaultRoutes.length ? defaultRoutes : configuredDefaultRoutes,
       recommendation: "Configure a default route where traffic should leave the local routing domain."
     }),
     check("routing", "Tracked routes", badTracked.length === 0 ? "pass" : "critical", {
@@ -223,9 +244,9 @@ function routingChecks(project: NetworkProject): ProjectAuditCheck[] {
       recommendation: "Create matching track objects or remove stale track IDs.",
       affectedDeviceIds: badTracked.map(({ device }) => device.id)
     }),
-    check("routing", "DHCP relay placement", helperPorts.length || !project.devices.some((device) => device.config.services.dhcp && device.config.dhcpPools.some((pool) => pool.enabled)) ? "pass" : "info", {
-      summary: helperPorts.length ? `${helperPorts.length} helper-address interfaces` : "No helper-address interfaces",
-      detail: "Remote DHCP pools require helper-address on client-facing routed interfaces.",
+    check("routing", "DHCP relay placement", helperPorts.length || !activeDhcpPoolExists ? "pass" : "info", {
+      summary: helperPorts.length ? `${helperPorts.length} active helper-address interfaces` : "No active helper-address interfaces",
+      detail: "Remote DHCP pools require active helper-address on client-facing routed interfaces.",
       evidence: helperPorts.map(({ device, port }) => `${device.label} ${port.name} -> ${port.helperAddresses?.join(", ")}`),
       recommendation: "Add helper-address on each remote client VLAN when DHCP server is not local."
     })
@@ -510,14 +531,20 @@ function duplicateValues(values: string[]): string[] {
 
 function gatewayExists(project: NetworkProject, hostPort: NetworkPort): boolean {
   if (!isIpv4(hostPort.gateway) || !isIpv4(hostPort.ipAddress) || !isSubnetMask(hostPort.subnetMask)) return false;
+  if (!ipInSubnet(hostPort.gateway, hostPort.ipAddress, hostPort.subnetMask)) return false;
   return project.devices.some((device) => device.ports.some((port) => {
     if (port.id === hostPort.id) return false;
-    if (port.ipAddress === hostPort.gateway) return true;
-    if ((port.secondaryIpAddresses ?? []).some((address) => address.ipAddress === hostPort.gateway)) return true;
-    if ((port.hsrpGroups ?? []).some((group) => group.virtualIp === hostPort.gateway)) return true;
-    if ((port.vrrpGroups ?? []).some((group) => group.virtualIp === hostPort.gateway)) return true;
-    return isIpv4(port.ipAddress) && isSubnetMask(port.subnetMask) && ipInSubnet(hostPort.gateway, port.ipAddress, port.subnetMask);
+    if (!device.powerOn || !port.adminUp) return false;
+    if (port.ipAddress === hostPort.gateway && sameSubnetOwner(hostPort.gateway, port.ipAddress, port.subnetMask)) return true;
+    if ((port.secondaryIpAddresses ?? []).some((address) => address.ipAddress === hostPort.gateway && sameSubnetOwner(hostPort.gateway, address.ipAddress, address.subnetMask))) return true;
+    if ((port.hsrpGroups ?? []).some((group) => group.virtualIp === hostPort.gateway && sameSubnetOwner(hostPort.gateway, port.ipAddress, port.subnetMask))) return true;
+    if ((port.vrrpGroups ?? []).some((group) => group.virtualIp === hostPort.gateway && sameSubnetOwner(hostPort.gateway, port.ipAddress, port.subnetMask))) return true;
+    return false;
   }));
+}
+
+function sameSubnetOwner(gateway: string, ownerIp: string, ownerMask: string): boolean {
+  return isIpv4(ownerIp) && isSubnetMask(ownerMask) && ipInSubnet(gateway, ownerIp, ownerMask);
 }
 
 function uniqueNetworks(project: NetworkProject): string[] {

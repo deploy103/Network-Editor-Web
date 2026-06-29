@@ -1,5 +1,6 @@
 import { getDeviceModel } from "../data/deviceCatalog";
 import { ipInSubnet, isIpv4, isSubnetMask, maskToPrefix } from "./ip";
+import { interfaceLineProtocolUp } from "./routeState";
 import type { NetworkDevice, NetworkProject } from "../types/network";
 
 export interface DeviceCapacityRow {
@@ -9,6 +10,7 @@ export interface DeviceCapacityRow {
   model: string;
   portsTotal: number;
   portsConnected: number;
+  portsActive: number;
   portsConfigured: number;
   portUtilization: number;
   modulesInstalled: number;
@@ -41,6 +43,7 @@ export interface CapacityPlanReport {
     devices: number;
     portsTotal: number;
     portsConnected: number;
+    portsActive: number;
     portsConfigured: number;
     modulesInstalled: number;
     moduleSlots: number;
@@ -50,7 +53,7 @@ export interface CapacityPlanReport {
 }
 
 export function analyzeCapacityPlan(project: NetworkProject): CapacityPlanReport {
-  const devices = project.devices.map(deviceCapacity);
+  const devices = project.devices.map((device) => deviceCapacity(project, device));
   const dhcpPools = project.devices.flatMap(dhcpCapacityRows);
   const warnings = [
     ...devices.flatMap((device) => device.warnings.map((warning) => `${device.label}: ${warning}`)),
@@ -64,6 +67,7 @@ export function analyzeCapacityPlan(project: NetworkProject): CapacityPlanReport
       devices: devices.length,
       portsTotal: devices.reduce((sum, device) => sum + device.portsTotal, 0),
       portsConnected: devices.reduce((sum, device) => sum + device.portsConnected, 0),
+      portsActive: devices.reduce((sum, device) => sum + device.portsActive, 0),
       portsConfigured: devices.reduce((sum, device) => sum + device.portsConfigured, 0),
       modulesInstalled: devices.reduce((sum, device) => sum + device.modulesInstalled, 0),
       moduleSlots: devices.reduce((sum, device) => sum + device.moduleSlots, 0),
@@ -86,17 +90,18 @@ export function buildCapacityPlanReportLines(project: NetworkProject): string[] 
     "",
     "Summary",
     `- Devices: ${capacity.totals.devices}`,
-    `- Ports: ${capacity.totals.portsConnected}/${capacity.totals.portsTotal} connected, ${capacity.totals.portsConfigured} configured`,
+    `- Ports: ${capacity.totals.portsConnected}/${capacity.totals.portsTotal} connected, ${capacity.totals.portsActive} active, ${capacity.totals.portsConfigured} configured`,
     `- Modules: ${capacity.totals.modulesInstalled}/${capacity.totals.moduleSlots} slots used`,
     `- DHCP pools: ${capacity.totals.dhcpPools}`,
     `- Warnings: ${capacity.totals.warnings}`,
     "",
     "Device Capacity",
-    ...table(["Device", "Kind", "Model", "Ports", "Configured", "Modules", "VLANs", "Routes", "Policy", "Services", "Warnings"], capacity.devices.map((device) => [
+    ...table(["Device", "Kind", "Model", "Ports", "Active", "Configured", "Modules", "VLANs", "Routes", "Policy", "Services", "Warnings"], capacity.devices.map((device) => [
       device.label,
       device.kind,
       device.model,
       `${device.portsConnected}/${device.portsTotal} (${device.portUtilization}%)`,
+      String(device.portsActive),
       String(device.portsConfigured),
       `${device.modulesInstalled}/${device.moduleSlots}`,
       String(device.vlanCount),
@@ -124,9 +129,11 @@ export function buildCapacityPlanReportLines(project: NetworkProject): string[] 
   ];
 }
 
-function deviceCapacity(device: NetworkDevice): DeviceCapacityRow {
+function deviceCapacity(project: NetworkProject, device: NetworkDevice): DeviceCapacityRow {
   const dataPorts = device.ports.filter((port) => port.kind !== "console");
-  const connected = dataPorts.filter((port) => port.linkId).length;
+  const connected = dataPorts.filter((port) => port.linkId && project.links.some((link) => link.id === port.linkId)).length;
+  const active = dataPorts.filter((port) => interfaceLineProtocolUp(project, device, port)).length;
+  const staleLinkReferences = dataPorts.filter((port) => port.linkId && !project.links.some((link) => link.id === port.linkId)).length;
   const configured = dataPorts.filter((port) => isIpv4(port.ipAddress) || port.mode === "trunk" || port.vlan !== 1 || port.description || port.channelGroup || port.portSecurity?.enabled).length;
   const modules = getDeviceModel(device.modelId)?.modules.length ?? device.modules.length;
   const routeCount = device.config.staticRoutes.length + (device.config.routingProtocols?.length ?? 0);
@@ -140,6 +147,8 @@ function deviceCapacity(device: NetworkDevice): DeviceCapacityRow {
     device.config.vlans.length > 100 ? "large VLAN table" : "",
     policyCount > 50 ? "large policy table" : "",
     routeCount > 30 ? "large route table" : "",
+    connected > active ? `${connected - active} connected port(s) inactive` : "",
+    staleLinkReferences ? `${staleLinkReferences} stale link reference(s)` : "",
     device.kind === "server" && serviceCount > 4 ? "many services on one server" : ""
   ].filter(Boolean);
   return {
@@ -149,6 +158,7 @@ function deviceCapacity(device: NetworkDevice): DeviceCapacityRow {
     model: device.model,
     portsTotal: dataPorts.length,
     portsConnected: connected,
+    portsActive: active,
     portsConfigured: configured,
     portUtilization: utilization,
     modulesInstalled: device.modules.length,

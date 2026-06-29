@@ -1,5 +1,201 @@
 # Development Log
 
+## 2026-06-29 KST
+
+- 18:33 Started extended development session through KST 24:00 with 10-minute resumable progress logging.
+- Audited the current dirty worktree before editing. Existing changes cover route lazy loading, report chunk splitting, diagnostics expansion, simulation routing behavior, Rust engine updates, Go module updates, and smoke script coverage.
+- Verified the current web production build with `npm run build`; TypeScript and Vite build completed successfully.
+- 18:38 Added a routed-sample Activity Wizard CLI output assertion for the router `show version` path, then extended the browser visual smoke script to exercise Activity Wizard Check Results, active CLI engine revalidation, and a live device CLI `show ip interface brief` response.
+- 18:38 Added feature-smoke coverage that asserts the routed sample carries the browser-checkable CLI output assertion.
+- 18:38 Verified `node --check scripts/visual-smoke.cjs`, `npm run build`, `npm run smoke:features`, and `npm run smoke:cli`.
+- 18:38 Attempted `npm run smoke:visual`; execution is still blocked by missing Playwright Chromium system dependency `libnspr4.so`.
+- 18:42 Extended browser visual smoke coverage further to inspect a Physical tab connected port, assert peer/TDR details, exercise explicit cable disconnect, and then run a live device CLI `show ip interface brief` command.
+- 18:42 Hardened visual-smoke waits so active CLI revalidation waits for the completed engine message and CLI output waits for `IP-Address`, reducing browser-test flake risk.
+- 18:42 Verified `node --check scripts/visual-smoke.cjs`, `npm run build`, `npm run smoke:features`, `npm run smoke:python-cli`, `npm run smoke:python-http`, and full `npm run smoke:all`.
+- 18:42 Checked `git diff --check`; no whitespace errors. Attempted Rust `cargo test`, but local `cargo` is not installed.
+- 18:45 Expanded TypeScript simulation-generated PDU headers so ICMP and service events include explicit Layer 4 protocol fields and DNS/HTTP/FTP/EMAIL/TFTP/SYSLOG/SSH/TELNET port metadata instead of relying only on UI-side inference.
+- 18:45 Added feature-smoke assertions for explicit ICMP protocol, HTTP TCP/80, and DNS UDP/53 event headers.
+- 18:45 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 18:56 Added a shared PDU header builder for simulator events, legacy UI header inference, and project-report header summaries so protocol/port mappings stay in one place.
+- 18:56 Expanded PDU headers with ICMP type/code, service source/destination ports, Layer 7 operations, and packet disposition rows for ICMP, DHCP, DNS, HTTP, FTP, EMAIL, TFTP, SYSLOG, SSH, and TELNET flows.
+- 18:56 Added Project Report `Latest PDU Headers` output with legacy event header inference, plus feature-smoke assertions for HTTP, DNS, DHCP, ICMP, and legacy TFTP header summaries.
+- 18:56 Updated README implemented-surface text for explicit PDU protocol/port/operation headers and report summaries.
+- 18:56 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`; `npm run smoke:visual` remains blocked by missing `libnspr4.so`.
+- 19:04 Extended the browser visual-smoke script with workspace drawing resize coverage through both the drawing HUD resize button and SVG resize-handle drag path, plus freehand draw/label/persist checks.
+- 19:04 Added a routed-sample Activity Wizard HTTP `Destination port=80` packet-header assertion and feature/visual smoke checks that the sample exposes it.
+- 19:04 Added IOS-style `show ip route <network> <mask>` filtering by translating subnet masks to the route table's `/prefix` output, then listed the form in CLI help/search suggestions.
+- 19:04 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`; `npm run smoke:visual` is still blocked by missing `libnspr4.so`.
+- 19:12 Added Project Report detail tables for Activity Wizard command-output assertions and packet-header assertions so exported reports include labels, devices/protocols, fields, expected text, and points.
+- 19:12 Expanded CLI route lookup to support best-match `show ip route <host-ip>`, `show route <host-ip>` alias preservation, `show ip route <network> <mask> longer-prefixes`, and default-route fallback for host lookups.
+- 19:12 Added smoke coverage for route host best-match, default fallback, network/mask filtering, longer-prefixes, alias argument preservation, CLI help/search text, and direct PDU helper SSH/TELNET metadata.
+- 19:12 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 19:14 Expanded Project Report Activity detail output further to include command rules, ordered command sequences, and per-interface expectations alongside command-output and packet-header assertions.
+- 19:14 Added feature-smoke coverage that confirms exported project reports include Activity command rule, command sequence, interface expectation, command-output assertion, and packet-header assertion details.
+- 19:14 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 19:23 Hardened CLI route host best-match lookup so inactive tracked static routes are skipped when an active floating backup/default candidate exists, while still keeping down tracked routes visible in explicit route table output.
+- 19:23 Added CLI support and smoke coverage for `show ip route <network>/<prefix>` and `show ip route <network>/<prefix> longer-prefixes`, plus help/completion text for CIDR route filters.
+- 19:23 Expanded Verification Plan routing tasks with protocol-specific OSPF/EIGRP/RIP CLI checks such as `show ip ospf interface brief`, `show ip ospf neighbor`, `show ip eigrp interfaces`, and `show ip rip database`.
+- 19:23 Updated README implemented-surface notes for tracked floating route lookup, CIDR route filters, report exports, and protocol-specific verification-plan CLI checks.
+- 19:23 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 19:29 Expanded Instructor Lab Workbook grading output with detailed Activity command rules, command sequences, CLI output assertions, interface expectations, and packet-header assertions while keeping student workbook output to a check-count summary.
+- 19:29 Added CLI `show ip prefix-list summary`, `show ip prefix-list detail`, and `show ip prefix-list <name> detail` output, plus help/completion coverage for prefix-list summary/detail workflows.
+- 19:29 Added feature/CLI smoke coverage for instructor workbook Activity details and prefix-list summary/detail output.
+- 19:29 Updated README implemented-surface notes for instructor workbook Activity details and prefix-list summary/detail support.
+- 19:29 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 19:33 Added CLI `show route-map summary` and `show route-map <name> detail` output so PBR policy checks can show aggregate entries, permit/deny counts, set-next-hop counts, and hit totals.
+- 19:33 Added CLI smoke coverage and help/completion entries for route-map summary/detail workflows.
+- 19:33 Updated README implemented-surface notes for route-map summary/detail support.
+- 19:33 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 19:38 Connected the new route-map/prefix-list summary checks into Verification Plan policy tasks for PBR labs.
+- 19:38 Added CLI `show access-list summary` output with ACL type, entry, permit/deny, and hit totals, then connected ACL summary checks into security-lab Verification Plan tasks.
+- 19:38 Added CLI/feature smoke coverage for ACL summary output and policy summary verification-plan commands.
+- 19:38 Updated README implemented-surface notes for ACL summary and policy-specific verification-plan checks.
+- 19:38 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 19:42 Added explicit CLI smoke coverage for the `show ip access-lists summary` alias and `show nat statistics` alias.
+- 19:42 Improved NAT show-command expansion so `show nat statistics` and `show nat translations` route to the same outputs as the `show ip nat ...` forms.
+- 19:42 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 19:45 Added Project Report `Policy Summary` rows in the Security and Policy section so ACL/NAT/prefix-list/route-map/PBR-port counts are scannable per device.
+- 19:45 Added feature-smoke coverage for security policy summary rows in firewall-heavy reports.
+- 19:45 Updated README implemented-surface notes for security policy summaries.
+- 19:45 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 19:49 Expanded Instructor Lab Workbook and Security Matrix summaries to include prefix-list entries, route-map entries, and PBR-enabled port counts for policy-heavy labs.
+- 19:49 Added Project Report Activity answer snapshot detail output with captured time, device/link counts, annotation count, service devices, and startup-config device counts.
+- 19:49 Added feature-smoke coverage for workbook policy counts, Security Matrix policy totals, and Activity answer snapshot report details.
+- 19:49 Updated README implemented-surface notes for Activity answer snapshot report details.
+- 19:49 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 19:53 Added Instructor Lab Workbook Activity answer snapshot summaries so captured device/link/annotation/service/startup-config counts appear in grading artifacts.
+- 19:53 Added CLI `show service logs summary` with HTTP/FTP/EMAIL/TFTP/SYSLOG log counts, plus help/completion and CLI smoke coverage.
+- 19:53 Updated README implemented-surface notes for service log summaries.
+- 19:53 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 19:55 Connected `show service logs summary` into Verification Plan service-device tasks.
+- 19:55 Updated Lab Workbook service verification guidance to recommend `show service logs summary`.
+- 19:55 Added feature-smoke coverage for Verification Plan and Lab Workbook service-log summary references.
+- 19:55 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 19:59 Added CLI `show services summary` with enabled/disabled service counts, runtime log count, DHCP pool count, and DNS record count.
+- 19:59 Connected `show services summary` into Verification Plan service-device tasks and added CLI/feature smoke coverage.
+- 19:59 Updated README implemented-surface notes for service summaries.
+- 19:59 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 20:04 Added Project Report service summary and service log summary tables with enabled/disabled service counts, DHCP pool/lease counts, DNS record/name-server counts, and per-service log totals.
+- 20:04 Added Lab Workbook service summary evidence lines so student/instructor exports show service counts, DHCP leases, DNS records, and HTTP/FTP/EMAIL/TFTP/SYSLOG log counts.
+- 20:04 Added feature-smoke coverage for Project Report and Lab Workbook service/log summary output.
+- 20:04 Updated README implemented-surface notes for service/log summaries.
+- 20:04 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 20:09 Added service-by-service reachability status summaries to the standalone Service Reachability export and Project Report Service Reachability section.
+- 20:09 Expanded Verification Plan service tasks with service-specific DHCP/DNS/Desktop/log commands such as `show ip dhcp binding`, `show hosts`, `show service logs http`, and matching expected evidence.
+- 20:09 Added feature-smoke coverage for service reachability status summaries and service-specific Verification Plan commands.
+- 20:09 Updated README implemented-surface notes for service-reachability status summaries and service-specific DHCP/DNS/log checks.
+- 20:09 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 20:11 Added Project Report Runtime Tables `Runtime Summary` output with per-device ARP, MAC, DHCP lease, NAT translation, log, and clock counts.
+- 20:11 Added feature-smoke coverage for the Project Report runtime summary and corrected the assertion for empty-runtime sample output.
+- 20:11 Updated README implemented-surface notes for runtime evidence in report exports.
+- 20:11 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 20:15 Added CLI `show logging summary` with buffered log totals, severity counts, console/buffer state, trap level, and logging hosts.
+- 20:15 Preserved `show logging summary` arguments through abbreviated show-command expansion, including `sh logg sum`.
+- 20:15 Added CLI smoke coverage for logging summary output, abbreviation handling, and help search exposure.
+- 20:15 Updated README implemented-surface notes for logging summaries.
+- 20:15 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 20:18 Added Failure Impact severity summaries for high/medium/low/none scenarios with link/device counts and worst affected-pair counts.
+- 20:18 Surfaced the same Failure Impact severity summary in the Project Report Failure Impact section.
+- 20:18 Added feature-smoke coverage for standalone Failure Impact and Project Report severity summary output.
+- 20:18 Updated README implemented-surface notes for failure severity summaries.
+- 20:18 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 20:20 Added standalone Configuration Drift `Status Summary` and `Device Status` tables for faster review of in-sync, unsaved, drifted, and not-applicable devices.
+- 20:20 Added feature-smoke coverage for Configuration Drift status tables.
+- 20:20 Updated README implemented-surface notes for drift status tables.
+- 20:20 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 20:23 Added Routing Matrix device coverage summaries with per-L3-device connected/static/dynamic/default/missing coverage counts.
+- 20:23 Surfaced the same routing coverage summary in the Project Report Routing Matrix section.
+- 20:23 Added feature-smoke coverage for standalone Routing Matrix and Project Report coverage summary output.
+- 20:23 Updated README implemented-surface notes for routing coverage summaries.
+- 20:23 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 20:25 Added Security Matrix `Policy Type Summary` output with ACL/NAT/PBR entry counts, permit/deny counts, and hit totals.
+- 20:25 Surfaced the same policy type summary in the Project Report Security Matrix section.
+- 20:25 Added feature-smoke coverage for standalone Security Matrix and Project Report policy type summary output.
+- 20:25 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 20:29 Added CLI `show hosts summary` with default-domain, name-server, host-record, IPv4-record, and duplicate-host-name counts.
+- 20:29 Added abbreviation/help/completion coverage for `show hosts summary`, including `sh hosts sum`.
+- 20:29 Connected `show hosts summary` into Verification Plan DNS service checks and added feature-smoke coverage.
+- 20:29 Updated README implemented-surface notes for host summaries.
+- 20:29 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 20:33 Added CLI `show ip dhcp pool summary` with configured/active/disabled pool counts, total lease capacity, active leases, and excluded range counts.
+- 20:33 Added abbreviation/help/completion coverage for `show ip dhcp pool summary`, including `sh ip dhcp pool sum`.
+- 20:33 Connected `show ip dhcp pool summary` into Verification Plan DHCP service checks and added feature-smoke coverage.
+- 20:33 Updated README implemented-surface notes for DHCP pool summaries.
+- 20:33 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 20:35 Updated Lab Workbook service required checks to recommend `show services summary`, `show ip dhcp pool summary`, `show hosts summary`, and `show service logs summary`.
+- 20:35 Added feature-smoke coverage for the expanded Lab Workbook service-summary verification guidance.
+- 20:35 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 20:39 Added CLI `show ip dhcp binding summary` with total, active, expired, and unique-client binding counts.
+- 20:39 Added abbreviation/completion/help coverage for `show ip dhcp binding summary`, including `sh ip dhcp binding sum`.
+- 20:39 Connected `show ip dhcp binding summary` into Verification Plan DHCP checks and Lab Workbook DHCP evidence guidance.
+- 20:39 Updated README implemented-surface notes for DHCP binding summaries.
+- 20:39 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 20:42 Added CLI `show arp summary` and `show mac address-table summary` with runtime table totals, unique/interface counts, dynamic/static MAC counts, and VLAN counts.
+- 20:42 Added abbreviation/help/completion coverage for ARP/MAC runtime summaries, including `sh arp sum` and `sh mac address-table sum`.
+- 20:42 Updated README implemented-surface notes for ARP/MAC summaries.
+- 20:42 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 20:47 Added CLI `show cdp summary` and `show lldp summary` with discovery global state, timer/holdtime, interface enablement, TX, and RX counts.
+- 20:47 Preserved CDP/LLDP summary arguments through abbreviated show-command expansion and added CLI smoke coverage for `sh cdp sum` and `sh lldp sum`.
+- 20:47 Updated README implemented-surface notes for CDP/LLDP summaries.
+- 20:47 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 20:50 Expanded the Project Report Security Matrix headline summary to include prefix-list entries, route-map entries, service exposures, and warning counts alongside ACL/NAT/PBR totals.
+- 20:50 Added feature-smoke coverage for the expanded Project Report Security Matrix summary wording.
+- 20:50 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 20:56 Added CLI `show port-security summary` with secure-port totals, maximum/current/configured secure MAC counts, sticky-port count, and violation-mode totals.
+- 20:56 Added CLI `show ip dhcp snooping summary` with global state, VLAN count, MAC-verify state, trusted/untrusted/rate-limited interfaces, and snooping binding totals.
+- 20:56 Connected DHCP snooping and port-security summary commands into Verification Plan switching checks, plus help/completion/abbreviation and smoke coverage.
+- 20:56 Updated README implemented-surface notes for DHCP snooping and port-security summaries.
+- 20:56 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 21:48 Added Desktop Command Prompt `pathping <ip|name>` support that reuses the existing simulation path events and reports hop/statistics output alongside `ping` and `tracert`.
+- 21:48 Added Desktop pathping quick-command/help/placeholder exposure, feature-smoke source coverage, and README implemented-surface documentation.
+- 21:48 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 22:11 Added shared Desktop diagnostics helpers for `hostname`, `getmac`, `netstat -an` listening-port rows, and `arp -d` runtime ARP cleanup, then wired them into the Desktop Command Prompt quick commands/help.
+- 22:11 Expanded Desktop `ipconfig /all` output with adapter MAC and DHCP lease state, added `nslookup <name> <dns-server>` support, and logged successful/NXDOMAIN Desktop DNS lookups into DNS service logs.
+- 22:11 Added CLI `show service logs dns`, `clear service logs dns`, DNS log counts in `show services dns` and service-log summaries, plus CLI smoke coverage.
+- 22:11 Added listener evidence to Verification Plan Desktop service checks, standalone Service Reachability export, Project Report Services, and Lab Workbook service summaries.
+- 22:11 Updated README implemented-surface notes for Desktop diagnostics and listening-port summaries.
+- 22:11 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, and `git diff --check`.
+- 22:15 Added DNS-specific Verification Plan and Lab Workbook evidence checks via `show service logs dns`.
+- 22:15 Expanded Project Report and Service Reachability listener output using the shared Desktop `netstat -an` listener rows.
+- 22:15 Expanded Desktop `ipconfig /all` with DHCP lease expiration details and added `nslookup <name> <dns-server>` support for directed DNS tests.
+- 22:15 Attempted Go/Rust build targets; local `go` and `wasm-pack` are not installed in this environment.
+- 22:15 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, and `git diff --check`.
+- 22:23 Added Desktop Command Prompt `netstat -ano`/`-aon`/`-oan` support with stable listener PID evidence while preserving existing `netstat -an` output.
+- 22:23 Moved Desktop `nslookup <name> [dns-server]` parsing into shared Desktop diagnostics helpers and added smoke coverage for directed DNS server arguments.
+- 22:23 Updated Verification Plan and Lab Workbook DNS guidance to call out directed `nslookup <record> [dns-server]` evidence before checking `show service logs dns`.
+- 22:23 Added shared Desktop `route print` output with Windows-style Interface List, IPv4 Route Table, active routes, default gateways, and persistent-route footer.
+- 22:23 Added shared Desktop `arp -a` output with interface grouping, Internet Address, Physical Address, and dynamic-type columns.
+- 22:23 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 22:27 Extracted Desktop `ipconfig /all` rendering into shared diagnostics helpers and added direct helper smoke coverage for adapter MAC, DHCP, lease expiration, IPv4, gateway, and DNS fields.
+- 22:27 Extracted Desktop `ping -n` parsing into shared diagnostics helpers and added smoke coverage for spaced `-n`, compact `-n4` style, default count, and max-count clamping.
+- 22:27 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 22:30 Added listener PID columns to Project Report and standalone Service Reachability `Listening Ports` exports using the shared Desktop `netstat -ano` row data.
+- 22:30 Updated Verification Plan service-device tasks and Lab Workbook service checks to include `Desktop > Command Prompt > netstat -ano` PID evidence.
+- 22:30 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 22:32 Added Desktop Command Prompt `getmac /v` support with verbose connection-name, adapter-kind, physical-address, and transport-name columns.
+- 22:32 Updated README implemented-surface text for `getmac /v` and listening-port PID summaries.
+- 22:32 Re-verified `npm run build`, `npm run smoke:features`, `npm run smoke:cli`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 22:34 Added Instructor Lab Workbook service summary listener PID evidence such as `HTTP:4080` and `DNS:4053` alongside listener counts.
+- 22:34 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 22:36 Added Desktop Command Prompt route/netstat aliases for `route print -4`, `netstat -rn`, `netstat -na`, `netstat -nao`, and `netstat -noa`.
+- 22:36 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 22:37 Added Desktop `nslookup -type=A|PTR`, `-querytype=`, and `-q=` option parsing so typed forward/reverse lookups preserve directed DNS server arguments.
+- 22:37 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 22:40 Added shared Desktop trace parser support for `tracert -d` and `pathping -n` so common no-name-resolution options are ignored while preserving the target.
+- 22:40 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 22:41 Expanded Verification Plan Desktop identity evidence with `getmac /v` and `route print -4` checks.
+- 22:41 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 22:42 Hardened Desktop trace/pathping parsing for value options such as `tracert -h 5 <target>` and `pathping -q 2 <target>`.
+- 22:42 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 22:44 Hardened Desktop `ping` parsing for common Windows options such as `-4`, `-l`, `-w`, and reordered `-n` counts while preserving the bounded request count.
+- 22:44 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+- 22:46 Added `Service Log Summary` rows to the standalone Service Reachability export so DNS/HTTP/FTP/EMAIL/TFTP/SYSLOG evidence counts travel with reachability checks.
+- 22:46 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
+
+### Next
+
+- Continue with low-risk simulator/Desktop feature work and keep full web/feature/CLI smoke green.
+
 ## 2026-06-24 KST
 
 - Added Packet Tracer-style Activity Wizard window with Instructions and Check Results tabs.

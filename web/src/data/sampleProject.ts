@@ -1,18 +1,11 @@
 import { createDevice } from "./deviceCatalog";
+import { type SampleProjectTemplateId } from "./sampleProjectTemplates";
 import { addLink, recalc, validateConnection } from "../engine/topology";
 import type { NetworkDevice, NetworkPort, NetworkProject } from "../types/network";
 import { createId } from "../utils/id";
 
-export type SampleProjectTemplateId = "routed-services" | "ospf-campus" | "dual-wan-pbr" | "firewall-dmz" | "wireless-campus";
+export { sampleProjectTemplates, type SampleProjectTemplateId } from "./sampleProjectTemplates";
 type SampleActivityRequirement = { kind: NonNullable<NonNullable<NetworkProject["activity"]>["requirements"]>[number]["kind"]; label: string; target: number; points: number };
-
-export const sampleProjectTemplates: Array<{ id: SampleProjectTemplateId; name: string; detail: string }> = [
-  { id: "routed-services", name: "라우팅 서비스", detail: "PC, 라우터, 서버 서비스 기본 검증" },
-  { id: "ospf-campus", name: "OSPF 캠퍼스", detail: "L3 스위치 이중화와 OSPF 동적 라우팅" },
-  { id: "dual-wan-pbr", name: "Dual-WAN PBR", detail: "Prefix-list, route-map, IP SLA, tracked static route" },
-  { id: "firewall-dmz", name: "방화벽 DMZ", detail: "ASA/Firepower 스타일 inside/outside/dmz NAT와 ACL" },
-  { id: "wireless-campus", name: "무선 캠퍼스", detail: "WLC, AP, 무선 클라이언트, 서비스 VLAN" }
-];
 
 export function createSampleProjectFromTemplate(ownerId: string, templateId: SampleProjectTemplateId = "routed-services"): NetworkProject {
   if (templateId === "ospf-campus") return createOspfCampusSampleProject(ownerId);
@@ -76,6 +69,26 @@ export function createRoutedSampleProject(ownerId: string): NetworkProject {
         { id: createId("act_req"), kind: "annotation-count", label: "At least two workspace annotations", target: 2, points: 5 },
         { id: createId("act_req"), kind: "tdr-normal-count", label: "Three normal copper TDR links", target: 3, points: 5 },
         { id: createId("act_req"), kind: "service-count", label: "At least one service device", target: 1, points: 5 }
+      ],
+      commandOutputAssertions: [
+        {
+          id: createId("act_cli"),
+          label: "Router show version output",
+          deviceId: configuredRouter.id,
+          commands: ["enable", "show version"],
+          expectedText: "Configuration register",
+          points: 5
+        }
+      ],
+      headerAssertions: [
+        {
+          id: createId("act_hdr"),
+          label: "HTTP destination port header",
+          protocol: "HTTP",
+          field: "Destination port",
+          value: "80",
+          points: 5
+        }
       ]
     },
     simulationEvents: [],

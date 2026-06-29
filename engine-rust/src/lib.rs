@@ -42,6 +42,8 @@ pub struct StaticRoute {
     pub network: String,
     pub mask: String,
     pub next_hop: String,
+    #[serde(default)]
+    pub distance: Option<u16>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -93,7 +95,7 @@ pub fn simulate_ping(project_json: &str, source_id: &str, target_id: &str) -> St
 
 #[wasm_bindgen]
 pub fn engine_version() -> String {
-    "network-engine-rust-wasm/0.2.0".to_string()
+    "network-engine-rust-wasm/0.2.1".to_string()
 }
 
 fn simulate_ping_inner(project: &EngineProject, source_id: &str, target_id: &str) -> EngineResult {
@@ -234,10 +236,7 @@ fn route_path(project: &EngineProject, source_id: &str, source_vlan: u16, gatewa
         return merge_paths(first_leg, final_leg);
     }
 
-    let route = gateway
-        .static_routes
-        .iter()
-        .find(|route| ip_in_subnet(target_ip, &route.network, &route.mask));
+    let route = select_static_route(&gateway.static_routes, target_ip);
     let Some(route) = route else {
         return vec![];
     };
@@ -289,6 +288,25 @@ fn port_carries_vlan(port: &EnginePort, vlan: u16) -> bool {
         "trunk" => port.allowed_vlans.contains(&vlan),
         _ => port.vlan == vlan,
     }
+}
+
+fn select_static_route<'a>(routes: &'a [StaticRoute], target_ip: &str) -> Option<&'a StaticRoute> {
+    routes
+        .iter()
+        .filter(|route| ip_in_subnet(target_ip, &route.network, &route.mask))
+        .max_by(|left, right| {
+            static_route_prefix_len(left)
+                .cmp(&static_route_prefix_len(right))
+                .then_with(|| static_route_distance(right).cmp(&static_route_distance(left)))
+        })
+}
+
+fn static_route_prefix_len(route: &StaticRoute) -> u32 {
+    ipv4_to_u32(&route.mask).map(u32::count_ones).unwrap_or(0)
+}
+
+fn static_route_distance(route: &StaticRoute) -> u16 {
+    route.distance.unwrap_or(1)
 }
 
 fn bfs(project: &EngineProject, start: &str, target: &str, adjacency: &HashMap<String, Vec<String>>) -> Vec<String> {
@@ -386,4 +404,42 @@ fn fail(last: &str, at: &str, event_type: &str, message: &str) -> EngineResult {
 
 fn serialize_result(result: EngineResult) -> String {
     serde_json::to_string(&result).unwrap_or_else(|_| "{\"success\":false,\"message\":\"serialization failed\",\"events\":[]}".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn static_route(network: &str, mask: &str, next_hop: &str, distance: Option<u16>) -> StaticRoute {
+        StaticRoute {
+            network: network.to_string(),
+            mask: mask.to_string(),
+            next_hop: next_hop.to_string(),
+            distance,
+        }
+    }
+
+    #[test]
+    fn static_route_selection_prefers_longest_prefix_before_distance() {
+        let routes = vec![
+            static_route("0.0.0.0", "0.0.0.0", "10.12.0.2", Some(1)),
+            static_route("10.30.0.0", "255.255.255.0", "10.13.0.3", Some(200)),
+        ];
+
+        let selected = select_static_route(&routes, "10.30.0.10").expect("route should match");
+
+        assert_eq!(selected.next_hop, "10.13.0.3");
+    }
+
+    #[test]
+    fn static_route_selection_prefers_lower_distance_for_equal_prefix() {
+        let routes = vec![
+            static_route("10.30.0.0", "255.255.255.0", "10.12.0.2", Some(200)),
+            static_route("10.30.0.0", "255.255.255.0", "10.13.0.3", Some(10)),
+        ];
+
+        let selected = select_static_route(&routes, "10.30.0.10").expect("route should match");
+
+        assert_eq!(selected.next_hop, "10.13.0.3");
+    }
 }

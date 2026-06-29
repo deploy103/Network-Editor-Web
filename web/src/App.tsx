@@ -1,9 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { AuthScreen } from "./components/AuthScreen";
-import { Editor } from "./components/Editor";
-import { LandingPage } from "./components/LandingPage";
-import { ProjectHome } from "./components/ProjectHome";
-import { createSampleProjectFromTemplate, sampleProjectTemplates, type SampleProjectTemplateId } from "./data/sampleProject";
+import { lazy, Suspense, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { sampleProjectTemplates, type SampleProjectTemplateId } from "./data/sampleProjectTemplates";
 import { createBlankProject, currentUser, deleteProject, importProject, loadProjects, logout, markSessionActive, saveProject } from "./storage/repository";
 import type { NetworkProject, User } from "./types/network";
 import { createId } from "./utils/id";
@@ -16,6 +12,10 @@ type AppRoute =
 type SaveStatus = "saved" | "pending" | "saving" | "error";
 type AppTheme = "light" | "dark";
 const THEME_KEY = "new-network-editor-theme";
+const AuthScreen = lazy(() => import("./components/AuthScreen").then((module) => ({ default: module.AuthScreen })));
+const Editor = lazy(() => import("./components/Editor").then((module) => ({ default: module.Editor })));
+const LandingPage = lazy(() => import("./components/LandingPage").then((module) => ({ default: module.LandingPage })));
+const ProjectHome = lazy(() => import("./components/ProjectHome").then((module) => ({ default: module.ProjectHome })));
 
 function readRoute(): AppRoute {
   const path = window.location.pathname.replace(/\/+$/, "") || "/";
@@ -29,6 +29,20 @@ function readRoute(): AppRoute {
 
 function readTheme(): AppTheme {
   return localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light";
+}
+
+function RouteFallback() {
+  return (
+    <main className="auth-shell auth-refined">
+      <section className="auth-panel auth-card">
+        <strong>화면을 불러오는 중입니다.</strong>
+      </section>
+    </main>
+  );
+}
+
+function RouteBoundary({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<RouteFallback />}>{children}</Suspense>;
 }
 
 export function App() {
@@ -203,6 +217,7 @@ export function App() {
     }
     setHomeError("");
     try {
+      const { createSampleProjectFromTemplate } = await import("./data/sampleProject");
       const saved = await saveProject(createSampleProjectFromTemplate(user.id, templateId));
       setProject(saved);
       setSaveStatus("saved");
@@ -340,92 +355,108 @@ export function App() {
   if (!user) {
     if (route.name === "auth") {
       return (
-        <AuthScreen
-          initialMode={route.mode}
-          onAuthenticated={(nextUser) => {
-            setUser(nextUser);
-            navigate("/projects", true);
-          }}
-          onBack={() => navigate("/")}
-          onModeChange={(mode) => navigate(mode === "login" ? "/login" : "/signup")}
-          onThemeToggle={toggleTheme}
-          theme={theme}
-        />
+        <RouteBoundary>
+          <AuthScreen
+            initialMode={route.mode}
+            onAuthenticated={(nextUser) => {
+              setUser(nextUser);
+              navigate("/projects", true);
+            }}
+            onBack={() => navigate("/")}
+            onModeChange={(mode) => navigate(mode === "login" ? "/login" : "/signup")}
+            onThemeToggle={toggleTheme}
+            theme={theme}
+          />
+        </RouteBoundary>
       );
     }
-    return <LandingPage user={null} onLogin={() => navigate("/login")} onSignup={() => navigate("/signup")} onWorkspace={() => navigate("/login")} onLogout={signOut} onThemeToggle={toggleTheme} theme={theme} />;
+    return (
+      <RouteBoundary>
+        <LandingPage user={null} onLogin={() => navigate("/login")} onSignup={() => navigate("/signup")} onWorkspace={() => navigate("/login")} onLogout={signOut} onThemeToggle={toggleTheme} theme={theme} />
+      </RouteBoundary>
+    );
   }
 
   if (route.name === "home" || route.name === "auth") {
-    return <LandingPage user={user} onLogin={() => navigate("/projects")} onSignup={() => navigate("/projects")} onWorkspace={() => navigate("/projects")} onLogout={signOut} onThemeToggle={toggleTheme} theme={theme} />;
+    return (
+      <RouteBoundary>
+        <LandingPage user={user} onLogin={() => navigate("/projects")} onSignup={() => navigate("/projects")} onWorkspace={() => navigate("/projects")} onLogout={signOut} onThemeToggle={toggleTheme} theme={theme} />
+      </RouteBoundary>
+    );
   }
 
   if (route.name === "projects") {
     return (
-      <ProjectHome
-        user={user}
-        projects={projects}
-        error={projectsLoading ? "프로젝트를 불러오는 중입니다." : homeError}
-        onOpen={(item) => {
-          setHomeError("");
-          setProject(item);
-          navigate(`/projects/${encodeURIComponent(item.id)}`);
-        }}
-        onCreate={createProject}
-        onCreateSample={createSampleProject}
-        sampleTemplates={sampleProjectTemplates}
-        onDuplicate={duplicateProject}
-        onImport={importProjectFile}
-        onDelete={removeProject}
-        onLogout={signOut}
-        onThemeToggle={toggleTheme}
-        theme={theme}
-      />
+      <RouteBoundary>
+        <ProjectHome
+          user={user}
+          projects={projects}
+          error={projectsLoading ? "프로젝트를 불러오는 중입니다." : homeError}
+          onOpen={(item) => {
+            setHomeError("");
+            setProject(item);
+            navigate(`/projects/${encodeURIComponent(item.id)}`);
+          }}
+          onCreate={createProject}
+          onCreateSample={createSampleProject}
+          sampleTemplates={sampleProjectTemplates}
+          onDuplicate={duplicateProject}
+          onImport={importProjectFile}
+          onDelete={removeProject}
+          onLogout={signOut}
+          onThemeToggle={toggleTheme}
+          theme={theme}
+        />
+      </RouteBoundary>
     );
   }
 
   if (!project) {
     return (
-      <ProjectHome
-        user={user}
-        projects={projects}
-        error={projectsLoading ? "프로젝트를 불러오는 중입니다." : homeError || "프로젝트를 열 수 없습니다."}
-        onOpen={(item) => {
-          setHomeError("");
-          setProject(item);
-          navigate(`/projects/${encodeURIComponent(item.id)}`);
-        }}
-        onCreate={createProject}
-        onCreateSample={createSampleProject}
-        sampleTemplates={sampleProjectTemplates}
-        onDuplicate={duplicateProject}
-        onImport={importProjectFile}
-        onDelete={removeProject}
-        onLogout={signOut}
-        onThemeToggle={toggleTheme}
-        theme={theme}
-      />
+      <RouteBoundary>
+        <ProjectHome
+          user={user}
+          projects={projects}
+          error={projectsLoading ? "프로젝트를 불러오는 중입니다." : homeError || "프로젝트를 열 수 없습니다."}
+          onOpen={(item) => {
+            setHomeError("");
+            setProject(item);
+            navigate(`/projects/${encodeURIComponent(item.id)}`);
+          }}
+          onCreate={createProject}
+          onCreateSample={createSampleProject}
+          sampleTemplates={sampleProjectTemplates}
+          onDuplicate={duplicateProject}
+          onImport={importProjectFile}
+          onDelete={removeProject}
+          onLogout={signOut}
+          onThemeToggle={toggleTheme}
+          theme={theme}
+        />
+      </RouteBoundary>
     );
   }
 
   return (
-    <Editor
-      project={project}
-      saveError={saveError}
-      saveStatus={saveStatus}
-      lastSavedAt={lastSavedAt}
-      onBack={() => {
-        flushPendingSave();
-        setProject(null);
-        setRefreshKey((value) => value + 1);
-        navigate("/projects");
-      }}
-      onChange={persistProject}
-      onSave={saveProjectNow}
-      onThemeToggle={toggleTheme}
-      theme={theme}
-      user={user}
-    />
+    <RouteBoundary>
+      <Editor
+        project={project}
+        saveError={saveError}
+        saveStatus={saveStatus}
+        lastSavedAt={lastSavedAt}
+        onBack={() => {
+          flushPendingSave();
+          setProject(null);
+          setRefreshKey((value) => value + 1);
+          navigate("/projects");
+        }}
+        onChange={persistProject}
+        onSave={saveProjectNow}
+        onThemeToggle={toggleTheme}
+        theme={theme}
+        user={user}
+      />
+    </RouteBoundary>
   );
 }
 

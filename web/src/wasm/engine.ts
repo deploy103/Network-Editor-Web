@@ -9,10 +9,10 @@ interface WasmModule {
 
 let wasmModule: Promise<WasmModule | null> | null = null;
 
-export async function simulatePing(project: NetworkProject, sourceId: string, targetId: string): Promise<{ project: NetworkProject; success: boolean; message: string }> {
-  if (requiresEnhancedFallback(project)) return fallbackPing(project, sourceId, targetId);
+export async function simulatePing(project: NetworkProject, sourceId: string, targetId: string, protocol = "icmp"): Promise<{ project: NetworkProject; success: boolean; message: string }> {
+  if (requiresTypeScriptPingFallback(project, protocol)) return fallbackPing(project, sourceId, targetId, protocol);
   const wasm = await loadWasm();
-  if (!wasm) return fallbackPing(project, sourceId, targetId);
+  if (!wasm) return fallbackPing(project, sourceId, targetId, protocol);
   try {
     const payload = JSON.stringify(toEngineProject(project));
     const result = JSON.parse(wasm.simulate_ping(payload, sourceId, targetId)) as { success: boolean; message: string; events: Array<Omit<SimulationEvent, "id" | "time">> };
@@ -30,7 +30,7 @@ export async function simulatePing(project: NetworkProject, sourceId: string, ta
       message: result.message
     };
   } catch {
-    return fallbackPing(project, sourceId, targetId);
+    return fallbackPing(project, sourceId, targetId, protocol);
   }
 }
 
@@ -60,7 +60,7 @@ function toEngineProject(project: NetworkProject) {
       label: device.label,
       kind: device.kind,
       power_on: device.powerOn,
-      static_routes: device.config.staticRoutes.map((route) => ({ network: route.network, mask: route.mask, next_hop: route.nextHop })),
+      static_routes: device.config.staticRoutes.map((route) => ({ network: route.network, mask: route.mask, next_hop: route.nextHop, distance: route.distance })),
       ports: device.ports.map((port) => ({
         id: port.id,
         name: port.name,
@@ -85,10 +85,23 @@ function toEngineProject(project: NetworkProject) {
   };
 }
 
-function requiresEnhancedFallback(project: NetworkProject): boolean {
+export function requiresTypeScriptPingFallback(project: NetworkProject, protocol = "icmp"): boolean {
+  if (protocol.toLowerCase() !== "icmp") return true;
   return project.devices.some((device) =>
     device.config.accessRules.length > 0 ||
     device.config.natRules.length > 0 ||
-    device.ports.some((port) => port.kind === "wireless")
+    (device.config.routingProtocols?.length ?? 0) > 0 ||
+    (device.config.routeMaps?.length ?? 0) > 0 ||
+    (device.config.prefixLists?.length ?? 0) > 0 ||
+    (device.config.ipSlaOperations?.length ?? 0) > 0 ||
+    (device.config.trackObjects?.length ?? 0) > 0 ||
+    device.config.staticRoutes.some((route) => Boolean(route.trackId)) ||
+    device.ports.some((port) =>
+      port.kind === "wireless" ||
+      Boolean(port.accessGroupIn || port.accessGroupOut || port.policyRouteMap || port.natRole) ||
+      Boolean(port.secondaryIpAddresses?.length || port.hsrpGroups?.length || port.vrrpGroups?.length) ||
+      Boolean(port.parentPortId || port.subinterfaceVlan || port.encapsulationDot1qNative) ||
+      (port.mode === "trunk" && port.nativeVlan !== undefined && !port.allowedVlans.includes(port.nativeVlan))
+    )
   );
 }

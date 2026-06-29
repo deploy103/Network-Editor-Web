@@ -43,10 +43,20 @@ export interface SecurityMatrixReport {
     zones: number;
     aclRules: number;
     natRules: number;
+    prefixListEntries: number;
+    routeMapEntries: number;
     pbrRules: number;
     exposures: number;
     warnings: number;
   };
+}
+
+export interface SecurityPolicyTypeSummary {
+  policyType: SecurityPolicyRow["policyType"];
+  entries: number;
+  permits: number;
+  denies: number;
+  hits: number;
 }
 
 export function analyzeSecurityMatrix(project: NetworkProject): SecurityMatrixReport {
@@ -79,6 +89,8 @@ export function analyzeSecurityMatrix(project: NetworkProject): SecurityMatrixRe
       zones: zones.length,
       aclRules: policies.filter((policy) => policy.policyType === "acl").length,
       natRules: policies.filter((policy) => policy.policyType === "nat").length,
+      prefixListEntries: project.devices.reduce((total, device) => total + (device.config.prefixLists?.length ?? 0), 0),
+      routeMapEntries: project.devices.reduce((total, device) => total + (device.config.routeMaps?.length ?? 0), 0),
       pbrRules: policies.filter((policy) => policy.policyType === "pbr").length,
       exposures: exposures.length,
       warnings: warnings.length
@@ -92,6 +104,7 @@ export function buildSecurityMatrixReportText(project: NetworkProject): string {
 
 export function buildSecurityMatrixReportLines(project: NetworkProject): string[] {
   const matrix = analyzeSecurityMatrix(project);
+  const policySummary = summarizeSecurityPoliciesByType(matrix);
   return [
     "Network Editor Web Security Matrix",
     `Project: ${project.name}`,
@@ -101,9 +114,20 @@ export function buildSecurityMatrixReportLines(project: NetworkProject): string[
     `- Zones: ${matrix.totals.zones}`,
     `- ACL rules: ${matrix.totals.aclRules}`,
     `- NAT rules: ${matrix.totals.natRules}`,
+    `- Prefix-list entries: ${matrix.totals.prefixListEntries}`,
+    `- Route-map entries: ${matrix.totals.routeMapEntries}`,
     `- PBR rules: ${matrix.totals.pbrRules}`,
     `- Service exposures: ${matrix.totals.exposures}`,
     `- Warnings: ${matrix.totals.warnings}`,
+    "",
+    "Policy Type Summary",
+    ...table(["Type", "Entries", "Permit", "Deny", "Hits"], policySummary.map((summary) => [
+      summary.policyType,
+      String(summary.entries),
+      String(summary.permits),
+      String(summary.denies),
+      String(summary.hits)
+    ])),
     "",
     "Zones",
     ...table(["Zone", "Type", "Networks", "Interfaces", "Devices"], matrix.zones.map((zone) => [
@@ -141,6 +165,19 @@ export function buildSecurityMatrixReportLines(project: NetworkProject): string[
     "Warnings",
     ...(matrix.warnings.length ? matrix.warnings.map((warning) => `- ${warning}`) : ["- none"])
   ];
+}
+
+export function summarizeSecurityPoliciesByType(matrix: SecurityMatrixReport): SecurityPolicyTypeSummary[] {
+  return (["acl", "nat", "pbr"] as Array<SecurityPolicyRow["policyType"]>).map((policyType) => {
+    const entries = matrix.policies.filter((policy) => policy.policyType === policyType);
+    return {
+      policyType,
+      entries: entries.length,
+      permits: entries.filter((policy) => policy.action === "permit").length,
+      denies: entries.filter((policy) => policy.action === "deny").length,
+      hits: entries.reduce((total, policy) => total + policy.hits, 0)
+    };
+  });
 }
 
 function inferSecurityZones(project: NetworkProject): SecurityZone[] {
@@ -210,12 +247,14 @@ function aclPolicyRow(device: NetworkDevice, rule: AccessRule, zones: SecurityZo
 }
 
 function natPolicyRow(device: NetworkDevice, rule: NatRule, zones: SecurityZone[]): SecurityPolicyRow {
+  const insideLocal = natAddress(rule.insideLocal) || rule.insideLocal;
+  const insideGlobal = natAddress(rule.insideGlobal) || rule.insideGlobal;
   return {
     deviceId: device.id,
     deviceLabel: device.label,
     policyType: "nat",
-    sourceZone: zoneForAddress(rule.insideLocal, zones),
-    destinationZone: zoneForAddress(rule.insideGlobal, zones),
+    sourceZone: zoneForAddress(insideLocal, zones),
+    destinationZone: zoneForAddress(insideGlobal, zones),
     action: rule.type ?? "static",
     protocol: "ip",
     source: rule.insideLocal,
@@ -236,12 +275,12 @@ function zoneForAddress(value: string, zones: SecurityZone[]): string {
 }
 
 function serviceExposures(project: NetworkProject, zones: SecurityZone[]): SecurityExposure[] {
-  return project.devices.flatMap((device) => {
+  const direct = project.devices.flatMap((device) => {
     const enabled = Object.entries(device.config.services).filter(([, enabled]) => enabled).map(([name]) => name.toUpperCase());
-    if (!enabled.length) return [];
-    return device.ports.filter((port) => isIpv4(port.ipAddress)).flatMap((port) => enabled.map((service) => {
+    if (!device.powerOn || !enabled.length) return [];
+    return device.ports.filter((port) => port.adminUp && isIpv4(port.ipAddress)).flatMap((port) => enabled.map((service) => {
       const zone = zones.find((candidate) => candidate.interfaces.includes(`${device.label} ${port.name}`));
-      const exposure = zone?.type === "outside" ? "outside" : zone?.type === "dmz" ? "dmz" : zone?.type === "inside" || zone?.type === "internal" ? "internal" : "unknown";
+      const exposure: SecurityExposure["exposure"] = zone?.type === "outside" ? "outside" : zone?.type === "dmz" ? "dmz" : zone?.type === "inside" || zone?.type === "internal" ? "internal" : "unknown";
       return {
         deviceId: device.id,
         deviceLabel: device.label,
@@ -252,6 +291,60 @@ function serviceExposures(project: NetworkProject, zones: SecurityZone[]): Secur
         reason: exposure === "outside" ? "Service IP is directly in an outside zone." : exposure === "dmz" ? "Service is placed in a DMZ zone." : "Service is not directly outside-facing."
       };
     }));
+  });
+  const staticNat = project.devices.flatMap((serviceDevice) => {
+    const enabled = Object.entries(serviceDevice.config.services).filter(([, enabled]) => enabled).map(([name]) => name.toUpperCase());
+    if (!serviceDevice.powerOn || !enabled.length) return [];
+    return serviceDevice.ports.filter((port) => port.adminUp && isIpv4(port.ipAddress)).flatMap((port) =>
+      project.devices.flatMap((policyDevice) =>
+        !policyDevice.powerOn ? [] : policyDevice.config.natRules
+          .filter((rule) => (rule.type ?? "static") === "static" && natAddress(rule.insideLocal) === port.ipAddress && isIpv4(natAddress(rule.insideGlobal)) && natOutsideOperational(policyDevice, rule))
+          .flatMap((rule) => {
+            const globalAddress = natAddress(rule.insideGlobal);
+            const globalZone = zoneForAddress(globalAddress, zones);
+            return enabled.map((service) => ({
+              deviceId: serviceDevice.id,
+              deviceLabel: serviceDevice.label,
+              service,
+              ipAddress: globalAddress,
+              zone: globalZone === "unknown" ? "outside NAT" : globalZone,
+              exposure: "outside" as const,
+              reason: `Static NAT on ${policyDevice.label} publishes ${port.ipAddress} as ${globalAddress}.`
+            }));
+          })
+      )
+    );
+  });
+  return dedupeExposures([...direct, ...staticNat]);
+}
+
+function natAddress(value: string): string {
+  const hostMatch = value.match(/host\s+(\d+\.\d+\.\d+\.\d+)/i);
+  return hostMatch?.[1] ?? (isIpv4(value) ? value : "");
+}
+
+function natOutsideOperational(device: NetworkDevice, rule: NatRule): boolean {
+  const names = [rule.outsideInterface, rule.interfaceName].filter((name): name is string => Boolean(name));
+  if (!names.length) return true;
+  return names.some((name) => {
+    const port = device.ports.find((candidate) => portNameMatches(candidate.name, name));
+    return Boolean(port?.adminUp);
+  });
+}
+
+function portNameMatches(portName: string, query: string): boolean {
+  const compactPort = portName.toLowerCase().replace(/\s+/g, "");
+  const compactQuery = query.toLowerCase().replace(/\s+/g, "");
+  return compactPort === compactQuery;
+}
+
+function dedupeExposures(exposures: SecurityExposure[]): SecurityExposure[] {
+  const seen = new Set<string>();
+  return exposures.filter((exposure) => {
+    const key = `${exposure.deviceId}:${exposure.service}:${exposure.ipAddress}:${exposure.exposure}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
 }
 

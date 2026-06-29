@@ -1,11 +1,13 @@
 import { analyzeAddressPlan } from "./addressPlan";
 import { analyzeConfigDrift } from "./configDrift";
+import { desktopNetstatListeningRows } from "./desktopDiagnostics";
 import { analyzeFailureImpact } from "./failureImpact";
 import { analyzeProjectAudit } from "./projectAudit";
 import { analyzeSecurityMatrix } from "./securityMatrix";
 import { analyzeServiceReachability } from "./serviceReachability";
+import { endpoint, linkLabel } from "./topology";
 import { buildVerificationPlan } from "./verificationPlan";
-import type { NetworkProject } from "../types/network";
+import type { NetworkDevice, NetworkLink, NetworkProject } from "../types/network";
 
 export type WorkbookAudience = "student" | "instructor";
 
@@ -83,7 +85,7 @@ function overviewSection(project: NetworkProject, audience: WorkbookAudience): W
 function topologySection(project: NetworkProject): WorkbookSection {
   const impact = analyzeFailureImpact(project);
   const devices = project.devices.map((device) => `- ${device.label}: ${device.model} (${device.kind})`);
-  const links = project.links.map((link) => `- ${link.type} ${link.status}: ${link.endpointA.deviceId} <-> ${link.endpointB.deviceId}`);
+  const links = project.links.map((link) => `- ${link.type} ${workbookLinkState(project, link)}: ${linkLabel(project, link)}`);
   return {
     title: "Topology Inventory",
     lines: [
@@ -129,6 +131,22 @@ function addressingSection(project: NetworkProject, audience: WorkbookAudience):
 function serviceSection(project: NetworkProject): WorkbookSection {
   const reachability = analyzeServiceReachability(project);
   const serviceServers = reachability.servers.map((server) => `- ${server.label} ${server.ipAddress}: ${server.services.map((service) => service.toUpperCase()).join(", ")}`);
+  const serviceSummary = project.devices.filter(hasServiceWorkbookSurface).map((device) => {
+    const serviceEntries = Object.entries(device.config.services);
+    const enabledCount = serviceEntries.filter(([, enabled]) => enabled).length;
+    const activePools = device.config.dhcpPools.filter((pool) => pool.enabled).length;
+    const listenerRows = desktopNetstatListeningRows(device);
+    const listenerSummary = listenerRows.map((row) => `${row.service}:${row.pid}`).join(", ");
+    const logSummary = [
+      `DNS ${workbookServiceLogCount(device, "DNS")}`,
+      `HTTP ${workbookServiceLogCount(device, "HTTP")}`,
+      `FTP ${workbookServiceLogCount(device, "FTP")}`,
+      `EMAIL ${workbookServiceLogCount(device, "EMAIL")}`,
+      `TFTP ${workbookServiceLogCount(device, "TFTP")}`,
+      `SYSLOG ${device.runtime.logs.length}`
+    ].join(", ");
+    return `- ${device.label}: services ${enabledCount}/${serviceEntries.length}, listeners ${listenerRows.length}${listenerSummary ? ` (${listenerSummary})` : ""}, DHCP pools ${activePools}/${device.config.dhcpPools.length}, DHCP leases ${device.runtime.dhcpLeases.length}, DNS records ${device.config.dnsRecords.length}, logs ${logSummary}`;
+  });
   const blocked = reachability.checks.filter((check) => check.status === "blocked" || check.status === "local-only").slice(0, 10);
   return {
     title: "Services",
@@ -136,25 +154,41 @@ function serviceSection(project: NetworkProject): WorkbookSection {
       "Service endpoints",
       ...(serviceServers.length ? serviceServers : ["- none"]),
       "",
+      "Service summary",
+      ...(serviceSummary.length ? serviceSummary : ["- none"]),
+      "",
       `Reachability: ${reachability.totals.reachable} reachable, ${reachability.totals.blocked} blocked, ${reachability.totals.localOnly} local-only.`,
       ...(blocked.length ? ["", "Open service gaps", ...blocked.map((check) => `- ${check.client.label} ${check.service.toUpperCase()}: ${check.reason}`)] : []),
       "",
       "Required checks",
       "- Use Desktop or Complex PDU tests for DNS and HTTP when those services are enabled.",
+      "- Use Desktop Command Prompt netstat -an or netstat -ano on service devices to confirm listening application ports and PID evidence.",
+      "- Use show services summary on service devices to confirm enabled and disabled service counts.",
       "- Confirm DHCP leases are issued from the intended pool when DHCP is part of the lab.",
-      "- Check service logs after test traffic is generated."
+      "- Use show ip dhcp pool summary when DHCP pools are part of the lab.",
+      "- Use show ip dhcp binding summary after DHCP tests to confirm lease evidence.",
+      "- Use show hosts summary when DNS records or name servers are part of the lab.",
+      "- Use show service logs dns after nslookup <record> <dns-server> tests to confirm directed DNS evidence.",
+      "- Check service logs after test traffic is generated.",
+      "- Use show service logs summary on service devices to confirm per-service evidence counts."
     ]
   };
 }
 
 function securitySection(project: NetworkProject, audience: WorkbookAudience): WorkbookSection {
   const matrix = analyzeSecurityMatrix(project);
+  const prefixListCount = project.devices.reduce((total, device) => total + (device.config.prefixLists?.length ?? 0), 0);
+  const routeMapCount = project.devices.reduce((total, device) => total + (device.config.routeMaps?.length ?? 0), 0);
+  const pbrPortCount = project.devices.reduce((total, device) => total + device.ports.filter((port) => port.policyRouteMap).length, 0);
   return {
     title: "Security And Policy",
     lines: [
       `Zones: ${matrix.totals.zones}`,
       `ACL rules: ${matrix.totals.aclRules}`,
       `NAT rules: ${matrix.totals.natRules}`,
+      `Prefix-list entries: ${prefixListCount}`,
+      `Route-map entries: ${routeMapCount}`,
+      `PBR-enabled ports: ${pbrPortCount}`,
       `PBR rules: ${matrix.totals.pbrRules}`,
       "",
       "Exposure summary",
@@ -198,7 +232,9 @@ function gradingSection(project: NetworkProject, audience: WorkbookAudience): Wo
   return {
     title: "Grading Checklist",
     lines: [
+      "Requirements",
       ...(requirements.length ? requirements.map((requirement) => `- ${requirement.label}: ${requirement.target} target, ${requirement.points} points`) : ["- Add Activity Wizard requirements for scored grading."]),
+      ...activityDetailLines(project, audience),
       "",
       "Always check",
       `- Startup-config saved on network devices: ${drift.totals.inSync} in sync, ${drift.totals.unsaved} unsaved, ${drift.totals.drifted} drifted.`,
@@ -207,6 +243,66 @@ function gradingSection(project: NetworkProject, audience: WorkbookAudience): Wo
       audience === "instructor" ? "- Export Activity Check and Project Report as grading artifacts." : "- Submit the project after saving configurations and completing verification."
     ]
   };
+}
+
+function activityDetailLines(project: NetworkProject, audience: WorkbookAudience): string[] {
+  const activity = project.activity;
+  if (!activity) return [];
+  const counts = {
+    commandRules: activity.commandRules?.length ?? 0,
+    commandSequences: activity.commandSequences?.length ?? 0,
+    commandOutputAssertions: activity.commandOutputAssertions?.length ?? 0,
+    interfaceExpectations: activity.interfaceExpectations?.length ?? 0,
+    headerAssertions: activity.headerAssertions?.length ?? 0
+  };
+  if (audience !== "instructor") {
+    const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+    return total ? [
+      "",
+      "Activity checks",
+      `- Instructor has ${total} detailed Activity checks configured. Use Check Results before submission.`
+    ] : [];
+  }
+
+  const lines: string[] = ["", "Instructor Activity Checks"];
+  if (activity.answerSnapshot) {
+    lines.push(
+      "Answer snapshot",
+      `- Captured ${activity.answerSnapshot.capturedAt}: ${activity.answerSnapshot.devices.length} devices, ${activity.answerSnapshot.links.length} links, ${activity.answerSnapshot.annotationCount} annotations, ${activity.answerSnapshot.serviceDeviceIds.length} service devices, ${activity.answerSnapshot.startupConfigDeviceIds.length} startup configs.`
+    );
+  }
+  if (counts.commandRules) {
+    lines.push("Command rules", ...(activity.commandRules ?? []).map((rule) =>
+      `- ${rule.label}: ${rule.deviceId ? deviceLabel(project, rule.deviceId) : "Any device"} command "${rule.command}" (${rule.points} pts)`
+    ));
+  }
+  if (counts.commandSequences) {
+    lines.push("Command sequences", ...(activity.commandSequences ?? []).map((sequence) =>
+      `- ${sequence.label}: ${sequence.deviceId ? deviceLabel(project, sequence.deviceId) : "Any device"} sequence ${sequence.commands.join(" -> ")} (${sequence.points} pts)`
+    ));
+  }
+  if (counts.commandOutputAssertions) {
+    lines.push("Command output assertions", ...(activity.commandOutputAssertions ?? []).map((assertion) =>
+      `- ${assertion.label}: ${assertion.deviceId ? deviceLabel(project, assertion.deviceId) : "Any device"} ${assertion.commands.join(" && ")} contains "${assertion.expectedText}" (${assertion.points} pts)`
+    ));
+  }
+  if (counts.interfaceExpectations) {
+    lines.push("Interface expectations", ...(activity.interfaceExpectations ?? []).map((expectation) => {
+      const expected = [
+        expectation.ipAddress ? `ip ${expectation.ipAddress}` : "",
+        expectation.subnetMask ? `mask ${expectation.subnetMask}` : "",
+        expectation.mode ? `mode ${expectation.mode}` : "",
+        expectation.vlan !== undefined ? `vlan ${expectation.vlan}` : ""
+      ].filter(Boolean).join(", ") || "configured state";
+      return `- ${expectation.label}: ${deviceLabel(project, expectation.deviceId)} ${portLabel(project, expectation.deviceId, expectation.portId)} expects ${expected} (${expectation.points} pts)`;
+    }));
+  }
+  if (counts.headerAssertions) {
+    lines.push("Packet header assertions", ...(activity.headerAssertions ?? []).map((assertion) =>
+      `- ${assertion.label}: ${(assertion.protocol || "Any").toUpperCase()} ${assertion.field}=${assertion.value} (${assertion.points} pts)`
+    ));
+  }
+  return lines.length > 2 ? lines : [];
 }
 
 function troubleshootingSection(project: NetworkProject): WorkbookSection {
@@ -250,4 +346,34 @@ function defaultObjectives(): string[] {
     "3. Save network device configurations.",
     "4. Prove reachability with CLI, Desktop tools, and PDU simulation."
   ];
+}
+
+function workbookLinkState(project: NetworkProject, link: NetworkLink): string {
+  if (link.status !== "up") return link.status;
+  const a = endpoint(project, link.endpointA);
+  const b = endpoint(project, link.endpointB);
+  return a?.device.powerOn && b?.device.powerOn && a.port.adminUp && b.port.adminUp ? "active" : "inactive (stored up)";
+}
+
+function deviceLabel(project: NetworkProject, deviceId: string): string {
+  return project.devices.find((device) => device.id === deviceId)?.label ?? deviceId;
+}
+
+function portLabel(project: NetworkProject, deviceId: string, portId: string): string {
+  const device = project.devices.find((item): item is NetworkDevice => item.id === deviceId);
+  return device?.ports.find((port) => port.id === portId)?.name ?? portId;
+}
+
+function hasServiceWorkbookSurface(device: NetworkDevice): boolean {
+  return Object.values(device.config.services).some(Boolean) ||
+    device.config.dhcpPools.length > 0 ||
+    (device.config.dhcpExcludedRanges?.length ?? 0) > 0 ||
+    device.config.dnsRecords.length > 0 ||
+    (device.config.nameServers ?? []).length > 0 ||
+    device.runtime.dhcpLeases.length > 0 ||
+    device.runtime.logs.length > 0;
+}
+
+function workbookServiceLogCount(device: NetworkDevice, prefix: string): number {
+  return device.runtime.logs.filter((log) => log.message.startsWith(prefix)).length;
 }

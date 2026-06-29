@@ -242,7 +242,7 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
   const base = session.mode === "exec"
       ? ["enable", "setup", "show version", "show boot", "show inventory", "show platform", "show tech-support", "show clock", "show privilege", "show history", "show debugging", "show interfaces", "show ip interface brief", "show ip route", "show route", "show cdp", "show cdp neighbors", "show arp", "ping ", "traceroute ", "terminal length 0", "help"]
     : session.mode === "privileged"
-      ? ["disable", "setup", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show boot", "show inventory", "show platform", "show module", "show environment", "show tech-support", "show clock", "clock set 12:34:56 Jun 19 2026", "show privilege", "show history", "show debugging", "show logging", "show service logs", "show service logs http", "show service logs ftp", "show service logs email", "show service logs tftp", "show service logs syslog", "show services", "show services enabled", "show services disabled", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show cable-diagnostics tdr", "show spanning-tree", "show standby", "show standby brief", "show vrrp", "show vrrp brief", "show interfaces", "show interfaces counters", "show interfaces description", "show interfaces status", "show interfaces transceiver", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip ssh", "show ip route", "show ip route summary", "show ip route connected", "show ip route interface ", "show ip route gateway ", "show ip route local", "show ip route static", "show route", "show route-map", "show route-map ", "show ip prefix-list", "show ip prefix-list ", "show ip protocols", "show ip protocols ospf", "show ip protocols eigrp", "show ip protocols static", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show vlan summary", "show vlan id ", "show vlan name ", "show mac address-table", "show mac address-table address ", "show mac address-table dynamic", "show mac address-table interface ", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show arp ", "show ip dhcp binding", "show ip dhcp binding ", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp pool ", "show ip dhcp server statistics", "show hosts", "show hosts ", "show access-list", "show ip access-lists", "show nat", "test cable-diagnostics tdr interface ", "debug ip icmp", "debug ip packet", "debug ip dhcp server events", "debug spanning-tree events", "undebug all", "clear arp", "clear arp-cache", "clear arp 192.168.1.10", "clear logging", "clear service logs", "clear service logs http", "clear service logs ftp", "clear service logs email", "clear service logs tftp", "clear service logs syslog", "clear mac address-table", "clear mac address-table dynamic", "clear mac address-table dynamic interface ", "clear mac address-table vlan ", "clear ip dhcp binding", "clear ip dhcp binding *", "clear ip dhcp conflict *", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
+      ? ["disable", "setup", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show boot", "show inventory", "show platform", "show module", "show environment", "show tech-support", "show clock", "clock set 12:34:56 Jun 19 2026", "show privilege", "show history", "show debugging", "show logging", "show logging summary", "show service logs", "show service logs summary", "show service logs dns", "show service logs http", "show service logs ftp", "show service logs email", "show service logs tftp", "show service logs syslog", "show services", "show services summary", "show services enabled", "show services disabled", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show cable-diagnostics tdr", "show spanning-tree", "show spanning-tree summary", "show standby", "show standby brief", "show vrrp", "show vrrp brief", "show interfaces", "show interfaces counters", "show interfaces description", "show interfaces status", "show interfaces transceiver", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip ssh", "show ip route", "show ip route 10.20.0.55", "show ip route summary", "show ip route connected", "show ip route 10.20.0.0 255.255.255.0", "show ip route 10.20.0.0 255.255.255.0 longer-prefixes", "show ip route 10.20.0.0/24", "show ip route 10.20.0.0/24 longer-prefixes", "show ip route interface ", "show ip route gateway ", "show ip route local", "show ip route static", "show route", "show route-map", "show route-map ", "show route-map summary", "show route-map PBR detail", "show ip prefix-list", "show ip prefix-list ", "show ip prefix-list summary", "show ip prefix-list detail", "show ip prefix-list DST30 detail", "show ip protocols", "show ip protocols ospf", "show ip protocols eigrp", "show ip protocols static", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show nat statistics", "show vlan brief", "show vlan summary", "show vlan id ", "show vlan name ", "show mac address-table", "show mac address-table summary", "show mac address-table address ", "show mac address-table dynamic", "show mac address-table interface ", "show cdp summary", "show cdp neighbors", "show cdp neighbors detail", "show lldp summary", "show arp", "show arp summary", "show arp ", "show ip dhcp binding", "show ip dhcp binding summary", "show ip dhcp binding ", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp pool summary", "show ip dhcp pool ", "show ip dhcp server statistics", "show hosts", "show hosts summary", "show hosts ", "show access-list", "show access-list summary", "show ip access-lists", "show ip access-lists summary", "show nat", "test cable-diagnostics tdr interface ", "debug ip icmp", "debug ip packet", "debug ip dhcp server events", "debug spanning-tree events", "undebug all", "clear arp", "clear arp-cache", "clear arp 192.168.1.10", "clear logging", "clear service logs", "clear service logs dns", "clear service logs http", "clear service logs ftp", "clear service logs email", "clear service logs tftp", "clear service logs syslog", "clear mac address-table", "clear mac address-table dynamic", "clear mac address-table dynamic interface ", "clear mac address-table vlan ", "clear ip dhcp binding", "clear ip dhcp binding *", "clear ip dhcp conflict *", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
         ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "username admin secret cisco", "no username ", "interface ", "int ", "interface range fa0/1 - 2", "default interface ", "vlan ", "no vlan ", "spanning-tree vlan 1 root primary", "no spanning-tree vlan 1 root primary", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "route-map PBR permit 10", "no route-map PBR", "ip prefix-list DST30 seq 5 permit 10.30.0.0/24", "no ip prefix-list DST30", "ip route ", "ip route 10.20.0.0 255.255.255.0 192.168.10.1 200", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-name lab.local", "no ip domain-name", "ip name-server 8.8.8.8", "no ip name-server ", "ip ssh version 2", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "crypto key zeroize rsa", "logging host 192.168.1.100", "logging trap warnings", "logging buffered", "no logging console", "ip dhcp excluded-address 192.168.1.1 192.168.1.20", "ip dhcp pool ", "no ip dhcp excluded-address ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "ip nat inside source list 10 interface fa0/1 overload", "no ip nat inside source static ", "no ip nat inside source list 10 interface fa0/1 overload", "ip access-list standard ", "ip access-list extended ", "ip access-list resequence WEB-FILTER 10 10", "no ip access-list extended ", "access-list 101 remark campus edge", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service password-encryption", "no service password-encryption", "service dhcp", "no service dhcp", "service dns", "no service dns", "service http", "no service http", "service ftp", "no service ftp", "service email", "no service email", "service tftp", "no service tftp", "service syslog", "no service syslog", "do show ip route", "do show route-map", "do show ip prefix-list", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
@@ -269,14 +269,17 @@ function featureCommandCandidates(device: NetworkDevice, session: CliSession): s
   if (session.mode === "privileged") {
     return [
       "show cdp",
+      "show cdp summary",
       "show cdp interface",
       "show cdp neighbors",
       "show cdp neighbors detail",
       "show lldp",
+      "show lldp summary",
       "show lldp interface",
       "show lldp neighbors",
       "show lldp neighbors detail",
       "show ip dhcp snooping",
+      "show ip dhcp snooping summary",
       "show ip dhcp snooping binding",
       "show vtp status",
       "show vtp counters",
@@ -287,18 +290,24 @@ function featureCommandCandidates(device: NetworkDevice, session: CliSession): s
       "show vrrp brief",
       "show route-map",
       "show route-map PBR",
+      "show route-map summary",
+      "show route-map PBR detail",
       "show ip prefix-list",
       "show ip prefix-list DST30",
+      "show ip prefix-list summary",
+      "show ip prefix-list DST30 detail",
       "show ip sla summary",
       "show ip sla configuration",
       "show track",
       "show errdisable recovery",
+      "show spanning-tree summary",
       "show etherchannel summary",
       "show etherchannel port-channel",
       "show etherchannel 1 detail",
       "show interfaces transceiver",
       "show interfaces transceiver detail",
       "show port-security",
+      "show port-security summary",
       "show port-security address",
       "show port-security interface "
     ];
@@ -854,7 +863,7 @@ function expandShowCommand(rest: string[]): string {
   if (isAbbrev(first, "module", 3)) return "show module";
   if (isAbbrev(first, "environment", 3) || isAbbrev(first, "env", 3)) return "show environment";
   if (isAbbrev(first, "errdisable", 3) && isAbbrev(second, "recovery", 3)) return "show errdisable recovery";
-  if (isAbbrev(first, "logging", 3)) return "show logging";
+  if (isAbbrev(first, "logging", 3)) return ["show logging", ...rest.slice(1)].join(" ").trim();
   if (isAbbrev(first, "service", 4) && isAbbrev(second, "logs", 3)) return ["show service logs", ...rest.slice(2)].join(" ").trim();
   if (isAbbrev(first, "services", 4)) return ["show services", ...rest.slice(1)].join(" ").trim();
   if (isAbbrev(first, "flash", 2)) return "show flash";
@@ -872,18 +881,22 @@ function expandShowCommand(rest: string[]): string {
   if (isAbbrev(first, "tech-support", 4) || (first === "tech" && isAbbrev(second, "support", 3))) return "show tech-support";
   if (isAbbrev(first, "protocols", 3)) return ["show protocols", ...rest.slice(1)].join(" ").trim();
   if (isAbbrev(first, "track", 3)) return ["show track", ...rest.slice(1)].join(" ").trim();
-  if (first === "route" || first === "ro") return "show ip route";
+  if (first === "route" || first === "ro") return ["show ip route", ...rest.slice(1)].join(" ").trim();
   if (first === "route-map" || first.startsWith("route-m")) return ["show route-map", ...rest.slice(1)].join(" ").trim();
   if (first === "arp") return ["show arp", ...rest.slice(1)].join(" ").trim();
   if (first === "host" || first === "hosts") return ["show hosts", ...rest.slice(1)].join(" ").trim();
-  if (first === "nat") return "show nat";
+  if (first === "nat") {
+    if (isAbbrev(second, "statistics", 3) || isAbbrev(second, "stats", 3)) return "show ip nat statistics";
+    if (isAbbrev(second, "translations", 2) || isAbbrev(second, "translation", 2)) return "show ip nat translations";
+    return "show nat";
+  }
   if (isAbbrev(first, "etherchannel", 5)) return ["show etherchannel", ...rest.slice(1)].join(" ").trim();
   if (isAbbrev(first, "port-security", 4)) return ["show port-security", ...rest.slice(1)].join(" ").trim();
   if (first === "vtp") return ["show vtp", ...rest.slice(1)].join(" ").trim() || "show vtp status";
   if (first === "lldp") {
     if (isAbbrev(second, "neighbors", 3)) return lowerRest[2]?.startsWith("det") ? "show lldp neighbors detail" : "show lldp neighbors";
     if (isAbbrev(second, "interface", 3)) return ["show lldp interface", ...rest.slice(2)].join(" ").trim();
-    return "show lldp";
+    return ["show lldp", ...rest.slice(1)].join(" ").trim();
   }
   if (isAbbrev(first, "vlan")) {
     if (isAbbrev(second, "summary", 3)) return "show vlan summary";
@@ -894,7 +907,7 @@ function expandShowCommand(rest: string[]): string {
   if (first === "cdp") {
     if (isAbbrev(second, "neighbors", 3)) return lowerRest[2]?.startsWith("det") ? "show cdp neighbors detail" : "show cdp neighbors";
     if (isAbbrev(second, "interface", 3)) return ["show cdp interface", ...rest.slice(2)].join(" ").trim();
-    return "show cdp";
+    return ["show cdp", ...rest.slice(1)].join(" ").trim();
   }
   if (first === "ip") {
     if (isAbbrev(second, "route", 2)) return ["show ip route", ...rest.slice(2)].join(" ");
@@ -2979,7 +2992,10 @@ function showCommand(device: NetworkDevice, lower: string, session?: CliSession)
   if (lower === "show platform" || lower === "show module") return platformStatus(device);
   if (lower === "show environment") return environmentStatus(device);
   if (lower === "show errdisable recovery") return errdisableRecoveryStatus(device);
-  if (lower === "show logging") return loggingStatus(device);
+  if (lower === "show logging" || lower.startsWith("show logging ")) {
+    const filter = lower.slice("show logging".length).trim();
+    return filter && isAbbrev(filter, "summary", 3) ? loggingSummary(device) : loggingStatus(device);
+  }
   if (lower === "show service logs" || lower.startsWith("show service logs ")) return serviceLogStatus(device, lower.slice("show service logs".length).trim());
   if (lower === "show services" || lower.startsWith("show services ")) return servicesStatus(device, lower.slice("show services".length).trim());
   if (lower === "show flash" || lower === "show flash:") return flashDirectory(device);
@@ -3138,9 +3154,9 @@ function clearDhcpBindings(device: NetworkDevice, session: CliSession, lower: st
 function clearServiceLogs(device: NetworkDevice, session: CliSession, lower: string): CliResult {
   const service = lower.slice("clear service logs".length).trim().toLowerCase();
   if (!service || service === "*" || service === "all" || service === "syslog") return result({ ...device, runtime: { ...device.runtime, logs: [] } }, session, "");
-  const prefixes: Record<string, string> = { http: "HTTP", ftp: "FTP", email: "EMAIL", tftp: "TFTP" };
+  const prefixes: Record<string, string> = { dns: "DNS", http: "HTTP", ftp: "FTP", email: "EMAIL", tftp: "TFTP" };
   const prefix = prefixes[service];
-  if (!prefix) return result(device, session, "% Usage: clear service logs [all|http|ftp|email|tftp|syslog]");
+  if (!prefix) return result(device, session, "% Usage: clear service logs [all|dns|http|ftp|email|tftp|syslog]");
   return result({ ...device, runtime: { ...device.runtime, logs: device.runtime.logs.filter((log) => !log.message.startsWith(prefix)) } }, session, "");
 }
 
@@ -3197,6 +3213,7 @@ function clearMacAddressTable(device: NetworkDevice, session: CliSession, lower:
 function hostsStatus(device: NetworkDevice, filter = ""): string {
   const nameServers = device.config.nameServers ?? [];
   const query = filter.trim().toLowerCase();
+  if (query && isAbbrev(query, "summary", 3)) return hostsSummary(device);
   const hostRecords = query
     ? device.config.dnsRecords.filter((record) => record.name.toLowerCase().includes(query) || record.value === query)
     : device.config.dnsRecords;
@@ -3209,6 +3226,29 @@ function hostsStatus(device: NetworkDevice, filter = ""): string {
     "Host                     Address",
     ...hostRecords.map((record) => `${record.name.padEnd(25)}${record.value}`)
   ].join("\n");
+}
+
+function hostsSummary(device: NetworkDevice): string {
+  const nameServers = device.config.nameServers ?? [];
+  const duplicateNames = duplicateHostNames(device.config.dnsRecords.map((record) => record.name));
+  return [
+    "Host summary",
+    `Default domain: ${device.config.domainName || "not set"}`,
+    `Name servers: ${nameServers.length}`,
+    `Host records: ${device.config.dnsRecords.length}`,
+    `IPv4 host records: ${device.config.dnsRecords.filter((record) => isIpv4(record.value)).length}`,
+    `Duplicate host names: ${duplicateNames.length}`
+  ].join("\n");
+}
+
+function duplicateHostNames(names: string[]): string[] {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const name of names.map((item) => item.toLowerCase()).filter(Boolean)) {
+    if (seen.has(name)) duplicates.add(name);
+    seen.add(name);
+  }
+  return Array.from(duplicates);
 }
 
 function currentClock(device: NetworkDevice): string {
@@ -3261,15 +3301,52 @@ function loggingStatus(device: NetworkDevice): string {
   ].join("\n");
 }
 
+function loggingSummary(device: NetworkDevice): string {
+  const logging = device.config.logging ?? { console: true, buffered: true, hosts: [], trap: "informational" };
+  const counts = {
+    info: device.runtime.logs.filter((log) => log.level === "info").length,
+    warning: device.runtime.logs.filter((log) => log.level === "warning").length,
+    error: device.runtime.logs.filter((log) => log.level === "error").length
+  };
+  return [
+    "Logging summary",
+    `Buffered messages: ${device.runtime.logs.length}`,
+    `Info messages: ${counts.info}`,
+    `Warning messages: ${counts.warning}`,
+    `Error messages: ${counts.error}`,
+    `Console logging: ${logging.console ? "enabled" : "disabled"}`,
+    `Buffer logging: ${logging.buffered ? "enabled" : "disabled"}`,
+    `Trap level: ${logging.trap}`,
+    `Logging hosts: ${logging.hosts.join(", ") || "none"}`
+  ].join("\n");
+}
+
 function serviceLogStatus(device: NetworkDevice, service = ""): string {
   const normalized = service.trim().toLowerCase();
-  const services: Record<string, string> = { http: "HTTP", ftp: "FTP", email: "EMAIL", tftp: "TFTP" };
+  const services: Record<string, string> = { dns: "DNS", http: "HTTP", ftp: "FTP", email: "EMAIL", tftp: "TFTP" };
+  if (normalized === "summary") return serviceLogSummary(device);
   if (!normalized || normalized === "all" || normalized === "*" || normalized === "syslog") {
     return [`Service log: ${normalized ? normalized.toUpperCase() : "ALL"}`, ...runtimeLogLines(device.runtime.logs)].join("\n");
   }
   const prefix = services[normalized];
-  if (!prefix) return "% Usage: show service logs [all|http|ftp|email|tftp|syslog]";
+  if (!prefix) return "% Usage: show service logs [all|summary|dns|http|ftp|email|tftp|syslog]";
   return [`Service log: ${prefix}`, ...runtimeLogLines(device.runtime.logs.filter((log) => log.message.startsWith(prefix)))].join("\n");
+}
+
+function serviceLogSummary(device: NetworkDevice): string {
+  const rows = [
+    ["DNS", serviceLogCount(device, "DNS")],
+    ["HTTP", serviceLogCount(device, "HTTP")],
+    ["FTP", serviceLogCount(device, "FTP")],
+    ["EMAIL", serviceLogCount(device, "EMAIL")],
+    ["TFTP", serviceLogCount(device, "TFTP")],
+    ["SYSLOG", device.runtime.logs.length]
+  ];
+  return [
+    "Service log summary",
+    "Service   Logs",
+    ...rows.map(([service, count]) => `${String(service).padEnd(10)}${count}`)
+  ].join("\n");
 }
 
 function runtimeLogLines(logs: NetworkDevice["runtime"]["logs"]): string[] {
@@ -3280,6 +3357,7 @@ function runtimeLogLines(logs: NetworkDevice["runtime"]["logs"]): string[] {
 
 function servicesStatus(device: NetworkDevice, filter = ""): string {
   const normalized = filter.trim().toLowerCase();
+  if (normalized === "summary") return servicesSummary(device);
   const services = Object.entries(device.config.services).filter(([name, enabled]) => {
     if (!normalized) return true;
     if (normalized === "enabled") return enabled;
@@ -3293,9 +3371,23 @@ function servicesStatus(device: NetworkDevice, filter = ""): string {
   ].join("\n");
 }
 
+function servicesSummary(device: NetworkDevice): string {
+  const entries = Object.entries(device.config.services);
+  const enabled = entries.filter(([, state]) => state).length;
+  const disabled = entries.length - enabled;
+  return [
+    "Services summary",
+    `Enabled services: ${enabled}`,
+    `Disabled services: ${disabled}`,
+    `Runtime logs: ${device.runtime.logs.length}`,
+    `DHCP pools: ${device.config.dhcpPools.length}`,
+    `DNS records: ${device.config.dnsRecords.length}`
+  ].join("\n");
+}
+
 function serviceDetail(device: NetworkDevice, service: string): string {
   if (service === "dhcp") return `${device.config.dhcpPools.filter((pool) => pool.enabled).length}/${device.config.dhcpPools.length} pools, ${dhcpExcludedRanges(device).length} excluded ranges`;
-  if (service === "dns") return `${device.config.dnsRecords.length} host records, ${(device.config.nameServers ?? []).length} name servers`;
+  if (service === "dns") return `${device.config.dnsRecords.length} host records, ${(device.config.nameServers ?? []).length} name servers, ${serviceLogCount(device, "DNS")} logs`;
   if (service === "http") return `${device.ports.filter((port) => port.adminUp && port.ipAddress).length} listening interfaces, ${serviceLogCount(device, "HTTP")} logs`;
   if (service === "ftp") return `anonymous read-only, readme.txt, running-config.txt, network-backup.ptweb, ${serviceLogCount(device, "FTP")} logs`;
   if (service === "email") return `SMTP/POP3 mailboxes: admin, user, ${serviceLogCount(device, "EMAIL")} logs`;
@@ -3310,6 +3402,7 @@ function serviceLogCount(device: NetworkDevice, prefix: string): number {
 
 function dhcpBindingStatus(device: NetworkDevice, filter = ""): string {
   const query = filter.trim().toLowerCase();
+  if (query && isAbbrev(query, "summary", 3)) return dhcpBindingSummary(device);
   const leases = query
     ? device.runtime.dhcpLeases.filter((lease) => lease.ipAddress === query || lease.deviceId.toLowerCase().includes(query) || lease.macAddress.toLowerCase() === query)
     : device.runtime.dhcpLeases;
@@ -3323,6 +3416,19 @@ function dhcpBindingStatus(device: NetworkDevice, filter = ""): string {
       const expires = new Date(lease.expiresAt).toLocaleString("ko-KR", { hour12: false });
       return `${lease.ipAddress.padEnd(17)}${lease.macAddress.padEnd(24)}${expires.padEnd(25)}Automatic (${lease.deviceId})`;
     })
+  ].join("\n");
+}
+
+function dhcpBindingSummary(device: NetworkDevice): string {
+  const now = Date.now();
+  const active = device.runtime.dhcpLeases.filter((lease) => lease.expiresAt > now);
+  const expired = device.runtime.dhcpLeases.length - active.length;
+  return [
+    "DHCP binding summary",
+    `Total bindings: ${device.runtime.dhcpLeases.length}`,
+    `Active bindings: ${active.length}`,
+    `Expired bindings: ${expired}`,
+    `Unique clients: ${new Set(device.runtime.dhcpLeases.map((lease) => lease.deviceId).filter(Boolean)).size}`
   ].join("\n");
 }
 
@@ -3362,8 +3468,9 @@ function dhcpServerStatistics(device: NetworkDevice): string {
 }
 
 function dhcpPoolStatus(device: NetworkDevice, filter = ""): string {
-  if (!device.config.dhcpPools.length) return "No DHCP pools.";
   const query = filter.trim().toLowerCase();
+  if (query && isAbbrev(query, "summary", 3)) return dhcpPoolSummary(device);
+  if (!device.config.dhcpPools.length) return "No DHCP pools.";
   const pools = query ? device.config.dhcpPools.filter((pool) => pool.name.toLowerCase() === query || pool.name.toLowerCase().includes(query)) : device.config.dhcpPools;
   if (!pools.length) return `% DHCP pool ${filter} not found.`;
   return pools.map((pool) => {
@@ -3385,6 +3492,22 @@ function dhcpPoolStatus(device: NetworkDevice, filter = ""): string {
       ` State                          : ${pool.enabled ? "active" : "disabled"}`
     ].join("\n");
   }).join("\n\n");
+}
+
+function dhcpPoolSummary(device: NetworkDevice): string {
+  const pools = device.config.dhcpPools;
+  const activePools = pools.filter((pool) => pool.enabled).length;
+  const activeLeases = device.runtime.dhcpLeases.filter((lease) => lease.expiresAt > Date.now()).length;
+  const totalCapacity = pools.reduce((total, pool) => total + Math.max(0, pool.maxLeases), 0);
+  return [
+    "DHCP pool summary",
+    `Configured pools: ${pools.length}`,
+    `Active pools: ${activePools}`,
+    `Disabled pools: ${pools.length - activePools}`,
+    `Total lease capacity: ${totalCapacity}`,
+    `Active leases: ${activeLeases}`,
+    `Excluded ranges: ${dhcpExcludedRanges(device).length}`
+  ].join("\n");
 }
 
 function applyLoggingCommand(device: NetworkDevice, command: string, lower: string): NetworkDevice {
@@ -3844,6 +3967,7 @@ function vlanDetail(device: NetworkDevice, filter: string): string {
 
 function arpTableStatus(device: NetworkDevice, filter = ""): string {
   const query = filter.trim().toLowerCase();
+  if (query && isAbbrev(query, "summary", 3)) return arpTableSummary(device);
   const entries = query
     ? device.runtime.arpTable.filter((entry) =>
       entry.ipAddress === query ||
@@ -3858,7 +3982,17 @@ function arpTableStatus(device: NetworkDevice, filter = ""): string {
   ].join("\n");
 }
 
+function arpTableSummary(device: NetworkDevice): string {
+  return [
+    "ARP summary",
+    `Total entries: ${device.runtime.arpTable.length}`,
+    `Unique MACs: ${new Set(device.runtime.arpTable.map((entry) => normalizeMacAddress(entry.macAddress)).filter(Boolean)).size}`,
+    `Interfaces: ${new Set(device.runtime.arpTable.map((entry) => entry.portName).filter(Boolean)).size}`
+  ].join("\n");
+}
+
 function macAddressTable(device: NetworkDevice, lower: string): string {
+  if (lower.split(/\s+/).some((token) => isAbbrev(token, "summary", 3))) return macAddressTableSummary(device);
   let entries = [...device.runtime.macTable];
   const vlanMatch = lower.match(/\bvlan\s+(\d+)/);
   const interfaceMatch = lower.match(/\binterface\s+(.+)$/);
@@ -3874,6 +4008,17 @@ function macAddressTable(device: NetworkDevice, lower: string): string {
   return entries.length
     ? ["Vlan  Mac Address         Type      Ports", ...entries.map((entry) => `${String(entry.vlan).padEnd(6)}${entry.macAddress.padEnd(20)}${entry.type.padEnd(10)}${entry.portName}`)].join("\n")
     : "No entries learned.";
+}
+
+function macAddressTableSummary(device: NetworkDevice): string {
+  return [
+    "MAC address-table summary",
+    `Total entries: ${device.runtime.macTable.length}`,
+    `Dynamic entries: ${device.runtime.macTable.filter((entry) => entry.type === "dynamic").length}`,
+    `Static entries: ${device.runtime.macTable.filter((entry) => entry.type === "static").length}`,
+    `VLANs: ${new Set(device.runtime.macTable.map((entry) => entry.vlan)).size}`,
+    `Interfaces: ${new Set(device.runtime.macTable.map((entry) => entry.portName).filter(Boolean)).size}`
+  ].join("\n");
 }
 
 function normalizeMacAddress(value: string): string {
@@ -3982,6 +4127,7 @@ function errdisableRecoveryStatus(device: NetworkDevice): string {
 function cdpStatus(device: NetworkDevice, filter = ""): string {
   const cdp = cdpConfig(device);
   const normalized = filter.trim().toLowerCase();
+  if (normalized && isAbbrev(normalized, "summary", 3)) return cdpSummary(device);
   if (normalized.startsWith("interface")) {
     const name = filter.trim().slice("interface".length).trim();
     return cdpInterfaceStatus(device, name);
@@ -4004,6 +4150,21 @@ function cdpStatus(device: NetworkDevice, filter = ""): string {
   ].join("\n");
 }
 
+function cdpSummary(device: NetworkDevice): string {
+  const cdp = cdpConfig(device);
+  const dataPorts = device.ports.filter((port) => port.kind !== "console");
+  const enabledInterfaces = dataPorts.filter((port) => cdp.enabled && port.cdpEnabled !== false).length;
+  return [
+    "CDP summary",
+    `Global state: ${cdp.enabled ? "enabled" : "disabled"}`,
+    `Timer: ${cdp.timer} seconds`,
+    `Holdtime: ${cdp.holdtime} seconds`,
+    `Version: ${cdp.version}`,
+    `Enabled interfaces: ${enabledInterfaces}`,
+    `Disabled interfaces: ${dataPorts.length - enabledInterfaces}`
+  ].join("\n");
+}
+
 function cdpInterfaceStatus(device: NetworkDevice, name = ""): string {
   const cdp = cdpConfig(device);
   const ports = name ? [findPort(device, name)].filter((port): port is NetworkPort => Boolean(port)) : device.ports.filter((port) => port.kind !== "console");
@@ -4017,6 +4178,7 @@ function cdpInterfaceStatus(device: NetworkDevice, name = ""): string {
 function lldpStatus(device: NetworkDevice, filter = ""): string {
   const lldp = lldpConfig(device);
   const normalized = filter.trim().toLowerCase();
+  if (normalized && isAbbrev(normalized, "summary", 3)) return lldpSummary(device);
   if (normalized.startsWith("interface")) {
     const name = filter.trim().slice("interface".length).trim();
     return lldpInterfaceStatus(device, name);
@@ -4041,6 +4203,19 @@ function lldpStatus(device: NetworkDevice, filter = ""): string {
   ].join("\n");
 }
 
+function lldpSummary(device: NetworkDevice): string {
+  const lldp = lldpConfig(device);
+  const dataPorts = device.ports.filter((port) => port.kind !== "console");
+  return [
+    "LLDP summary",
+    `Global state: ${lldp.enabled ? "enabled" : "disabled"}`,
+    `Timer: ${lldp.timer} seconds`,
+    `Holdtime: ${lldp.holdtime} seconds`,
+    `TX interfaces: ${dataPorts.filter((port) => lldp.enabled && port.lldpTransmit).length}`,
+    `RX interfaces: ${dataPorts.filter((port) => lldp.enabled && port.lldpReceive).length}`
+  ].join("\n");
+}
+
 function lldpInterfaceStatus(device: NetworkDevice, name = ""): string {
   const lldp = lldpConfig(device);
   const ports = name ? [findPort(device, name)].filter((port): port is NetworkPort => Boolean(port)) : device.ports.filter((port) => port.kind !== "console");
@@ -4058,11 +4233,12 @@ function lldpInterfaceStatus(device: NetworkDevice, name = ""): string {
 
 function dhcpSnoopingStatus(device: NetworkDevice, filter = ""): string {
   const normalized = filter.trim().toLowerCase();
+  if (normalized && isAbbrev(normalized, "summary", 3)) return dhcpSnoopingSummary(device);
   if (normalized === "binding" || normalized.startsWith("binding ")) {
     const query = filter.trim().slice("binding".length).trim();
     return dhcpSnoopingBindingStatus(device, query);
   }
-  if (normalized && normalized !== "vlan") return "% Usage: show ip dhcp snooping [binding]";
+  if (normalized && normalized !== "vlan") return "% Usage: show ip dhcp snooping [summary|binding]";
   const snooping = dhcpSnoopingConfig(device);
   const enabledVlans = snooping.vlans.length ? snooping.vlans.join(",") : "none";
   return [
@@ -4075,6 +4251,23 @@ function dhcpSnoopingStatus(device: NetworkDevice, filter = ""): string {
     ...device.ports
       .filter((port) => port.kind !== "console")
       .map((port) => `${port.name.padEnd(23)}${(port.dhcpSnoopingTrusted ? "yes" : "no").padEnd(11)}${port.dhcpSnoopingRateLimit ?? "unlimited"}`)
+  ].join("\n");
+}
+
+function dhcpSnoopingSummary(device: NetworkDevice): string {
+  const snooping = dhcpSnoopingConfig(device);
+  const dataPorts = device.ports.filter((port) => port.kind !== "console");
+  const trustedPorts = dataPorts.filter((port) => port.dhcpSnoopingTrusted).length;
+  const rateLimitedPorts = dataPorts.filter((port) => port.dhcpSnoopingRateLimit !== undefined).length;
+  return [
+    "DHCP snooping summary",
+    `Global state: ${snooping.enabled ? "enabled" : "disabled"}`,
+    `Enabled VLANs: ${snooping.vlans.length}`,
+    `Verify MAC address: ${snooping.verifyMacAddress ? "enabled" : "disabled"}`,
+    `Trusted interfaces: ${trustedPorts}`,
+    `Untrusted interfaces: ${dataPorts.length - trustedPorts}`,
+    `Rate-limited interfaces: ${rateLimitedPorts}`,
+    `Snooping bindings: ${device.runtime.dhcpLeases.length}`
   ].join("\n");
 }
 
@@ -4131,6 +4324,7 @@ function dhcpSnoopingBindingStatus(device: NetworkDevice, filter = ""): string {
 
 function portSecurityStatus(device: NetworkDevice, filter = ""): string {
   const normalized = filter.trim().toLowerCase();
+  if (normalized && isAbbrev(normalized, "summary", 3)) return portSecuritySummary(device);
   if (normalized.startsWith("interface ")) {
     const name = filter.trim().slice("interface ".length);
     const port = findPort(device, name);
@@ -4145,6 +4339,26 @@ function portSecurityStatus(device: NetworkDevice, filter = ""): string {
       const security = portSecurity(port);
       return `${port.name.padEnd(21)}${String(security.maximum).padEnd(15)}${String(secureAddressCount(device, port)).padEnd(13)}${String(0).padEnd(19)}${security.violation}`;
     })
+  ].join("\n");
+}
+
+function portSecuritySummary(device: NetworkDevice): string {
+  const ports = device.ports.filter((port) => port.kind !== "console" && portSecurity(port).enabled);
+  const maximumAddresses = ports.reduce((total, port) => total + portSecurity(port).maximum, 0);
+  const currentAddresses = ports.reduce((total, port) => total + secureAddressCount(device, port), 0);
+  const configuredAddresses = ports.reduce((total, port) => total + portSecurity(port).secureMacAddresses.length, 0);
+  const stickyPorts = ports.filter((port) => portSecurity(port).sticky).length;
+  const restrictPorts = ports.filter((port) => portSecurity(port).violation === "restrict").length;
+  const protectPorts = ports.filter((port) => portSecurity(port).violation === "protect").length;
+  const shutdownPorts = ports.filter((port) => portSecurity(port).violation === "shutdown").length;
+  return [
+    "Port-security summary",
+    `Secure ports: ${ports.length}`,
+    `Maximum secure addresses: ${maximumAddresses}`,
+    `Current secure addresses: ${currentAddresses}`,
+    `Configured secure MACs: ${configuredAddresses}`,
+    `Sticky ports: ${stickyPorts}`,
+    `Violation modes: restrict ${restrictPorts}, protect ${protectPorts}, shutdown ${shutdownPorts}`
   ].join("\n");
 }
 
@@ -4252,6 +4466,7 @@ function protocolsStatus(device: NetworkDevice, filter = ""): string {
 }
 
 function spanningTreeStatus(device: NetworkDevice, filter = ""): string {
+  if (filter.trim().toLowerCase() && isAbbrev(filter.trim().toLowerCase(), "summary", 3)) return spanningTreeSummary(device);
   const requestedVlans = filter.startsWith("vlan ") ? parseVlans(filter.slice("vlan ".length)) : [];
   const roots = new Set(device.config.stpRootPrimaryVlans ?? []);
   const secondaryRoots = new Set(device.config.stpRootSecondaryVlans ?? []);
@@ -4274,6 +4489,29 @@ function spanningTreeStatus(device: NetworkDevice, filter = ""): string {
         return `${port.name.padEnd(23)}Desg ${port.adminUp && device.powerOn ? "FWD" : "BLK"} ${String(cost).padEnd(9)}${priority}.${String(index + 1).padEnd(4)}${port.stpPortfast ? "P2p Edge" : "P2p"}${port.bpduGuard ? " BPDU Guard" : ""}`;
       })
   ].join("\n")).join("\n\n");
+}
+
+function spanningTreeSummary(device: NetworkDevice): string {
+  const vlans = device.config.vlans.length ? device.config.vlans : [{ id: 1, name: "default" }];
+  const roots = new Set(device.config.stpRootPrimaryVlans ?? []);
+  const secondaryRoots = new Set(device.config.stpRootSecondaryVlans ?? []);
+  const dataPorts = device.ports.filter((port) => port.kind !== "console");
+  const portInstances = vlans.flatMap((vlan) => dataPorts.filter((port) =>
+    port.mode === "access" ? port.vlan === vlan.id : port.mode === "trunk" ? port.allowedVlans.includes(vlan.id) : false
+  ));
+  const forwardingInstances = portInstances.filter((port) => device.powerOn && port.adminUp).length;
+  const blockingInstances = portInstances.length - forwardingInstances;
+  return [
+    "Spanning-tree summary",
+    `Mode: ${device.config.stpMode === "rapid-pvst" ? "rapid-pvst" : "pvst"}`,
+    `VLAN instances: ${vlans.length}`,
+    `Root primary VLANs: ${vlans.filter((vlan) => roots.has(vlan.id)).length}`,
+    `Root secondary VLANs: ${vlans.filter((vlan) => secondaryRoots.has(vlan.id)).length}`,
+    `Forwarding port instances: ${forwardingInstances}`,
+    `Blocking port instances: ${blockingInstances}`,
+    `PortFast interfaces: ${dataPorts.filter((port) => port.stpPortfast).length}`,
+    `BPDU Guard interfaces: ${dataPorts.filter((port) => port.bpduGuard).length}`
+  ].join("\n");
 }
 
 function standbyStatus(device: NetworkDevice, filter = ""): string {
@@ -4623,12 +4861,12 @@ function routeTable(device: NetworkDevice, filter = ""): string {
   const staticRoutes = device.config.staticRoutes.map((route) => {
     const prefix = isIpv4(route.mask) ? maskToPrefix(route.mask) : route.mask;
     const code = route.network === "0.0.0.0" && route.mask === "0.0.0.0" ? "S*" : "S ";
-    const track = route.trackId ? trackObjects(device).find((item) => item.trackId === route.trackId) : undefined;
-    const trackSuffix = route.trackId ? ` track ${route.trackId} ${track && trackObjectCliUp(device, track) ? "up" : "down"}` : "";
+    const trackSuffix = route.trackId ? ` track ${route.trackId} ${staticRouteCliActive(device, route) ? "up" : "down"}` : "";
     return `${code}   ${route.network}/${prefix} [${staticRouteDistance(route)}/0] via ${route.nextHop}${trackSuffix}`;
   });
   const defaultRoute = [...device.config.staticRoutes]
     .filter((route) => route.network === "0.0.0.0" && route.mask === "0.0.0.0")
+    .filter((route) => staticRouteCliActive(device, route))
     .sort((left, right) => staticRouteDistance(left) - staticRouteDistance(right))[0];
   const gatewayLine = defaultRoute ? `Gateway of last resort is ${defaultRoute.nextHop} to network 0.0.0.0` : device.config.defaultGateway ? `Gateway of last resort is ${device.config.defaultGateway}` : "Gateway of last resort is not set";
   const body = filterRouteLines([...connected, ...staticRoutes].filter((line, index, list) => list.indexOf(line) === index), filter);
@@ -4639,6 +4877,12 @@ function routeTable(device: NetworkDevice, filter = ""): string {
     "",
     ...(body.length ? body : ["No routes installed."])
   ].join("\n");
+}
+
+function staticRouteCliActive(device: NetworkDevice, route: StaticRouteConfig): boolean {
+  if (!route.trackId) return true;
+  const track = trackObjects(device).find((item) => item.trackId === route.trackId);
+  return Boolean(track && trackObjectCliUp(device, track));
 }
 
 function routeSummary(device: NetworkDevice): string {
@@ -4673,15 +4917,91 @@ function filterRouteLines(lines: string[], filter: string): string[] {
       return lowerLine.includes(`, ${name}`) || lowerLine.replace(/\s+/g, "").includes(`,${compactName}`);
     });
   }
-  if (isIpv4(filter)) return lines.filter((line) => line.includes(filter));
+  const cidr = parseRouteCidrFilter(filter);
+  if (cidr) {
+    if (cidr.longerPrefixes) {
+      const queryMask = prefixToMask(cidr.prefix);
+      return lines.filter((line) => {
+        const prefix = routeLinePrefix(line);
+        return Boolean(prefix && prefix.prefix >= cidr.prefix && ipInSubnet(prefix.network, cidr.network, queryMask));
+      });
+    }
+    return lines.filter((line) => line.includes(`${cidr.network}/${cidr.prefix}`));
+  }
+  const [network, mask] = filter.split(/\s+/);
+  if (network && mask && isIpv4(network) && isIpv4(mask) && isSubnetMask(mask)) {
+    if (filter.toLowerCase().split(/\s+/).includes("longer-prefixes")) {
+      const queryPrefix = maskToPrefix(mask);
+      return lines.filter((line) => {
+        const prefix = routeLinePrefix(line);
+        return Boolean(prefix && prefix.prefix >= queryPrefix && ipInSubnet(prefix.network, network, mask));
+      });
+    }
+    return lines.filter((line) => line.includes(`${network}/${maskToPrefix(mask)}`));
+  }
+  if (isIpv4(filter)) {
+    const exact = lines.filter((line) => line.includes(filter));
+    if (exact.length) return exact;
+    return routeLinesCoveringIp(lines, filter);
+  }
   return lines.filter((line) => line.toLowerCase().includes(filter.toLowerCase()));
+}
+
+function parseRouteCidrFilter(filter: string): { network: string; prefix: number; longerPrefixes: boolean } | null {
+  const tokens = filter.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const match = tokens[0]?.match(/^(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})$/);
+  if (!match) return null;
+  const prefix = Number(match[2]);
+  if (!isIpv4(match[1]) || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) return null;
+  return {
+    network: networkAddress(match[1], prefixToMask(prefix)),
+    prefix,
+    longerPrefixes: tokens.includes("longer-prefixes")
+  };
+}
+
+function routeLinesCoveringIp(lines: string[], ipAddress: string): string[] {
+  const matches = lines
+    .map((line) => ({ line, prefix: routeLinePrefix(line) }))
+    .filter((entry): entry is { line: string; prefix: { network: string; prefix: number } } => Boolean(entry.prefix))
+    .filter((entry) => ipInSubnet(ipAddress, entry.prefix.network, prefixToMask(entry.prefix.prefix)))
+    .sort((left, right) => right.prefix.prefix - left.prefix.prefix);
+  const installedMatches = matches.filter((entry) => routeLineInstalled(entry.line));
+  const candidates = installedMatches.length ? installedMatches : matches;
+  const bestPrefix = candidates[0]?.prefix.prefix;
+  if (bestPrefix === undefined) return [];
+  const bestPrefixMatches = candidates.filter((entry) => entry.prefix.prefix === bestPrefix);
+  const bestDistance = Math.min(...bestPrefixMatches.map((entry) => routeLineDistance(entry.line)));
+  return bestPrefixMatches.filter((entry) => routeLineDistance(entry.line) === bestDistance).map((entry) => entry.line);
+}
+
+function routeLinePrefix(line: string): { network: string; prefix: number } | null {
+  const match = line.match(/(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})/);
+  if (!match) return null;
+  const prefix = Number(match[2]);
+  if (!isIpv4(match[1]) || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) return null;
+  return { network: match[1], prefix };
+}
+
+function routeLineInstalled(line: string): boolean {
+  return !/\strack\s+\d+\s+down\b/i.test(line);
+}
+
+function routeLineDistance(line: string): number {
+  const match = line.match(/\[(\d+)\/\d+\]/);
+  return match ? Number(match[1]) : 0;
+}
+
+function prefixToMask(prefix: number): string {
+  const value = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  return [(value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255].join(".");
 }
 
 function ipProtocols(device: NetworkDevice, filter = ""): string {
   const protocols = routingProtocols(device);
   const blocks: string[][] = [];
   if (device.config.staticRoutes.length) {
-    blocks.push([`Routing Protocol is "static"`, `  Static routes configured: ${device.config.staticRoutes.length}`, ...device.config.staticRoutes.map((route) => `  ${route.network} ${route.mask} via ${route.nextHop} distance ${staticRouteDistance(route)}${route.trackId ? ` track ${route.trackId}` : ""}`)]);
+    blocks.push([`Routing Protocol is "static"`, `  Static routes configured: ${device.config.staticRoutes.length}`, ...device.config.staticRoutes.map((route) => `  ${route.network} ${route.mask} via ${route.nextHop} distance ${staticRouteDistance(route)}${route.trackId ? ` track ${route.trackId} ${staticRouteCliActive(device, route) ? "up" : "down"}` : ""}`)]);
   }
   for (const protocol of protocols) {
     blocks.push([
@@ -4879,7 +5199,7 @@ function help(mode: CliMode): string {
   if (mode === "acl") return "[sequence] permit|deny <protocol> <source> <destination>, [sequence] permit|deny <source> [wildcard], [sequence] remark <text>, no <sequence>, exit";
   if (mode === "route-map") return "description <text>, match ip address <acl...>, match ip address prefix-list <name...>, set ip next-hop <address>, no match ip address [acl...], no set ip next-hop, exit";
   if (mode === "ip-sla") return "icmp-echo <target-ip> [source-interface <name>], frequency <seconds>, timeout <ms>, threshold <ms>, shutdown, no shutdown, exit";
-  return "enable, setup, configure terminal, clock set, show clock, show run, show version, show boot, show platform, show environment, show tech-support, show services, show interfaces, show interfaces counters, show interfaces description, show interfaces switchport, show interfaces trunk, show etherchannel summary, show standby, show port-security, show cdp, show cable-diagnostics tdr, test cable-diagnostics tdr interface <name>, show ip interface, show ip interface brief, show interfaces status, show vlan brief, show ip route, show ip route summary, show ip protocols, show ip ospf neighbor, show ip eigrp neighbors, show ip rip database, show ip dhcp pool, show hosts, show access-list, show nat, show cdp neighbors, show arp, show ip dhcp binding, clear arp, clear mac address-table, clear ip dhcp binding, write memory, reload, write erase";
+  return "enable, setup, configure terminal, clock set, show clock, show run, show version, show boot, show platform, show environment, show tech-support, show services, show service logs [summary|dns|http|ftp|email|tftp|syslog], show logging [summary], show interfaces, show interfaces counters, show interfaces description, show interfaces switchport, show interfaces trunk, show etherchannel summary, show spanning-tree [summary|vlan], show standby, show port-security [summary|address|interface], show cdp [summary|neighbors|interface], show lldp [summary|neighbors|interface], show cable-diagnostics tdr, test cable-diagnostics tdr interface <name>, show ip interface, show ip interface brief, show interfaces status, show vlan brief, show ip route, show ip route <host-ip>, show ip route <network> <mask> [longer-prefixes], show ip route <network>/<prefix> [longer-prefixes], show ip route summary, show access-list [summary|detail], show route-map [summary|detail], show ip prefix-list [summary|detail], show ip protocols, show ip ospf neighbor, show ip eigrp neighbors, show ip rip database, show ip dhcp snooping [summary|binding], show ip dhcp pool [summary|name], show hosts [summary|name], show nat, show cdp neighbors, show arp [summary|ip], show mac address-table [summary|filters], show ip dhcp binding [summary|ip], clear arp, clear mac address-table, clear ip dhcp binding, write memory, reload, write erase";
 }
 
 function searchHelp(term: string): string {
@@ -4903,6 +5223,10 @@ function searchHelp(term: string): string {
     "show privilege",
     "show history",
     "show services",
+    "show services summary",
+    "show logging summary",
+    "show service logs summary",
+    "show service logs dns",
     "show ip interface",
     "show ip interface brief",
     "show ip ssh",
@@ -4915,24 +5239,40 @@ function searchHelp(term: string): string {
     "show interfaces counters",
     "show vlan brief",
     "show mac address-table dynamic",
+    "show mac address-table summary",
     "show etherchannel summary",
     "show etherchannel port-channel",
     "show etherchannel <group> detail",
     "show port-security",
+    "show port-security summary",
     "show port-security interface <name>",
     "show port-security address",
     "show cdp",
+    "show cdp summary",
     "show cdp interface",
+    "show lldp summary",
     "show ip route",
+    "show ip route <host-ip>",
+    "show ip route <network> <mask>",
+    "show ip route <network> <mask> longer-prefixes",
+    "show ip route <network>/<prefix>",
+    "show ip route <network>/<prefix> longer-prefixes",
     "show ip route summary",
     "show route-map",
+    "show route-map summary",
+    "show route-map <name> detail",
     "show ip prefix-list",
+    "show ip prefix-list summary",
+    "show ip prefix-list detail",
+    "show ip prefix-list <name> detail",
     "show ip sla summary",
     "show track",
     "show controllers",
     "show cable-diagnostics tdr",
     "show cable-diagnostics tdr interface <name>",
     "test cable-diagnostics tdr interface <name>",
+    "show spanning-tree summary",
+    "show spanning-tree vlan <id>",
     "show ip protocols",
     "show ip ospf",
     "show ip ospf neighbor",
@@ -4943,17 +5283,26 @@ function searchHelp(term: string): string {
     "show ip rip database",
     "show ip nat translations",
     "show ip nat statistics",
+    "show nat statistics",
+    "show ip dhcp snooping summary",
+    "show ip dhcp snooping binding",
     "show ip dhcp pool",
+    "show ip dhcp pool summary",
+    "show ip dhcp binding summary",
     "show hosts",
+    "show hosts summary",
     "ip name-server <address> [address...]",
     "duplex auto|full|half",
     "speed auto|<mbps>",
     "mtu <bytes>",
     "bandwidth <kbit>",
     "show access-list",
+    "show access-list summary",
+    "show access-list <name> detail",
     "ip access-list resequence <name> <start> <increment>",
     "show nat",
     "show cdp neighbors",
+    "show arp summary",
     "reload",
     "write erase",
     "ping <ip-or-host>",
@@ -5633,13 +5982,50 @@ function prefixListConfigLines(device: NetworkDevice): string[] {
 }
 
 function prefixListStatus(device: NetworkDevice, filter = ""): string {
-  const entries = orderedPrefixLists(device, filter);
-  if (!entries.length) return filter ? `% Prefix-list ${filter} not found.` : "No IP prefix lists configured.";
+  const parsed = parsePrefixListShowFilter(filter);
+  const entries = orderedPrefixLists(device, parsed.name);
+  if (!entries.length) return parsed.name ? `% Prefix-list ${parsed.name} not found.` : "No IP prefix lists configured.";
+  if (parsed.mode === "summary") return prefixListSummary(entries);
+  if (parsed.mode === "detail") return prefixListDetail(entries);
   const grouped = new Map<string, PrefixListConfig[]>();
   for (const entry of entries) grouped.set(entry.name, [...(grouped.get(entry.name) ?? []), entry]);
   return [...grouped.entries()].flatMap(([name, group]) => [
     `ip prefix-list ${name}: ${group.length} entries`,
     ...group.map((entry) => `   seq ${entry.sequence} ${entry.action} ${entry.prefix}${entry.ge !== undefined ? ` ge ${entry.ge}` : ""}${entry.le !== undefined ? ` le ${entry.le}` : ""} (${entry.hits} matches)`)
+  ]).join("\n");
+}
+
+function parsePrefixListShowFilter(filter: string): { name: string; mode: "normal" | "summary" | "detail" } {
+  const tokens = filter.trim().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return { name: "", mode: "normal" };
+  const first = tokens[0]?.toLowerCase();
+  const last = tokens.at(-1)?.toLowerCase();
+  if (first === "summary" || first === "detail") return { name: tokens.slice(1).join(" "), mode: first };
+  if (last === "summary" || last === "detail") return { name: tokens.slice(0, -1).join(" "), mode: last };
+  return { name: filter.trim(), mode: "normal" };
+}
+
+function prefixListSummary(entries: PrefixListConfig[]): string {
+  const grouped = new Map<string, PrefixListConfig[]>();
+  for (const entry of entries) grouped.set(entry.name, [...(grouped.get(entry.name) ?? []), entry]);
+  return [
+    "Prefix-list summary",
+    "Name                 Entries  Permit  Deny  Hits",
+    ...[...grouped.entries()].map(([name, group]) => {
+      const permits = group.filter((entry) => entry.action === "permit").length;
+      const denies = group.filter((entry) => entry.action === "deny").length;
+      const hits = group.reduce((sum, entry) => sum + entry.hits, 0);
+      return `${name.padEnd(21)}${String(group.length).padEnd(9)}${String(permits).padEnd(8)}${String(denies).padEnd(6)}${hits}`;
+    })
+  ].join("\n");
+}
+
+function prefixListDetail(entries: PrefixListConfig[]): string {
+  const grouped = new Map<string, PrefixListConfig[]>();
+  for (const entry of entries) grouped.set(entry.name, [...(grouped.get(entry.name) ?? []), entry]);
+  return [...grouped.entries()].flatMap(([name, group]) => [
+    `ip prefix-list ${name}: ${group.length} entries`,
+    ...group.map((entry) => `   seq ${entry.sequence} ${entry.action} ${entry.prefix} ge ${entry.ge ?? "-"} le ${entry.le ?? "-"} hits ${entry.hits}`)
   ]).join("\n");
 }
 
@@ -5745,8 +6131,10 @@ function routeMapConfigLines(device: NetworkDevice): string[] {
 }
 
 function routeMapStatus(device: NetworkDevice, filter = ""): string {
-  const maps = orderedRouteMaps(device, filter);
-  if (!maps.length) return filter ? `% Route-map ${filter} not found.` : "No route maps configured.";
+  const parsed = parseRouteMapShowFilter(filter);
+  const maps = orderedRouteMaps(device, parsed.name);
+  if (!maps.length) return parsed.name ? `% Route-map ${parsed.name} not found.` : "No route maps configured.";
+  if (parsed.mode === "summary") return routeMapSummary(maps);
   return maps.map((entry) => [
     `route-map ${entry.name}, ${entry.action}, sequence ${entry.sequence}`,
     ...(entry.description ? [`  Description: ${entry.description}`] : []),
@@ -5759,15 +6147,43 @@ function routeMapStatus(device: NetworkDevice, filter = ""): string {
   ].join("\n")).join("\n\n");
 }
 
+function parseRouteMapShowFilter(filter: string): { name: string; mode: "normal" | "summary" | "detail" } {
+  const tokens = filter.trim().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return { name: "", mode: "normal" };
+  const first = tokens[0]?.toLowerCase();
+  const last = tokens.at(-1)?.toLowerCase();
+  if (first === "summary" || first === "detail") return { name: tokens.slice(1).join(" "), mode: first };
+  if (last === "summary" || last === "detail") return { name: tokens.slice(0, -1).join(" "), mode: last };
+  return { name: filter.trim(), mode: "normal" };
+}
+
+function routeMapSummary(entries: RouteMapConfig[]): string {
+  const grouped = new Map<string, RouteMapConfig[]>();
+  for (const entry of entries) grouped.set(entry.name, [...(grouped.get(entry.name) ?? []), entry]);
+  return [
+    "Route-map summary",
+    "Name                 Entries  Permit  Deny  Set next-hop  Hits",
+    ...[...grouped.entries()].map(([name, group]) => {
+      const permits = group.filter((entry) => entry.action === "permit").length;
+      const denies = group.filter((entry) => entry.action === "deny").length;
+      const setNextHop = group.filter((entry) => entry.setNextHop).length;
+      const hits = group.reduce((sum, entry) => sum + entry.hits, 0);
+      return `${name.padEnd(21)}${String(group.length).padEnd(9)}${String(permits).padEnd(8)}${String(denies).padEnd(6)}${String(setNextHop).padEnd(14)}${hits}`;
+    })
+  ].join("\n");
+}
+
 function aclUsage(): string {
   return "% Usage: access-list <list> permit|deny|remark ...";
 }
 
 function accessListStatus(device: NetworkDevice, filter = ""): string {
-  const rulesToShow = filter
-    ? device.config.accessRules.filter((rule) => aclListName(rule).toLowerCase() === filter.toLowerCase())
+  const parsed = parseAccessListShowFilter(filter);
+  const rulesToShow = parsed.name
+    ? device.config.accessRules.filter((rule) => aclListName(rule).toLowerCase() === parsed.name.toLowerCase())
     : device.config.accessRules;
   if (!rulesToShow.length) return "No access lists configured.";
+  if (parsed.mode === "summary") return accessListSummary(rulesToShow);
   const groups = new Map<string, AccessRule[]>();
   for (const rule of rulesToShow) {
     const name = aclListName(rule);
@@ -5777,6 +6193,35 @@ function accessListStatus(device: NetworkDevice, filter = ""): string {
     `${rules.every(isStandardAccessRule) ? "Standard" : "Extended"} IP access list ${name}`,
     ...orderedAccessRules(rules).map((rule, index) => `    ${String(accessRuleSequence(rule, index)).padEnd(4)} ${accessRuleBody(rule)}${rule.remark ? "" : ` (${rule.hits} matches)`}`)
   ]).join("\n");
+}
+
+function parseAccessListShowFilter(filter: string): { name: string; mode: "normal" | "summary" | "detail" } {
+  const tokens = filter.trim().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return { name: "", mode: "normal" };
+  const first = tokens[0]?.toLowerCase();
+  const last = tokens.at(-1)?.toLowerCase();
+  if (first === "summary" || first === "detail") return { name: tokens.slice(1).join(" "), mode: first };
+  if (last === "summary" || last === "detail") return { name: tokens.slice(0, -1).join(" "), mode: last };
+  return { name: filter.trim(), mode: "normal" };
+}
+
+function accessListSummary(rules: AccessRule[]): string {
+  const groups = new Map<string, AccessRule[]>();
+  for (const rule of rules) {
+    const name = aclListName(rule);
+    groups.set(name, [...(groups.get(name) ?? []), rule]);
+  }
+  return [
+    "Access-list summary",
+    "Name                 Type      Entries  Permit  Deny  Hits",
+    ...[...groups.entries()].map(([name, group]) => {
+      const permits = group.filter((rule) => rule.action === "permit").length;
+      const denies = group.filter((rule) => rule.action === "deny").length;
+      const hits = group.reduce((sum, rule) => sum + rule.hits, 0);
+      const type = group.every(isStandardAccessRule) ? "standard" : "extended";
+      return `${name.padEnd(21)}${type.padEnd(10)}${String(group.length).padEnd(9)}${String(permits).padEnd(8)}${String(denies).padEnd(6)}${hits}`;
+    })
+  ].join("\n");
 }
 
 function accessRulesConfig(rules: AccessRule[]): string[] {

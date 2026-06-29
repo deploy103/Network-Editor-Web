@@ -4,6 +4,7 @@ import { analyzeFailureImpact } from "./failureImpact";
 import { analyzeSecurityMatrix } from "./securityMatrix";
 import { analyzeServiceReachability } from "./serviceReachability";
 import { isIpv4 } from "./ip";
+import { staticRouteState } from "./routeState";
 import type { NetworkDevice, NetworkProject } from "../types/network";
 
 export type VerificationTaskKind = "cli" | "pdu" | "desktop" | "config" | "physical" | "report";
@@ -137,7 +138,19 @@ function addressingTasks(project: NetworkProject): VerificationTask[] {
         expected: [`Duplicate IPs ${plan.totals.duplicateIps}`, `Overlaps ${plan.totals.overlaps}`, `Invalid entries ${plan.totals.invalidEntries}`]
       })]
     : [];
-  return [...subnetTasks, ...issueTasks];
+  const desktopTasks = project.devices
+    .filter((device) => device.kind === "pc" || device.kind === "server")
+    .map((device) => task("desktop", "recommended", `Verify desktop identity on ${device.label}`, {
+      device,
+      rationale: "Desktop identity, adapter MACs, and local routes help correlate host-side evidence with ARP, DHCP, and service tests.",
+      commands: ["Desktop > Command Prompt > hostname", "Desktop > Command Prompt > getmac", "Desktop > Command Prompt > getmac /v", "Desktop > Command Prompt > ipconfig /all", "Desktop > Command Prompt > route print", "Desktop > Command Prompt > route print -4"],
+      expected: [
+        `${device.config.hostname || device.label} hostname visible`,
+        `${device.ports.filter((port) => port.kind !== "console").length} network adapters listed`,
+        "Gateway and DNS settings match the address plan"
+      ]
+    }));
+  return [...subnetTasks, ...desktopTasks, ...issueTasks];
 }
 
 function routingTasks(project: NetworkProject): VerificationTask[] {
@@ -145,11 +158,22 @@ function routingTasks(project: NetworkProject): VerificationTask[] {
     .filter((device) => isNetworkDevice(device))
     .flatMap((device) => {
       const hasRoutes = device.config.staticRoutes.length || (device.config.routingProtocols?.length ?? 0);
+      const trackedRoutes = device.config.staticRoutes.filter((route) => route.trackId !== undefined);
+      const inactiveTrackedRoutes = trackedRoutes.filter((route) => staticRouteState(project, device, route) === "inactive");
+      const hasTracking = trackedRoutes.length > 0 ||
+        (device.config.trackObjects ?? []).length > 0 ||
+        device.ports.some((port) =>
+          (port.hsrpGroups ?? []).some((group) => group.trackInterface || group.trackObject !== undefined) ||
+          (port.vrrpGroups ?? []).some((group) => group.trackObject !== undefined)
+        );
       const commands = [
         "show ip interface brief",
         "show ip route",
+        ...device.config.staticRoutes.slice(0, 6).map((route) => `show ip route ${route.network} ${route.mask}`),
         ...(device.config.routingProtocols?.length ? ["show ip protocols"] : []),
-        ...(device.config.ipSlaOperations?.length ? ["show ip sla summary", "show track"] : []),
+        ...routingProtocolCommands(device),
+        ...(device.config.ipSlaOperations?.length ? ["show ip sla summary"] : []),
+        ...(hasTracking ? ["show track"] : []),
         ...(device.ports.some((port) => (port.hsrpGroups?.length ?? 0) > 0) ? ["show standby brief"] : []),
         ...(device.ports.some((port) => (port.vrrpGroups?.length ?? 0) > 0) ? ["show vrrp brief"] : [])
       ];
@@ -160,10 +184,23 @@ function routingTasks(project: NetworkProject): VerificationTask[] {
         expected: [
           device.config.staticRoutes.length ? `${device.config.staticRoutes.length} static routes visible` : "Connected routes visible",
           device.config.routingProtocols?.length ? `${device.config.routingProtocols.length} dynamic process entries visible` : "No dynamic routing expected",
-          device.config.ipSlaOperations?.length ? "IP SLA and track objects report expected state" : "No tracked reachability expected"
+          hasTracking
+            ? inactiveTrackedRoutes.length
+              ? `${inactiveTrackedRoutes.length} tracked static routes currently inactive; verify floating backup/default route`
+              : "Track objects and tracked routes report expected state"
+            : "No tracked reachability expected"
         ]
       })] : [];
     });
+}
+
+function routingProtocolCommands(device: NetworkDevice): string[] {
+  const protocols = new Set((device.config.routingProtocols ?? []).map((protocol) => protocol.protocol));
+  return [
+    ...(protocols.has("ospf") ? ["show ip ospf", "show ip ospf interface brief", "show ip ospf neighbor"] : []),
+    ...(protocols.has("eigrp") ? ["show ip eigrp neighbors", "show ip eigrp interfaces", "show ip eigrp topology"] : []),
+    ...(protocols.has("rip") ? ["show ip rip database"] : [])
+  ];
 }
 
 function switchingTasks(project: NetworkProject): VerificationTask[] {
@@ -176,9 +213,10 @@ function switchingTasks(project: NetworkProject): VerificationTask[] {
         "show vlan brief",
         "show interfaces trunk",
         "show spanning-tree",
+        "show spanning-tree summary",
         "show interfaces status",
-        ...(device.config.dhcpSnooping?.enabled ? ["show ip dhcp snooping"] : []),
-        ...(device.ports.some((port) => port.portSecurity?.enabled) ? ["show port-security"] : []),
+        ...(device.config.dhcpSnooping?.enabled ? ["show ip dhcp snooping", "show ip dhcp snooping summary"] : []),
+        ...(device.ports.some((port) => port.portSecurity?.enabled) ? ["show port-security", "show port-security summary"] : []),
         ...(device.ports.some((port) => port.channelGroup) ? ["show etherchannel summary"] : [])
       ],
       expected: [
@@ -197,10 +235,14 @@ function securityTasks(project: NetworkProject): VerificationTask[] {
       device,
       rationale: "ACL, NAT, prefix-list, and route-map hit counters prove security and policy routing behavior.",
       commands: [
-        ...(device.config.accessRules.length ? ["show access-list", "show ip access-lists"] : []),
+        ...(device.config.accessRules.length ? ["show access-list", "show access-list summary", "show ip access-lists"] : []),
         ...(device.config.natRules.length ? ["show ip nat statistics", "show ip nat translations"] : []),
-        ...((device.config.prefixLists ?? []).length ? ["show ip prefix-list"] : []),
-        ...((device.config.routeMaps ?? []).length ? ["show route-map"] : [])
+        ...((device.config.prefixLists ?? []).length ? ["show ip prefix-list", "show ip prefix-list summary"] : []),
+        ...((device.config.routeMaps ?? []).length ? [
+          "show route-map",
+          "show route-map summary",
+          ...(device.config.routeMaps ?? []).slice(0, 3).map((entry) => `show route-map ${entry.name} detail`)
+        ] : [])
       ],
       expected: [
         `${device.config.accessRules.length} ACL rules`,
@@ -223,8 +265,8 @@ function serviceTasks(project: NetworkProject): VerificationTask[] {
     .map((device) => task("desktop", "required", `Verify services on ${device.label}`, {
       device,
       rationale: "Enabled services should have an IP address, application state, and client tests.",
-      commands: ["Desktop > Services", "show services", "show service logs"],
-      expected: Object.entries(device.config.services).filter(([, enabled]) => enabled).map(([name]) => `${name.toUpperCase()} enabled`)
+      commands: serviceVerificationCommands(device),
+      expected: serviceVerificationExpected(device)
     }));
   const clientPduTasks = reachability.checks
     .filter((check) => check.status === "reachable")
@@ -242,6 +284,32 @@ function serviceTasks(project: NetworkProject): VerificationTask[] {
       })]
     : [];
   return [...serverTasks, ...clientPduTasks, ...blockedTask];
+}
+
+function serviceVerificationCommands(device: NetworkDevice): string[] {
+  const commands = ["Desktop > Services", "Desktop > Command Prompt > netstat -an", "Desktop > Command Prompt > netstat -ano", "show services", "show services summary", "show service logs", "show service logs summary"];
+  const services = enabledServiceNames(device);
+  if (services.includes("dhcp")) commands.push("show ip dhcp pool", "show ip dhcp pool summary", "show ip dhcp binding", "show ip dhcp binding summary");
+  if (services.includes("dns")) commands.push("show hosts", "show hosts summary", "Desktop > Command Prompt > nslookup <record> [dns-server]", "show service logs dns");
+  if (services.includes("http")) commands.push("Desktop > Web Browser", "show service logs http");
+  if (services.includes("ftp")) commands.push("Desktop > FTP", "show service logs ftp");
+  if (services.includes("email")) commands.push("Desktop > Email", "show service logs email");
+  if (services.includes("tftp")) commands.push("Desktop > TFTP", "show service logs tftp");
+  if (services.includes("syslog")) commands.push("Desktop > Syslog", "show logging", "show service logs syslog");
+  return Array.from(new Set(commands));
+}
+
+function serviceVerificationExpected(device: NetworkDevice): string[] {
+  const expected = enabledServiceNames(device).map((name) => `${name.toUpperCase()} enabled`);
+  if (expected.length) expected.push("Desktop netstat shows expected listening service ports", "Desktop netstat -ano shows listener PID evidence");
+  if (device.config.services.dhcp) expected.push(`${device.config.dhcpPools.filter((pool) => pool.enabled).length}/${device.config.dhcpPools.length} DHCP pools enabled`);
+  if (device.config.services.dns) expected.push(`${device.config.dnsRecords.length} DNS records available`, "DNS lookups create DNS service log entries");
+  if (device.config.services.http) expected.push("HTTP client request creates a service log entry");
+  if (device.config.services.ftp) expected.push("FTP client request creates a service log entry");
+  if (device.config.services.email) expected.push("EMAIL client request creates a service log entry");
+  if (device.config.services.tftp) expected.push("TFTP client request creates a service log entry");
+  if (device.config.services.syslog) expected.push("SYSLOG messages are visible in buffered logs");
+  return expected;
 }
 
 function wirelessTasks(project: NetworkProject): VerificationTask[] {
@@ -331,6 +399,12 @@ function renderTask(task: VerificationTask): string[] {
     ...task.expected.map((item) => `- ${item}`),
     ""
   ];
+}
+
+function enabledServiceNames(device: NetworkDevice): Array<keyof NetworkDevice["config"]["services"]> {
+  return (Object.entries(device.config.services) as Array<[keyof NetworkDevice["config"]["services"], boolean]>)
+    .filter(([, enabled]) => enabled)
+    .map(([name]) => name);
 }
 
 function isNetworkDevice(device: NetworkDevice): boolean {
