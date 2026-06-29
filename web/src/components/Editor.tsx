@@ -3,7 +3,7 @@ import { ArrowLeft, Cable, CircleDot, CircleHelp, Copy, Cpu, Download, Edit3, Fi
 import { cableCatalog, canPortUseCable, createDevice, defaultTransceiverIdForMedia, deviceCatalog, displayKind, effectivePortKind, getDeviceModel, getModuleSpec, getTransceiverSpec, installModule, installedModuleForSlot, removeModule, transceiverCatalog, transceiverCompatibleWithPort, transceiverMediaLabel } from "../data/deviceCatalog";
 import { bootBanner, bootDevice, initialCliSession, initialConsoleSession, runCliCommand, type CliSession } from "../engine/cli";
 import { cliEngine } from "../engine/cliEngine";
-import { clearDesktopArpEntries, desktopArpTable, desktopDnsCache, desktopGetmacTable, desktopHostname, desktopIpconfigAll, desktopNetstatListening, desktopRoutePrint, isDesktopRoutePrintCommand, parseDesktopArpCommand, parseDesktopNetstatCommand, parseDesktopNslookupCommand, parseDesktopPingCommand, parseDesktopTraceCommand } from "../engine/desktopDiagnostics";
+import { clearDesktopArpEntries, desktopArpTable, desktopDnsCache, desktopGetmacTable, desktopHostname, desktopIpconfigAll, desktopNetstatListening, desktopRoutePrint, isDesktopRoutePrintCommand, parseDesktopArpCommand, parseDesktopNetstatCommand, parseDesktopNslookupCommand, parseDesktopPingCommand, parseDesktopRemoteAccessCommand, parseDesktopTraceCommand } from "../engine/desktopDiagnostics";
 import { desktopConsoleTargets } from "../engine/desktopTerminal";
 import { diagnoseProject, type NetworkIssueSeverity } from "../engine/diagnostics";
 import { ipInSubnet, ipToNumber, isIpv4, isSubnetMask, maskToPrefix } from "../engine/ip";
@@ -7678,7 +7678,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
       "  arp -a | arp -d <ip|*> | route print [-4] | netstat -r|-rn | netstat -an|-ano",
       "  ping [-4] [-n 횟수] <ip|이름> | tracert [-d] <ip|이름> | pathping [-n] <ip|이름> | nslookup [-type=A|PTR] <이름|ip> [dns-server]",
       "  http|web|browser <ip|이름> | ftp <ip|이름> [ls|get 파일] | email|mail <서버> <받는사람> [메시지]",
-      "  ssh <ip|이름> | telnet <ip|이름> | tftp <ip|이름> | syslog <ip|이름> <메시지>"
+      "  ssh [-l user] [-p 22] <ip|이름> | telnet <ip|이름> [23] | tftp <ip|이름> | syslog <ip|이름> <메시지>"
     ].join("\n");
   }
   if (lower === "hostname") return desktopHostname(device);
@@ -7913,10 +7913,10 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
       "250 Message accepted for delivery"
     ].join("\n");
   }
-  if (lower.startsWith("ssh ") || lower.startsWith("telnet ")) {
-    const protocol = lower.startsWith("ssh ") ? "ssh" : "telnet";
-    const targetText = command.split(/\s+/).slice(1).join(" ");
-    if (!targetText.trim()) return `사용법: ${protocol} <ip|이름>`;
+  const remoteCommand = parseDesktopRemoteAccessCommand(command);
+  if (remoteCommand.protocol) {
+    const { protocol, targetText } = remoteCommand;
+    if (!targetText.trim()) return `사용법: ${protocol === "ssh" ? "ssh [-l user] [-p 22]" : "telnet"} <ip|이름>${protocol === "telnet" ? " [23]" : ""}`;
     const resolved = await resolveDesktopNetworkTarget(project, device, targetText, onProjectChange);
     if (!resolved.target) return resolved.error;
     const { target, project: resolvedProject } = resolved;
@@ -7924,6 +7924,12 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     if (!result.success) {
       onProjectChange(appendDesktopEvent(result.project, device.id, target.id, protocol.toUpperCase(), `${protocol.toUpperCase()} 연결 실패: ${result.message}`, "dropped"), result.message);
       return `${protocol.toUpperCase()} 연결 실패: ${result.message}`;
+    }
+    const expectedPort = protocol === "ssh" ? "22" : "23";
+    if (remoteCommand.port && remoteCommand.port !== expectedPort) {
+      const nextProject = appendDesktopEvent(result.project, device.id, target.id, protocol.toUpperCase(), `${target.label} ${protocol.toUpperCase()} TCP/${remoteCommand.port} 접속 거부: expected TCP/${expectedPort}`, "dropped");
+      onProjectChange(nextProject, `${target.label} TCP/${remoteCommand.port} 접속이 거부되었습니다.`);
+      return `Connecting to ${target.label}:${remoteCommand.port}...\n% Connection refused: ${protocol.toUpperCase()} listens on TCP/${expectedPort}.`;
     }
     const access = remoteAccessState(target, protocol);
     if (!access.enabled) {
@@ -7937,7 +7943,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
       protocol === "ssh" ? `SSH-${target.config.sshVersion ?? "2"}.0-PTWEB` : "Trying 23 ... Open",
       "User Access Verification",
       "",
-      "Username: admin",
+      `Username: ${remoteCommand.username || "admin"}`,
       "Password:",
       `${target.config.hostname || target.label}#`,
       `${protocol.toUpperCase()} session established.`
@@ -7984,7 +7990,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     onProjectChange(appendDesktopEvent(loggedProject, device.id, target.id, "SYSLOG", `${target.label}에 SYSLOG 메시지를 기록했습니다.`, "delivered"), "SYSLOG 메시지를 기록했습니다.");
     return `SYSLOG sent to ${target.label}: ${logMessage}`;
   }
-  return "알 수 없는 데스크톱 명령입니다. help, hostname, getmac [/v], ipconfig, arp -a, arp -d <ip|*>, route print [-4], netstat -r|-rn, netstat -an, netstat -ano, ping [-4] [-n 횟수] <ip|이름>, tracert [-d] <ip|이름>, pathping [-n] <ip|이름>, nslookup [-type=A|PTR] <이름|ip> [dns-server], http/web <ip|이름>, ftp <ip|이름>, email/mail <ip|이름> <받는사람>, ssh <ip|이름>, telnet <ip|이름>, tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
+  return "알 수 없는 데스크톱 명령입니다. help, hostname, getmac [/v], ipconfig, arp -a, arp -d <ip|*>, route print [-4], netstat -r|-rn, netstat -an, netstat -ano, ping [-4] [-n 횟수] <ip|이름>, tracert [-d] <ip|이름>, pathping [-n] <ip|이름>, nslookup [-type=A|PTR] <이름|ip> [dns-server], http/web <ip|이름>, ftp <ip|이름>, email/mail <ip|이름> <받는사람>, ssh [-l user] [-p 22] <ip|이름>, telnet <ip|이름> [23], tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
 }
 
 function resolveDesktopTarget(project: NetworkProject, value: string): NetworkDevice | null {

@@ -231,6 +231,40 @@ export function parseDesktopNetstatCommand(command: string): { kind: "routes" | 
   return { kind: "none", includePid: false };
 }
 
+export function parseDesktopRemoteAccessCommand(command: string): { protocol: "ssh" | "telnet" | ""; targetText: string; username: string; port: string } {
+  const tokens = command.trim().split(/\s+/);
+  const protocol = tokens.shift()?.toLowerCase();
+  if (protocol !== "ssh" && protocol !== "telnet") return { protocol: "", targetText: "", username: "", port: "" };
+  let username = "";
+  let port = "";
+  const positional: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const lower = token.toLowerCase();
+    if (protocol === "ssh" && (lower === "-l" || lower === "/l") && tokens[index + 1]) {
+      username = tokens[index + 1];
+      index += 1;
+    } else if ((lower === "-p" || lower === "/p") && tokens[index + 1]) {
+      port = tokens[index + 1];
+      index += 1;
+    } else if (protocol === "ssh" && lower.startsWith("-p") && lower.length > 2) {
+      port = token.slice(2);
+    } else {
+      positional.push(token);
+    }
+  }
+  let targetText = positional[0] ?? "";
+  if (protocol === "ssh" && targetText.includes("@")) {
+    const [user, host] = targetText.split("@");
+    username = username || user;
+    targetText = host || targetText;
+  }
+  if (protocol === "telnet" && positional[1] && /^\d+$/.test(positional[1])) {
+    port = positional[1];
+  }
+  return { protocol, targetText, username, port };
+}
+
 export function parseDesktopNslookupCommand(command: string): { name: string; serverText: string; queryType: string } {
   const tokens = command.trim().split(/\s+/);
   const args = tokens[0]?.toLowerCase() === "nslookup" ? tokens.slice(1) : [...tokens];
