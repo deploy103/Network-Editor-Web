@@ -195,6 +195,8 @@
 - 22:58 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 - 23:00 Added shared Desktop parsers for Windows-style slash and spaced options across `arp /a`, `arp /d <ip>`, `route print /4`, `netstat /ano`, `netstat -a -n -o`, and `netstat /rn`.
 - 23:01 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
+- 23:03 Added shared Desktop SSH/Telnet parsing for `ssh user@host`, `ssh -l user -p 22 host`, and `telnet host 23`, including expected-port rejection output for mismatched SSH/Telnet ports.
+- 23:04 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 
 ### Next
 

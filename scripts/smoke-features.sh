@@ -48,7 +48,7 @@ const { canPortUseCable, createDevice, deviceCatalog, effectivePortKind, getTran
 const { analyzeAddressPlan, buildAddressPlanReportText } = require(path.join(tmpdir, "engine/addressPlan.js"));
 const { analyzeCapacityPlan, buildCapacityPlanReportText } = require(path.join(tmpdir, "engine/capacityPlan.js"));
 const { analyzeConfigDrift, buildConfigDriftReportText } = require(path.join(tmpdir, "engine/configDrift.js"));
-const { clearDesktopArpEntries, desktopArpTable, desktopDnsCache, desktopGetmacTable, desktopHostname, desktopIpconfigAll, desktopNetstatListening, desktopNetstatListeningRows, desktopRoutePrint, isDesktopRoutePrintCommand, parseDesktopArpCommand, parseDesktopNetstatCommand, parseDesktopNslookupCommand, parseDesktopPingCommand, parseDesktopTraceCommand } = require(path.join(tmpdir, "engine/desktopDiagnostics.js"));
+const { clearDesktopArpEntries, desktopArpTable, desktopDnsCache, desktopGetmacTable, desktopHostname, desktopIpconfigAll, desktopNetstatListening, desktopNetstatListeningRows, desktopRoutePrint, isDesktopRoutePrintCommand, parseDesktopArpCommand, parseDesktopNetstatCommand, parseDesktopNslookupCommand, parseDesktopPingCommand, parseDesktopRemoteAccessCommand, parseDesktopTraceCommand } = require(path.join(tmpdir, "engine/desktopDiagnostics.js"));
 const { desktopConsoleTargets } = require(path.join(tmpdir, "engine/desktopTerminal.js"));
 const { diagnoseProject } = require(path.join(tmpdir, "engine/diagnostics.js"));
 const { analyzeFailureImpact, buildFailureImpactReportText } = require(path.join(tmpdir, "engine/failureImpact.js"));
@@ -120,6 +120,12 @@ const sshTransport = pduTransportForProtocol("SSH");
 assert(sshTransport.protocol === "TCP" && sshTransport.destinationPort === "22" && sshTransport.operation === "Session open", "PDU transport helper must describe SSH TCP/22 session metadata");
 const telnetHeaders = buildPduHeaders("TELNET", "delivered", "pc_smoke", "router_smoke");
 assert(telnetHeaders.some((header) => header.layer === "Layer 4" && header.field === "Destination port" && header.value === "23") && telnetHeaders.some((header) => header.layer === "Packet" && header.field === "Disposition" && header.value === "delivered"), "PDU header helper must build TELNET destination-port and disposition headers");
+const sshUserAtHost = parseDesktopRemoteAccessCommand("ssh admin@router.lab.local");
+assert(sshUserAtHost.protocol === "ssh" && sshUserAtHost.username === "admin" && sshUserAtHost.targetText === "router.lab.local", "Desktop SSH parser must accept user@host targets");
+const sshWithOptions = parseDesktopRemoteAccessCommand("ssh -l netadmin -p 22 router.lab.local");
+assert(sshWithOptions.protocol === "ssh" && sshWithOptions.username === "netadmin" && sshWithOptions.port === "22" && sshWithOptions.targetText === "router.lab.local", "Desktop SSH parser must preserve -l user and -p port options");
+const telnetWithPort = parseDesktopRemoteAccessCommand("telnet router.lab.local 23");
+assert(telnetWithPort.protocol === "telnet" && telnetWithPort.targetText === "router.lab.local" && telnetWithPort.port === "23", "Desktop Telnet parser must accept optional TCP port arguments");
 
 assert(pc && server && router, "sample must include PC, server, and router");
 assert(desktopHostname(pc) === pc.config.hostname, "Desktop hostname command helper must use the configured hostname");
