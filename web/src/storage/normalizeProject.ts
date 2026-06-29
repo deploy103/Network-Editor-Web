@@ -1,11 +1,12 @@
-import { defaultConfig, getDeviceModel, getModuleSpec } from "../data/deviceCatalog";
+import { defaultConfig, defaultTransceiverIdForMedia, getDeviceModel, getModuleSpec, getTransceiverSpec } from "../data/deviceCatalog";
 import { isIpv4, isSubnetMask, maskToPrefix } from "../engine/ip";
 import { recalc } from "../engine/topology";
 import { createId } from "../utils/id";
-import type { ActivityAnswerSnapshot, ActivityCommandOutputAssertion, ActivityCommandRule, ActivityCommandSequence, ActivityHeaderAssertion, ActivityInterfaceExpectation, ActivityRequirementKind, CableType, DeviceConfig, DeviceKind, LinkStatus, NetworkDevice, NetworkLink, NetworkPort, NetworkProject, PortKind, PortMode, RuntimeState, SimulationEvent } from "../types/network";
+import type { ActivityAnswerSnapshot, ActivityCommandOutputAssertion, ActivityCommandRule, ActivityCommandSequence, ActivityHeaderAssertion, ActivityInterfaceExpectation, ActivityRequirementKind, CableType, DeviceConfig, DeviceKind, LinkStatus, NetworkDevice, NetworkLink, NetworkPort, NetworkProject, PortKind, PortMediaSelection, PortMode, RuntimeState, SimulationEvent } from "../types/network";
 
 const deviceKinds: DeviceKind[] = ["router", "switch", "firewall", "pc", "server", "wireless", "hub"];
 const portKinds: PortKind[] = ["ethernet", "fast-ethernet", "gigabit-ethernet", "serial", "console", "fiber", "wireless"];
+const portMediaSelections: PortMediaSelection[] = ["auto", "rj45", "sfp"];
 const portModes: PortMode[] = ["access", "trunk", "routed"];
 const cableTypes: CableType[] = ["auto", "console", "copper-straight", "copper-cross", "fiber", "serial-dce", "serial-dte", "wireless"];
 const linkStatuses: LinkStatus[] = ["up", "down", "blocked"];
@@ -54,6 +55,21 @@ function normalizePortKind(value: unknown): PortKind {
   if (value === "gigabit") return "gigabit-ethernet";
   if (typeof value === "string" && portKinds.includes(value as PortKind)) return value as PortKind;
   return "ethernet";
+}
+
+function normalizeActiveMedia(value: unknown, kind: PortKind, mediaOptions?: PortKind[]): PortKind {
+  if (typeof value === "string" && portKinds.includes(value as PortKind)) {
+    const media = value as PortKind;
+    if (media === kind || mediaOptions?.includes(media)) return media;
+  }
+  return kind;
+}
+
+function normalizeMediaSelection(value: unknown, activeMedia: PortKind, mediaOptions?: PortKind[]): PortMediaSelection | undefined {
+  if (!mediaOptions?.length) return undefined;
+  if (typeof value === "string" && portMediaSelections.includes(value as PortMediaSelection)) return value as PortMediaSelection;
+  if (activeMedia === "gigabit-ethernet" && mediaOptions.includes("gigabit-ethernet")) return "rj45";
+  return "auto";
 }
 
 function normalizeCableType(value: unknown): CableType {
@@ -212,11 +228,20 @@ function normalizePort(port: NetworkPort): NetworkPort {
   const vlan = Number.isInteger(port.vlan) ? port.vlan : 1;
   const allowedVlans = Array.isArray(port.allowedVlans) && port.allowedVlans.length ? port.allowedVlans : [vlan];
   const mode = isPortMode(port.mode) ? port.mode : legacy.interfaceConfig?.ipAddress ? "routed" : "access";
+  const kind = normalizePortKind(port.kind);
+  const mediaOptions = Array.isArray(port.mediaOptions) ? port.mediaOptions.map(normalizePortKind) : undefined;
+  const activeMedia = normalizeActiveMedia(port.activeMedia, kind, mediaOptions);
+  const mediaSelection = normalizeMediaSelection(port.mediaSelection, activeMedia, mediaOptions);
+  const transceiverId = normalizeTransceiverId(port.transceiverId, port.name, activeMedia);
   return {
     ...port,
     id: port.id || createId("port"),
     name: port.name || "포트",
-    kind: normalizePortKind(port.kind),
+    kind,
+    mediaOptions,
+    activeMedia,
+    mediaSelection,
+    transceiverId: mediaOptions?.length || activeMedia === "fiber" ? transceiverId : undefined,
     description: port.description ?? (legacy.requiredModule ? `Requires ${legacy.requiredModule}` : ""),
     macAddress: port.macAddress || "02:00:00:00:00:00",
     mode,
@@ -254,6 +279,19 @@ function normalizePort(port: NetworkPort): NetworkPort {
     hsrpGroups: normalizeHsrpGroups(port.hsrpGroups),
     vrrpGroups: normalizeVrrpGroups(port.vrrpGroups)
   };
+}
+
+function defaultTransceiverIdForPort(name: string): string | undefined {
+  return defaultTransceiverIdForMedia(name, "fiber");
+}
+
+function normalizeTransceiverId(value: unknown, name: string, activeMedia: PortKind): string | undefined {
+  if (activeMedia !== "fiber") return undefined;
+  if (typeof value === "string" && value) {
+    const transceiver = getTransceiverSpec(value);
+    if (transceiver && transceiver.media !== "copper") return transceiver.id;
+  }
+  return defaultTransceiverIdForPort(name);
 }
 
 function normalizeHsrpGroups(groups: NetworkPort["hsrpGroups"]): NonNullable<NetworkPort["hsrpGroups"]> {

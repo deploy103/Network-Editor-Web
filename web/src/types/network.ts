@@ -1,9 +1,11 @@
 export type DeviceKind = "router" | "switch" | "firewall" | "pc" | "server" | "wireless" | "hub";
 export type PortKind = "ethernet" | "fast-ethernet" | "gigabit-ethernet" | "serial" | "console" | "fiber" | "wireless";
+export type PortMediaSelection = "auto" | "rj45" | "sfp";
 export type PortMode = "access" | "trunk" | "routed";
 export type CableType = "auto" | "console" | "copper-straight" | "copper-cross" | "fiber" | "serial-dce" | "serial-dte" | "wireless";
 export type LinkStatus = "up" | "down" | "blocked";
 export type DeviceTab = "physical" | "config" | "cli" | "desktop" | "services";
+export type TransceiverMedia = "copper" | "mmf" | "smf";
 
 export interface Position {
   x: number;
@@ -38,18 +40,36 @@ export interface ModuleSpec {
   widthSlots?: number;
 }
 
+export interface TransceiverSpec {
+  id: string;
+  label: string;
+  media: TransceiverMedia;
+  compatibleMedia?: TransceiverMedia[];
+  speedMbps: number;
+  maxDistanceMeters: number;
+  connector: string;
+}
+
 export interface PortTemplate {
   name: string;
   kind: PortKind;
   mode: PortMode;
   vlan?: number;
   ipCapable?: boolean;
+  mediaOptions?: PortKind[];
+  activeMedia?: PortKind;
+  mediaSelection?: PortMediaSelection;
+  transceiverId?: string;
 }
 
 export interface NetworkPort {
   id: string;
   name: string;
   kind: PortKind;
+  mediaOptions?: PortKind[];
+  activeMedia?: PortKind;
+  mediaSelection?: PortMediaSelection;
+  transceiverId?: string;
   description: string;
   macAddress: string;
   mode: PortMode;

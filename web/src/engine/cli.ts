@@ -1,7 +1,7 @@
-import { defaultConfig, getDeviceModel, getModuleSpec } from "../data/deviceCatalog";
+import { defaultConfig, defaultTransceiverIdForMedia, effectivePortKind, getDeviceModel, getModuleSpec, getTransceiverSpec, transceiverCompatibleWithPort, transceiverMediaLabel } from "../data/deviceCatalog";
 import { createId } from "../utils/id";
 import { ipInSubnet, isIpv4, isSubnetMask, maskToPrefix, networkAddress } from "./ip";
-import type { DhcpExcludedRange, DhcpPool, DeviceConfig, NetworkDevice, NetworkPort, PrefixListEntry, RouteMapEntry, RuntimeState } from "../types/network";
+import type { DhcpExcludedRange, DhcpPool, DeviceConfig, NetworkDevice, NetworkPort, PortMediaSelection, PrefixListEntry, RouteMapEntry, RuntimeState } from "../types/network";
 
 export type CliMode = "exec" | "privileged" | "global" | "interface" | "vlan" | "dhcp" | "line" | "router" | "acl" | "route-map" | "ip-sla";
 export type CliPendingAction = "reload" | "erase-startup" | "enable-password" | "initial-config" | "console-username" | "console-password";
@@ -242,11 +242,11 @@ function commandCandidates(device: NetworkDevice, session: CliSession): string[]
   const base = session.mode === "exec"
       ? ["enable", "setup", "show version", "show boot", "show inventory", "show platform", "show tech-support", "show clock", "show privilege", "show history", "show debugging", "show interfaces", "show ip interface brief", "show ip route", "show route", "show cdp", "show cdp neighbors", "show arp", "ping ", "traceroute ", "terminal length 0", "help"]
     : session.mode === "privileged"
-      ? ["disable", "setup", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show boot", "show inventory", "show platform", "show module", "show environment", "show tech-support", "show clock", "clock set 12:34:56 Jun 19 2026", "show privilege", "show history", "show debugging", "show logging", "show service logs", "show service logs http", "show service logs ftp", "show service logs email", "show service logs tftp", "show service logs syslog", "show services", "show services enabled", "show services disabled", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show cable-diagnostics tdr", "show spanning-tree", "show standby", "show standby brief", "show vrrp", "show vrrp brief", "show interfaces", "show interfaces counters", "show interfaces description", "show interfaces status", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip ssh", "show ip route", "show ip route summary", "show ip route connected", "show ip route interface ", "show ip route gateway ", "show ip route local", "show ip route static", "show route", "show route-map", "show route-map ", "show ip prefix-list", "show ip prefix-list ", "show ip protocols", "show ip protocols ospf", "show ip protocols eigrp", "show ip protocols static", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show vlan summary", "show vlan id ", "show vlan name ", "show mac address-table", "show mac address-table address ", "show mac address-table dynamic", "show mac address-table interface ", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show arp ", "show ip dhcp binding", "show ip dhcp binding ", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp pool ", "show ip dhcp server statistics", "show hosts", "show hosts ", "show access-list", "show ip access-lists", "show nat", "test cable-diagnostics tdr interface ", "debug ip icmp", "debug ip packet", "debug ip dhcp server events", "debug spanning-tree events", "undebug all", "clear arp", "clear arp-cache", "clear arp 192.168.1.10", "clear logging", "clear service logs", "clear service logs http", "clear service logs ftp", "clear service logs email", "clear service logs tftp", "clear service logs syslog", "clear mac address-table", "clear mac address-table dynamic", "clear mac address-table dynamic interface ", "clear mac address-table vlan ", "clear ip dhcp binding", "clear ip dhcp binding *", "clear ip dhcp conflict *", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
+      ? ["disable", "setup", "configure terminal", "conf t", "show running-config", "show running-config all", "show startup-config", "show version", "show boot", "show inventory", "show platform", "show module", "show environment", "show tech-support", "show clock", "clock set 12:34:56 Jun 19 2026", "show privilege", "show history", "show debugging", "show logging", "show service logs", "show service logs http", "show service logs ftp", "show service logs email", "show service logs tftp", "show service logs syslog", "show services", "show services enabled", "show services disabled", "show users", "show line", "show terminal", "show protocols", "show file systems", "show flash", "dir", "show processes cpu", "show memory", "show controllers", "show controllers serial", "show cable-diagnostics tdr", "show spanning-tree", "show standby", "show standby brief", "show vrrp", "show vrrp brief", "show interfaces", "show interfaces counters", "show interfaces description", "show interfaces status", "show interfaces transceiver", "show interfaces trunk", "show interfaces switchport", "show ip interface", "show ip interface brief", "show ip ssh", "show ip route", "show ip route summary", "show ip route connected", "show ip route interface ", "show ip route gateway ", "show ip route local", "show ip route static", "show route", "show route-map", "show route-map ", "show ip prefix-list", "show ip prefix-list ", "show ip protocols", "show ip protocols ospf", "show ip protocols eigrp", "show ip protocols static", "show ip ospf", "show ip ospf neighbor", "show ip ospf interface brief", "show ip eigrp neighbors", "show ip rip database", "show ip nat translations", "show ip nat statistics", "show vlan brief", "show vlan summary", "show vlan id ", "show vlan name ", "show mac address-table", "show mac address-table address ", "show mac address-table dynamic", "show mac address-table interface ", "show cdp neighbors", "show cdp neighbors detail", "show arp", "show arp ", "show ip dhcp binding", "show ip dhcp binding ", "show ip dhcp conflict", "show ip dhcp pool", "show ip dhcp pool ", "show ip dhcp server statistics", "show hosts", "show hosts ", "show access-list", "show ip access-lists", "show nat", "test cable-diagnostics tdr interface ", "debug ip icmp", "debug ip packet", "debug ip dhcp server events", "debug spanning-tree events", "undebug all", "clear arp", "clear arp-cache", "clear arp 192.168.1.10", "clear logging", "clear service logs", "clear service logs http", "clear service logs ftp", "clear service logs email", "clear service logs tftp", "clear service logs syslog", "clear mac address-table", "clear mac address-table dynamic", "clear mac address-table dynamic interface ", "clear mac address-table vlan ", "clear ip dhcp binding", "clear ip dhcp binding *", "clear ip dhcp conflict *", "write memory", "wr", "copy running-config startup-config", "copy run start", "copy startup-config running-config", "copy start run", "reload", "reboot", "erase startup-config", "write erase", "terminal length 0", "power off", "power cycle", "ping ", "traceroute ", "help"]
       : session.mode === "global"
         ? ["hostname ", "enable secret ", "enable password ", "no enable secret", "banner motd #", "no banner motd", "username admin secret cisco", "no username ", "interface ", "int ", "interface range fa0/1 - 2", "default interface ", "vlan ", "no vlan ", "spanning-tree vlan 1 root primary", "no spanning-tree vlan 1 root primary", "line console 0", "line vty 0 4", "router rip", "router ospf 1", "router eigrp 1", "route-map PBR permit 10", "no route-map PBR", "ip prefix-list DST30 seq 5 permit 10.30.0.0/24", "no ip prefix-list DST30", "ip route ", "ip route 10.20.0.0 255.255.255.0 192.168.10.1 200", "no ip route ", "ip default-gateway ", "no ip default-gateway", "ip domain-name lab.local", "no ip domain-name", "ip name-server 8.8.8.8", "no ip name-server ", "ip ssh version 2", "ip domain-lookup", "no ip domain-lookup", "crypto key generate rsa modulus 1024", "crypto key zeroize rsa", "logging host 192.168.1.100", "logging trap warnings", "logging buffered", "no logging console", "ip dhcp excluded-address 192.168.1.1 192.168.1.20", "ip dhcp pool ", "no ip dhcp excluded-address ", "no ip dhcp pool ", "ip host ", "no ip host ", "ip nat inside source static 192.168.1.10 203.0.113.10", "ip nat inside source list 10 interface fa0/1 overload", "no ip nat inside source static ", "no ip nat inside source list 10 interface fa0/1 overload", "ip access-list standard ", "ip access-list extended ", "ip access-list resequence WEB-FILTER 10 10", "no ip access-list extended ", "access-list 101 remark campus edge", "access-list 101 permit ip any any", "access-list 10 permit 192.168.1.0 0.0.0.255", "no access-list ", "nat ", "no nat ", "service password-encryption", "no service password-encryption", "service dhcp", "no service dhcp", "service dns", "no service dns", "service http", "no service http", "service ftp", "no service ftp", "service email", "no service email", "service tftp", "no service tftp", "service syslog", "no service syslog", "do show ip route", "do show route-map", "do show ip prefix-list", "do show running-config", "do write memory", "end", "exit", "help"]
       : session.mode === "interface"
-          ? ["description ", "desc ", "no description", "encapsulation dot1Q 10", "encapsulation dot1Q 10 native", "no encapsulation dot1Q", "ip address ", "ip address 192.168.20.1 255.255.255.0 secondary", "ip add ", "no ip address", "no ip address 192.168.20.1 255.255.255.0 secondary", "duplex auto", "duplex full", "duplex half", "no duplex", "speed auto", "speed 100", "no speed", "mtu 1500", "no mtu", "bandwidth 100000", "no bandwidth", "ip helper-address ", "no ip helper-address ", "ip policy route-map PBR", "no ip policy route-map", "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "ip access-group 101 in", "ip access-group 101 out", "no ip access-group 101 in", "standby 1 ip 192.168.10.254", "standby 1 priority 110", "standby 1 preempt", "standby 1 version 2", "standby 1 track fa0/2 decrement 20", "vrrp 1 ip 192.168.10.253", "vrrp 1 priority 120", "vrrp 1 preempt", "vrrp 1 version 3", "vrrp 1 timers advertise 2", "vrrp 1 track 1 decrement 20", "no standby 1", "no standby 1 preempt", "no vrrp 1", "no vrrp 1 preempt", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk native vlan ", "switchport trunk allowed vlan ", "switchport nonegotiate", "no switchport nonegotiate", "no switchport", "spanning-tree portfast", "no spanning-tree portfast", "spanning-tree bpduguard enable", "spanning-tree bpduguard disable", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
+          ? ["description ", "desc ", "no description", "encapsulation dot1Q 10", "encapsulation dot1Q 10 native", "no encapsulation dot1Q", "ip address ", "ip address 192.168.20.1 255.255.255.0 secondary", "ip add ", "no ip address", "no ip address 192.168.20.1 255.255.255.0 secondary", "duplex auto", "duplex full", "duplex half", "no duplex", "speed auto", "speed 100", "no speed", "media-type auto-select", "media-type sfp", "media-type rj45", "mtu 1500", "no mtu", "bandwidth 100000", "no bandwidth", "ip helper-address ", "no ip helper-address ", "ip policy route-map PBR", "no ip policy route-map", "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "ip access-group 101 in", "ip access-group 101 out", "no ip access-group 101 in", "standby 1 ip 192.168.10.254", "standby 1 priority 110", "standby 1 preempt", "standby 1 version 2", "standby 1 track fa0/2 decrement 20", "vrrp 1 ip 192.168.10.253", "vrrp 1 priority 120", "vrrp 1 preempt", "vrrp 1 version 3", "vrrp 1 timers advertise 2", "vrrp 1 track 1 decrement 20", "no standby 1", "no standby 1 preempt", "no vrrp 1", "no vrrp 1 preempt", "shutdown", "shut", "no shutdown", "no shut", "switchport mode access", "switchport mode trunk", "switchport access vlan ", "switchport trunk native vlan ", "switchport trunk allowed vlan ", "switchport nonegotiate", "no switchport nonegotiate", "no switchport", "spanning-tree portfast", "no spanning-tree portfast", "spanning-tree bpduguard enable", "spanning-tree bpduguard disable", "clock rate ", "no clock rate", "do show ip interface brief", "do show running-config interface ", "end", "exit", "help"]
           : session.mode === "vlan"
             ? ["name ", "end", "exit", "help"]
             : session.mode === "dhcp"
@@ -296,6 +296,8 @@ function featureCommandCandidates(device: NetworkDevice, session: CliSession): s
       "show etherchannel summary",
       "show etherchannel port-channel",
       "show etherchannel 1 detail",
+      "show interfaces transceiver",
+      "show interfaces transceiver detail",
       "show port-security",
       "show port-security address",
       "show port-security interface "
@@ -923,6 +925,7 @@ function expandShowCommand(rest: string[]): string {
     if (isAbbrev(second, "trunk", 2)) return "show interfaces trunk";
     if (isAbbrev(second, "switchport", 2)) return "show interfaces switchport";
     if (isAbbrev(second, "counters", 4)) return "show interfaces counters";
+    if (isAbbrev(second, "transceiver", 2)) return lowerRest[2]?.startsWith("det") ? "show interfaces transceiver detail" : "show interfaces transceiver";
     if (isAbbrev(lowerRest.at(-1), "counters", 4) && rest.length > 2) return `show interface ${rest.slice(1, -1).join(" ")} counters`;
     if (isAbbrev(lowerRest.at(-1), "status", 2) && rest.length > 2) return `show interface ${rest.slice(1, -1).join(" ")} status`;
     if (isAbbrev(lowerRest.at(-1), "switchport", 2) && rest.length > 2) return `show interface ${rest.slice(1, -1).join(" ")} switchport`;
@@ -1292,6 +1295,15 @@ function platformStatus(device: NetworkDevice): string {
 }
 
 function inventoryStatus(device: NetworkDevice): string {
+  const transceivers = device.ports.flatMap((port) => {
+    const transceiver = getTransceiverSpec(port.transceiverId);
+    if (effectivePortKind(port) !== "fiber" || !transceiver) return [];
+    return [
+      "",
+      `NAME: "${port.name} transceiver", DESCR: "${transceiver.label}, ${transceiver.connector}, ${transceiver.maxDistanceMeters}m"`,
+      `PID: ${transceiver.id}, VID: V01, SN: ${serialNumber({ ...device, id: `${device.id}${port.id}${transceiver.id}` })}`
+    ];
+  });
   return [
     `NAME: "${device.label}", DESCR: "${device.model}"`,
     `PID: ${device.modelId}, VID: PTWEB, SN: ${serialNumber(device)}`,
@@ -1302,7 +1314,8 @@ function inventoryStatus(device: NetworkDevice): string {
         `NAME: "${module.slotId}", DESCR: "${spec?.description ?? module.moduleId}"`,
         `PID: ${module.moduleId}, VID: V0${index + 1}, SN: ${serialNumber({ ...device, id: `${device.id}${module.slotId}${module.moduleId}` })}`
       ];
-    })
+    }),
+    ...transceivers
   ].join("\n");
 }
 
@@ -1406,20 +1419,28 @@ function moduleBootLines(device: NetworkDevice): string[] {
 }
 
 function interfaceTypeCounts(device: NetworkDevice): Array<{ count: number; label: string }> {
-  const labels: Record<NetworkPort["kind"], string> = {
-    ethernet: "Ethernet interfaces",
-    "fast-ethernet": "FastEthernet interfaces",
-    "gigabit-ethernet": "GigabitEthernet interfaces",
-    serial: "Serial interfaces",
-    console: "terminal line(s)",
-    fiber: "Fiber interfaces",
-    wireless: "Wireless radio interfaces"
-  };
   const counts = device.ports.reduce<Record<string, number>>((items, port) => {
-    items[port.kind] = (items[port.kind] ?? 0) + 1;
+    const label = interfaceCountLabel(port);
+    items[label] = (items[label] ?? 0) + 1;
     return items;
   }, {});
-  return Object.entries(counts).map(([kind, count]) => ({ count, label: labels[kind as NetworkPort["kind"]] ?? `${kind} interfaces` }));
+  return Object.entries(counts).map(([label, count]) => ({ count, label }));
+}
+
+function interfaceCountLabel(port: NetworkPort): string {
+  if (/^HundredGigabitEthernet/i.test(port.name)) return "HundredGigabitEthernet interfaces";
+  if (/^FortyGigabitEthernet/i.test(port.name)) return "FortyGigabitEthernet interfaces";
+  if (/^TwentyFiveGigabitEthernet/i.test(port.name)) return "TwentyFiveGigabitEthernet interfaces";
+  if (/^TenGigabitEthernet/i.test(port.name)) return "TenGigabitEthernet interfaces";
+  if (/^GigabitEthernet/i.test(port.name)) return "GigabitEthernet interfaces";
+  if (/^FastEthernet/i.test(port.name)) return "FastEthernet interfaces";
+  if (/^Ethernet/i.test(port.name)) return "Ethernet interfaces";
+  if (/^Serial/i.test(port.name)) return "Serial interfaces";
+  if (/^Vlan/i.test(port.name)) return "Vlan interfaces";
+  if (port.kind === "console") return "terminal line(s)";
+  if (port.kind === "wireless") return "Wireless radio interfaces";
+  if (port.kind === "fiber") return "Fiber interfaces";
+  return `${port.kind} interfaces`;
 }
 
 function applyStartupConfig(device: NetworkDevice): NetworkDevice {
@@ -1906,6 +1927,13 @@ function applyStartupInterfaceLine(device: NetworkDevice, portId: string, comman
     return Number.isInteger(bandwidth) && bandwidth > 0 ? updatePort(device, port.id, { bandwidth }) : device;
   }
   if (lower === "no bandwidth") return updatePort(device, port.id, { bandwidth: undefined });
+  if (lower === "media-type sfp" || lower === "media-type rj45" || lower === "media-type auto-select") {
+    if (!port.mediaOptions?.length) return device;
+    const mediaSelection = mediaSelectionFromCommand(lower);
+    if (!mediaSelection) return device;
+    const patch = mediaSelectionPatch(port, mediaSelection);
+    return patch && (!patch.activeMedia || port.mediaOptions.includes(patch.activeMedia)) ? updatePort(device, port.id, patch) : device;
+  }
   if (lower === "switchport mode access") return updatePort(device, port.id, layer2ModePatch("access"));
   if (lower === "switchport mode trunk") return updatePort(device, port.id, { ...layer2ModePatch("trunk"), allowedVlans: port.allowedVlans.length ? port.allowedVlans : [1] });
   if (lower === "no switchport") return updatePort(device, port.id, { mode: "routed", ipCapable: true, voiceVlan: undefined, portSecurity: defaultPortSecurity(), channelGroup: undefined });
@@ -2597,6 +2625,15 @@ function interfaceCommand(device: NetworkDevice, session: CliSession, command: s
     return result(updateSelectedPorts(device, selectedPorts, { bandwidth }), session, "");
   }
   if (lower === "no bandwidth") return result(updateSelectedPorts(device, selectedPorts, { bandwidth: undefined }), session, "");
+  if (lower === "media-type sfp" || lower === "media-type rj45" || lower === "media-type auto-select") {
+    const mediaSelection = mediaSelectionFromCommand(lower);
+    if (!mediaSelection) return result(device, session, "% Usage: media-type {auto-select|rj45|sfp}");
+    if (selectedPorts.some((selected) => !selected.mediaOptions?.length)) return result(device, session, "% Media type is fixed on this interface.");
+    if (selectedPorts.some((selected) => selected.linkId)) return result(device, session, "% Remove the cable before changing media type.");
+    const patches = selectedPorts.map((selected) => mediaSelectionPatch(selected, mediaSelection));
+    if (patches.some((patch) => !patch)) return result(device, session, "% Media type is not supported on this interface.");
+    return result(updatePortsWith(device, selectedPorts, (selected) => mediaSelectionPatch(selected, mediaSelection) ?? {}), session, "");
+  }
   if (lower === "shutdown") return result(updateSelectedPorts(device, selectedPorts, { adminUp: false }), session, "");
   if (lower === "no shutdown") return result(updateSelectedPorts(device, selectedPorts, { adminUp: true }), session, "");
   if (lower === "switchport mode access") return result(updateSelectedPorts(device, selectedPorts, layer2ModePatch("access")), session, "");
@@ -3002,6 +3039,7 @@ function showCommand(device: NetworkDevice, lower: string, session?: CliSession)
   }
   if (lower === "show interfaces trunk") return trunkStatus(device);
   if (lower === "show interfaces status") return interfacesStatus(device);
+  if (lower === "show interfaces transceiver" || lower === "show interfaces transceiver detail") return transceiverStatus(device, lower.endsWith("detail"));
   if (lower.startsWith("show interface ") && lower.endsWith(" status")) {
     const name = lower.slice("show interface ".length, lower.length - " status".length).trim();
     const port = findPort(device, name);
@@ -3376,7 +3414,7 @@ function controllersStatus(device: NetworkDevice, filter = ""): string {
   if (!ports.length) return "% No controllers found.";
   return ports.map((port) => [
     `${port.name} controller`,
-    `  Hardware is ${port.kind}`,
+    `  Hardware is ${effectivePortKind(port)}`,
     `  DCE/DTE status: ${port.kind === "serial" ? (port.clockRate ? "DCE, clock rate set" : "DTE or clock rate not set") : "not applicable"}`,
     `  Clock rate: ${port.clockRate ?? "not set"}`,
     `  Cable state: ${port.linkId ? "connected" : "not connected"}`,
@@ -3416,14 +3454,15 @@ function cableDiagnosticsRow(device: NetworkDevice, port: NetworkPort): string {
 
 function tdrResult(device: NetworkDevice, port: NetworkPort): { speed: string; localPair: string; length: string; remotePair: string; status: string } {
   if (!tdrCapable(port)) return { speed: "-", localPair: "-", length: "-", remotePair: "-", status: "Not supported" };
-  const speed = port.speed && port.speed !== "auto" ? `${port.speed}M` : port.kind === "gigabit-ethernet" ? "1000M" : "100M";
+  const speed = port.speed && port.speed !== "auto" ? `${port.speed}M` : effectivePortKind(port) === "gigabit-ethernet" ? "1000M" : "100M";
   if (!device.powerOn || !port.adminUp) return { speed, localPair: "Pair A", length: "N/A", remotePair: "Pair B", status: "Not completed" };
   if (!port.linkId) return { speed, localPair: "Pair A", length: "0 m", remotePair: "Pair B", status: "Open" };
   return { speed, localPair: "Pair A", length: "5 +/- 2 m", remotePair: "Pair B", status: "Normal" };
 }
 
 function tdrCapable(port: NetworkPort): boolean {
-  return port.kind === "ethernet" || port.kind === "fast-ethernet" || port.kind === "gigabit-ethernet";
+  const kind = effectivePortKind(port);
+  return kind === "ethernet" || kind === "fast-ethernet" || kind === "gigabit-ethernet";
 }
 
 export function runningConfig(device: NetworkDevice): string {
@@ -3588,6 +3627,7 @@ function interfaceConfig(port: NetworkPort): string[] {
   lines.push(...portSecurityConfig(port));
   if (port.duplex && port.duplex !== "auto") lines.push(` duplex ${port.duplex}`);
   if (port.speed && port.speed !== "auto") lines.push(` speed ${port.speed}`);
+  if (port.mediaOptions?.length && port.mediaSelection && port.mediaSelection !== "auto") lines.push(` media-type ${port.mediaSelection}`);
   if (port.mtu && port.mtu !== 1500) lines.push(` mtu ${port.mtu}`);
   if (port.bandwidth) lines.push(` bandwidth ${port.bandwidth}`);
   if (port.kind === "serial" && port.clockRate) lines.push(` clock rate ${port.clockRate}`);
@@ -3596,8 +3636,13 @@ function interfaceConfig(port: NetworkPort): string[] {
 }
 
 function defaultBandwidth(port: NetworkPort): number {
-  if (port.kind === "gigabit-ethernet" || /gigabit/i.test(port.name)) return 1_000_000;
-  if (port.kind === "fast-ethernet" || /fast/i.test(port.name)) return 100_000;
+  const kind = effectivePortKind(port);
+  if (kind === "fiber" && /HundredGigabit|100G/i.test(port.name)) return 100_000_000;
+  if (kind === "fiber" && /FortyGigabit|40G/i.test(port.name)) return 40_000_000;
+  if (kind === "fiber" && /TwentyFiveGigabit|25G/i.test(port.name)) return 25_000_000;
+  if (kind === "fiber" && /TenGigabit|10G/i.test(port.name)) return 10_000_000;
+  if (kind === "gigabit-ethernet" || kind === "fiber" || /gigabit/i.test(port.name)) return 1_000_000;
+  if (kind === "fast-ethernet" || /fast/i.test(port.name)) return 100_000;
   if (port.kind === "serial") return 1_544;
   return 10_000;
 }
@@ -3607,7 +3652,7 @@ function interfaceStatus(device: NetworkDevice, port: NetworkPort): string {
   return [
     `${port.name} is ${device.powerOn && port.adminUp ? "up" : "down"}, line protocol is ${operational ? "up" : "down"}`,
     ...(port.description ? [`  Description: ${port.description}`] : []),
-    `  Hardware is ${port.kind}, address is ${port.macAddress}`,
+    `  Hardware is ${portMediaSummary(port)}, address is ${port.macAddress}`,
     `  Internet address is ${port.ipAddress ? `${port.ipAddress} ${port.subnetMask}` : "unassigned"}`,
     ...(secondaryIpAddresses(port).length ? [`  Secondary Internet addresses: ${secondaryIpAddresses(port).map((address) => `${address.ipAddress} ${address.subnetMask}`).join(", ")}`] : []),
     ...(isSubinterfacePort(port) ? [`  Encapsulation 802.1Q Virtual LAN, Vlan ID ${port.subinterfaceVlan ?? "not set"}${port.encapsulationDot1qNative ? " native" : ""}`] : []),
@@ -3639,8 +3684,64 @@ function interfacesStatus(device: NetworkDevice, selectedPort?: NetworkPort): st
     .map((port) => {
       const status = interfaceOperational(device, port) ? "connected" : port.adminUp ? "notconnect" : "disabled";
       const vlan = port.mode === "trunk" ? "trunk" : port.mode === "routed" ? "routed" : String(port.vlan);
-      return `${port.name.padEnd(22)}${(port.description || "").slice(0, 16).padEnd(19)}${status.padEnd(13)}${vlan.padEnd(6)}${(port.duplex ?? "auto").padEnd(7)}${(port.speed ?? "auto").padEnd(6)}${port.kind}`;
+      return `${port.name.padEnd(22)}${(port.description || "").slice(0, 16).padEnd(19)}${status.padEnd(13)}${vlan.padEnd(6)}${(port.duplex ?? "auto").padEnd(7)}${(port.speed ?? "auto").padEnd(6)}${portMediaSummary(port)}`;
     })].join("\n");
+}
+
+function transceiverStatus(device: NetworkDevice, detail = false): string {
+  const ports = device.ports.filter((port) => effectivePortKind(port) === "fiber" || port.mediaOptions?.includes("fiber"));
+  if (!ports.length) return "% No transceiver-capable interfaces found.";
+  const rows = ports.map((port) => {
+    const transceiver = getTransceiverSpec(port.transceiverId);
+    const present = effectivePortKind(port) === "fiber" && Boolean(transceiver);
+    const supported = Boolean(present && transceiver && transceiver.media !== "copper" && transceiverCompatibleWithPort(transceiver, port));
+    const status = present ? (supported ? "present" : "unsupported") : "notpresent";
+    const base = `${port.name.padEnd(24)}${status.padEnd(13)}${(transceiver?.label ?? "-").padEnd(22)}${(transceiver ? transceiverMediaLabel(transceiver) : "-").padEnd(8)}${transceiver ? `${transceiver.maxDistanceMeters}m` : "-"}`;
+    if (!detail) return base;
+    return [
+      base,
+      `  Connector: ${transceiver?.connector ?? "-"}`,
+      `  Nominal bitrate: ${transceiver ? `${transceiver.speedMbps} Mbps` : "-"}`,
+      `  Active media: ${effectivePortKind(port)}`,
+      `  Port support: ${present ? (supported ? "compatible" : "incompatible") : "-"}`,
+      `  Cable state: ${port.linkId ? "connected" : "not connected"}`
+    ].join("\n");
+  });
+  return [
+    "Interface               Status       Transceiver           Media   Distance",
+    ...rows
+  ].join("\n");
+}
+
+function portMediaSummary(port: NetworkPort): string {
+  const kind = effectivePortKind(port);
+  const transceiver = getTransceiverSpec(port.transceiverId);
+  if (kind === "fiber" && transceiver) return `${kind}/${transceiver.label}`;
+  return kind;
+}
+
+function mediaSelectionFromCommand(lower: string): PortMediaSelection | null {
+  if (lower === "media-type auto-select") return "auto";
+  if (lower === "media-type rj45") return "rj45";
+  if (lower === "media-type sfp") return "sfp";
+  return null;
+}
+
+function mediaSelectionPatch(port: NetworkPort, mediaSelection: PortMediaSelection): Partial<NetworkPort> | null {
+  if (!port.mediaOptions?.length) return null;
+  const activeMedia: NetworkPort["activeMedia"] = mediaSelection === "sfp"
+    ? "fiber"
+    : mediaSelection === "rj45"
+      ? "gigabit-ethernet"
+      : port.mediaOptions.includes(effectivePortKind(port))
+        ? effectivePortKind(port)
+        : port.mediaOptions[0];
+  if (!activeMedia || !port.mediaOptions.includes(activeMedia)) return null;
+  return {
+    mediaSelection,
+    activeMedia,
+    transceiverId: defaultTransceiverIdForMedia(port.name, activeMedia, port.transceiverId)
+  };
 }
 
 function interfaceCounters(device: NetworkDevice, selectedPort?: NetworkPort): string {
@@ -6306,9 +6407,16 @@ function subinterfaceVlanFromName(name: string): number | undefined {
 
 function interfaceOperational(device: NetworkDevice, port: NetworkPort): boolean {
   if (!device.powerOn || !port.adminUp) return false;
+  if (!localMediaOperational(port)) return false;
   const parent = parentPort(device, port);
   if (!parent) return Boolean(port.linkId);
-  return parent.adminUp && Boolean(parent.linkId);
+  return parent.adminUp && localMediaOperational(parent) && Boolean(parent.linkId);
+}
+
+function localMediaOperational(port: NetworkPort): boolean {
+  if (effectivePortKind(port) !== "fiber") return true;
+  const transceiver = getTransceiverSpec(port.transceiverId);
+  return Boolean(transceiver && transceiver.media !== "copper" && transceiverCompatibleWithPort(transceiver, port));
 }
 
 function virtualMac(index: number): string {
@@ -6356,25 +6464,44 @@ function normalizePortName(name: string): string {
   if (compact.startsWith("fastethernet")) return compact;
   if (compact.startsWith("gigabitethernet")) return compact;
   if (compact.startsWith("tengigabitethernet")) return compact;
+  if (compact.startsWith("twentyfivegigabitethernet")) return compact;
+  if (compact.startsWith("fortygigabitethernet")) return compact;
+  if (compact.startsWith("hundredgigabitethernet")) return compact;
   if (compact.startsWith("serial")) return compact;
   if (compact.startsWith("vlan")) return compact;
+  if (compact.startsWith("fo")) return compact.replace(/^fo/, "fortygigabitethernet");
+  if (compact.startsWith("forty")) return compact.replace(/^forty/, "fortygigabitethernet");
   if (compact.startsWith("fa")) return compact.replace(/^fa/, "fastethernet");
   if (compact.startsWith("f")) return compact.replace(/^f/, "fastethernet");
   if (compact.startsWith("gi")) return compact.replace(/^gi/, "gigabitethernet");
   if (compact.startsWith("g")) return compact.replace(/^g/, "gigabitethernet");
   if (compact.startsWith("te")) return compact.replace(/^te/, "tengigabitethernet");
   if (compact.startsWith("ten")) return compact.replace(/^ten/, "tengigabitethernet");
+  if (compact.startsWith("twe")) return compact.replace(/^twe/, "twentyfivegigabitethernet");
+  if (compact.startsWith("tw")) return compact.replace(/^tw/, "twentyfivegigabitethernet");
+  if (compact.startsWith("hu")) return compact.replace(/^hu/, "hundredgigabitethernet");
+  if (compact.startsWith("hundred")) return compact.replace(/^hundred/, "hundredgigabitethernet");
   if (compact.startsWith("se")) return compact.replace(/^se/, "serial");
   if (compact.startsWith("s")) return compact.replace(/^s/, "serial");
   return compact;
 }
 
 function compactAlias(name: string): string {
-  return normalizePortName(name).replace("fastethernet", "f").replace("tengigabitethernet", "te").replace("gigabitethernet", "g").replace("serial", "s");
+  return normalizePortName(name)
+    .replace("twentyfivegigabitethernet", "tw")
+    .replace("hundredgigabitethernet", "hu")
+    .replace("fortygigabitethernet", "fo")
+    .replace("fastethernet", "f")
+    .replace("tengigabitethernet", "te")
+    .replace("gigabitethernet", "g")
+    .replace("serial", "s");
 }
 
 function shortPortAlias(name: string): string {
   return name
+    .replace(/^TwentyFiveGigabitEthernet/i, "tw")
+    .replace(/^HundredGigabitEthernet/i, "hu")
+    .replace(/^FortyGigabitEthernet/i, "fo")
     .replace(/^TenGigabitEthernet/i, "te")
     .replace(/^FastEthernet/i, "fa")
     .replace(/^GigabitEthernet/i, "gi")

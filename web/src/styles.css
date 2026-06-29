@@ -14,7 +14,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -59,7 +60,8 @@ button:disabled {
 }
 
 input,
-select {
+select,
+textarea {
   min-width: 0;
   border: 1px solid #c6ced8;
   border-radius: 6px;
@@ -3165,6 +3167,35 @@ small,
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
+.physical-media-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  border: 1px solid #d4dde6;
+  border-radius: 7px;
+  background: #f8fafc;
+  padding: 8px;
+}
+
+.physical-media-controls label {
+  display: grid;
+  gap: 5px;
+  color: #52606b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.physical-media-controls small {
+  grid-column: 1 / -1;
+  color: #8a5a00;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.physical-media-controls .media-warning {
+  color: #b42318;
+}
+
 .device-window .port-table {
   min-width: 0;
   overflow-x: auto;
@@ -3504,6 +3535,30 @@ small,
 
 .rename-dialog header strong {
   font-size: 15px;
+}
+
+.text-input-dialog form {
+  width: min(430px, 100%);
+}
+
+.text-input-dialog label {
+  display: grid;
+  gap: 6px;
+  color: #40515d;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.text-input-dialog textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.text-input-dialog small {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: right;
 }
 
 .device-window .terminal {
@@ -4270,7 +4325,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
@@ -4280,7 +4336,8 @@ button:hover:not(:disabled) {
 
 button:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+textarea:focus-visible {
   outline: 2px solid rgba(15, 118, 110, 0.36);
   outline-offset: 2px;
 }
@@ -6104,6 +6161,35 @@ select:focus-visible {
   padding: 0;
 }
 
+.activity-editor-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 9px;
+  border: 1px solid #b6d7d3;
+  border-radius: 8px;
+  background: #f2fbf9;
+  padding: 10px;
+}
+
+.activity-editor-form header,
+.activity-editor-form .button-row,
+.activity-editor-form .form-error {
+  grid-column: 1 / -1;
+}
+
+.activity-editor-form label {
+  display: grid;
+  gap: 5px;
+  color: var(--ui-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.activity-editor-form textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
 .activity-requirement-tools {
   display: flex;
   flex-wrap: wrap;
@@ -6391,13 +6477,15 @@ select:focus-visible {
 }
 
 :root[data-theme="dark"] input,
-:root[data-theme="dark"] select {
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea {
   border-color: var(--ui-border);
   background: #0f1720;
   color: var(--ui-text);
 }
 
-:root[data-theme="dark"] input::placeholder {
+:root[data-theme="dark"] input::placeholder,
+:root[data-theme="dark"] textarea::placeholder {
   color: #758596;
 }
 
@@ -6580,10 +6668,12 @@ select:focus-visible {
 :root[data-theme="dark"] .config-subsection,
 :root[data-theme="dark"] .module-rack,
 :root[data-theme="dark"] .module-slot,
+:root[data-theme="dark"] .physical-media-controls,
 :root[data-theme="dark"] .physical-module-list,
 :root[data-theme="dark"] .physical-port-inspector,
 :root[data-theme="dark"] .physical-cable-trace div,
 :root[data-theme="dark"] .physical-port-details div,
+:root[data-theme="dark"] .activity-editor-form,
 :root[data-theme="dark"] .editable-service-row,
 :root[data-theme="dark"] .editable-acl-row,
 :root[data-theme="dark"] .editable-nat-row,
@@ -6643,11 +6733,18 @@ select:focus-visible {
 
 :root[data-theme="dark"] .physical-cable-trace strong,
 :root[data-theme="dark"] .physical-port-details dd,
+:root[data-theme="dark"] .physical-media-controls label,
+:root[data-theme="dark"] .activity-editor-form label,
+:root[data-theme="dark"] .text-input-dialog label,
 :root[data-theme="dark"] .selection-hud strong,
 :root[data-theme="dark"] .workspace-search-results strong,
 :root[data-theme="dark"] .rich-context-menu header,
 :root[data-theme="dark"] .device-context-menu.rich-context-menu header strong {
   color: var(--ui-text);
+}
+
+:root[data-theme="dark"] .physical-media-controls .media-warning {
+  color: #fca5a5;
 }
 
 :root[data-theme="dark"] .terminal,
@@ -6659,7 +6756,8 @@ select:focus-visible {
 }
 
 :root[data-theme="dark"] .device-context-menu.rich-context-menu,
-:root[data-theme="dark"] .rename-dialog form {
+:root[data-theme="dark"] .rename-dialog form,
+:root[data-theme="dark"] .text-input-dialog form {
   border-color: var(--ui-border);
   background: #111923;
   color: var(--ui-text);

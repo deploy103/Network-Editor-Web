@@ -710,5 +710,91 @@ assert(config.includes("no passive-interface vlan 1"), "passive-interface except
 assert(config.includes("default-information originate always"), "default-information originate must survive reload");
 assert(config.includes("router eigrp 10"), "EIGRP config must survive reload");
 assert(config.includes("router-id 2.2.2.2"), "EIGRP router-id must survive reload");
+
+let mediaDevice = createDevice("switch-2960-24tc", { x: 0, y: 0 }, []);
+let mediaSession = initialCliSession();
+const runMedia = (command) => {
+  const result = runCliCommand(mediaDevice, mediaSession, command);
+  mediaDevice = result.device;
+  mediaSession = result.session;
+  return result.output || "";
+};
+runMedia("enable");
+const mediaVersion = runMedia("show version");
+assert(mediaVersion.includes("24 FastEthernet interfaces") && mediaVersion.includes("2 GigabitEthernet interfaces"), "2960-24TC show version must count dual-purpose uplinks as GigabitEthernet interfaces");
+const initialTransceiver = runMedia("show interfaces transceiver detail");
+assert(initialTransceiver.includes("GigabitEthernet0/1") && initialTransceiver.includes("present") && initialTransceiver.includes("1000BASE-SX SFP") && initialTransceiver.includes("Active media: fiber"), "2960-24TC dual-purpose uplinks must default to active optical SFP media");
+const initialMediaRun = runMedia("show running-config interface GigabitEthernet0/1");
+assert(!initialMediaRun.includes("media-type "), "default dual-purpose auto-select media must not be emitted in running-config");
+runMedia("configure terminal");
+runMedia("interface GigabitEthernet0/1");
+runMedia("media-type rj45");
+const copperRun = runMedia("do show running-config interface GigabitEthernet0/1");
+assert(copperRun.includes("media-type rj45"), "interface media-type rj45 must appear in running-config");
+const copperTransceiver = runMedia("do show interfaces transceiver detail");
+assert(copperTransceiver.includes("GigabitEthernet0/1") && copperTransceiver.includes("notpresent") && copperTransceiver.includes("Active media: gigabit-ethernet"), "RJ-45 active dual-purpose uplink must show the SFP side inactive");
+const copperInventory = runMedia("do show inventory");
+assert(!copperInventory.includes("GigabitEthernet0/1 transceiver") && copperInventory.includes("GigabitEthernet0/2 transceiver"), "RJ-45 active dual-purpose uplink must not list an installed optic in inventory");
+runMedia("media-type sfp");
+const sfpRun = runMedia("do show running-config interface GigabitEthernet0/1");
+assert(sfpRun.includes("media-type sfp"), "interface media-type sfp must appear in running-config");
+const sfpInventory = runMedia("do show inventory");
+assert(sfpInventory.includes("GigabitEthernet0/1 transceiver") && sfpInventory.includes("PID: GLC-SX-MMD"), "SFP active dual-purpose uplink must list the installed optic in inventory");
+runMedia("media-type auto-select");
+const autoRun = runMedia("do show running-config interface GigabitEthernet0/1");
+assert(!autoRun.includes("media-type "), "interface media-type auto-select must restore default running-config output");
+runMedia("media-type rj45");
+runMedia("end");
+runMedia("write memory");
+runMedia("reload");
+runMedia("");
+runMedia("enable");
+const mediaReloadConfig = runMedia("show running-config");
+assert(mediaReloadConfig.includes("interface GigabitEthernet0/1") && mediaReloadConfig.includes("media-type rj45"), "dual-purpose media-type must survive reload");
+
+let coreDevice = createDevice("switch-9500-32c", { x: 0, y: 0 }, []);
+let coreSession = initialCliSession();
+const runCore = (command) => {
+  const result = runCliCommand(coreDevice, coreSession, command);
+  coreDevice = result.device;
+  coreSession = result.session;
+  return result.output || "";
+};
+runCore("enable");
+const coreVersion = runCore("show version");
+assert(coreVersion.includes("32 HundredGigabitEthernet interfaces"), "Catalyst 9500 show version must count 100G interfaces by name");
+const coreInterface = runCore("show interface HundredGigabitEthernet1/0/1");
+assert(coreInterface.includes("100GBASE-SR4 QSFP28") && coreInterface.includes("BW 100000000 Kbit/sec"), "100G fiber interfaces must show QSFP28 hardware and 100G bandwidth");
+const coreInventory = runCore("show inventory");
+assert(coreInventory.includes("HundredGigabitEthernet1/0/1 transceiver") && coreInventory.includes("PID: QSFP-100G-SR4-S"), "show inventory must list installed QSFP transceivers");
+coreDevice = { ...coreDevice, ports: coreDevice.ports.map((port) => port.name === "HundredGigabitEthernet1/0/1" ? { ...port, linkId: "link_bad_optic", transceiverId: "GLC-SX-MMD" } : port) };
+const badCoreTransceiver = runCore("show interfaces transceiver detail");
+assert(badCoreTransceiver.includes("HundredGigabitEthernet1/0/1") && badCoreTransceiver.includes("unsupported") && badCoreTransceiver.includes("Port support: incompatible"), "show interfaces transceiver must mark locally incompatible optics as unsupported");
+const badCoreStatusLine = runCore("show interfaces status").split("\n").find((line) => line.includes("HundredGigabitEthernet1/0/1")) || "";
+assert(badCoreStatusLine.includes("notconnect"), "show interfaces status must keep a locally incompatible optic out of connected state");
+
+let mixedCoreDevice = createDevice("switch-9500-24y4c", { x: 0, y: 0 }, []);
+let mixedCoreSession = initialCliSession();
+const runMixedCore = (command) => {
+  const result = runCliCommand(mixedCoreDevice, mixedCoreSession, command);
+  mixedCoreDevice = result.device;
+  mixedCoreSession = result.session;
+  return result.output || "";
+};
+runMixedCore("enable");
+const mixedCoreVersion = runMixedCore("show version");
+assert(mixedCoreVersion.includes("24 TwentyFiveGigabitEthernet interfaces") && mixedCoreVersion.includes("4 HundredGigabitEthernet interfaces"), "Catalyst 9500-24Y4C show version must count mixed 25G and 100G ports separately");
+assert(runMixedCore("show interface tw1/0/1").includes("TwentyFiveGigabitEthernet1/0/1 is"), "CLI must resolve TwentyFiveGigabitEthernet tw shorthand");
+assert(runMixedCore("show interface hu1/0/25").includes("HundredGigabitEthernet1/0/25 is"), "CLI must resolve HundredGigabitEthernet hu shorthand");
+let access25gDevice = createDevice("switch-9300x-24y", { x: 0, y: 0 }, []);
+let access25gSession = initialCliSession();
+const runAccess25g = (command) => {
+  const result = runCliCommand(access25gDevice, access25gSession, command);
+  access25gDevice = result.device;
+  access25gSession = result.session;
+  return result.output || "";
+};
+runAccess25g("enable");
+assert(runAccess25g("show version").includes("24 TwentyFiveGigabitEthernet interfaces"), "Catalyst 9300X-24Y show version must count 25G SFP28 interfaces");
 console.log("CLI smoke tests passed");
 NODE

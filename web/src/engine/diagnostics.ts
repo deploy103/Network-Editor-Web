@@ -1,3 +1,4 @@
+import { canPortUseCable, effectivePortKind, expectedTransceiverSpeedMbps, getTransceiverSpec, transceiverCompatibleWithPort, transceiverMediaLabel, transceiversShareFiberMedia } from "../data/deviceCatalog";
 import { ipInSubnet, ipToNumber, isIpv4, isSubnetMask, maskToPrefix, networkAddress } from "./ip";
 import { endpoint, linkLabel } from "./topology";
 import type { NetworkDevice, NetworkPort, NetworkProject } from "../types/network";
@@ -71,6 +72,23 @@ function diagnoseDevices(project: NetworkProject): NetworkIssue[] {
       }
       if (!port.adminUp && port.linkId) {
         issues.push(issue("warning", `${device.label} ${port.name} 포트가 shutdown 상태입니다`, "인터페이스를 활성화하기 전까지 연결된 링크는 다운 상태입니다."));
+      }
+      if (effectivePortKind(port) === "fiber") {
+        const transceiver = getTransceiverSpec(port.transceiverId);
+        if (!transceiver) {
+          issues.push(issue("warning", `${device.label} ${port.name} SFP transceiver가 없습니다`, "fiber media로 쓰려면 SX/LX 같은 transceiver를 선택해야 합니다."));
+        } else if (transceiver.media === "copper") {
+          issues.push(issue("error", `${device.label} ${port.name} transceiver/media 불일치`, `${transceiver.label}은 RJ-45 copper SFP입니다. Fiber media에는 optical transceiver를 사용하세요.`));
+        } else if (!transceiverCompatibleWithPort(transceiver, port)) {
+          const expected = expectedTransceiverSpeedMbps(port.name);
+          issues.push(issue("error", `${device.label} ${port.name} transceiver speed 불일치`, `${transceiver.label}은 ${transceiver.speedMbps} Mbps 모듈입니다. 이 포트에는 ${expected} Mbps급 optical transceiver를 선택하세요.`));
+        }
+      }
+      if (effectivePortKind(port) !== "fiber" && port.transceiverId) {
+        const transceiver = getTransceiverSpec(port.transceiverId);
+        if (transceiver && transceiver.media !== "copper") {
+          issues.push(issue("info", `${device.label} ${port.name} optical transceiver가 비활성입니다`, "dual-purpose 포트가 RJ-45 copper media로 설정되어 있어 SFP 광 모듈은 사용되지 않습니다."));
+        }
       }
       for (const secondary of port.secondaryIpAddresses ?? []) {
         pushOwner(ipOwners, secondary.ipAddress, { device, port });
@@ -313,6 +331,13 @@ function diagnoseLinks(project: NetworkProject): NetworkIssue[] {
     if (a.port.linkId !== link.id || b.port.linkId !== link.id) {
       issues.push(issue("error", "케이블 상태 불일치", `${label}가 연결되어 있지만 한쪽 포트가 링크를 참조하지 않습니다.`));
     }
+    if (!canPortUseCable(a.port, link.type) || !canPortUseCable(b.port, link.type)) {
+      issues.push(issue("error", "케이블/media 불일치", `${label}: ${link.type} 케이블이 현재 포트 media 설정과 맞지 않습니다.`));
+    }
+    const fiberProblem = explainFiberOpticsMismatch(a.port, b.port, label, link.type);
+    if (fiberProblem) {
+      issues.push(issue("error", "광 모듈 불일치", fiberProblem));
+    }
     if (link.status === "down") {
       issues.push(issue("warning", "링크 다운", explainDownLink(a.device, a.port, b.device, b.port, label)));
     }
@@ -333,6 +358,20 @@ function diagnoseLinks(project: NetworkProject): NetworkIssue[] {
     }
   }
   return issues;
+}
+
+function explainFiberOpticsMismatch(aPort: NetworkPort, bPort: NetworkPort, label: string, linkType: string): string {
+  if (linkType !== "fiber") return "";
+  if (effectivePortKind(aPort) !== "fiber" || effectivePortKind(bPort) !== "fiber") return "";
+  const aTransceiver = getTransceiverSpec(aPort.transceiverId);
+  const bTransceiver = getTransceiverSpec(bPort.transceiverId);
+  if (!aTransceiver || !bTransceiver) return `${label}: 양쪽 fiber 포트 모두 optical transceiver가 필요합니다.`;
+  if (aTransceiver.media === "copper" || bTransceiver.media === "copper") return `${label}: 1000BASE-T 같은 copper SFP는 fiber cable과 연결할 수 없습니다.`;
+  if (!transceiverCompatibleWithPort(aTransceiver, aPort)) return `${label}: ${aPort.name}에는 ${aTransceiver.label} 속도가 맞지 않습니다.`;
+  if (!transceiverCompatibleWithPort(bTransceiver, bPort)) return `${label}: ${bPort.name}에는 ${bTransceiver.label} 속도가 맞지 않습니다.`;
+  if (!transceiversShareFiberMedia(aTransceiver, bTransceiver)) return `${label}: ${aTransceiver.label}(${transceiverMediaLabel(aTransceiver)})와 ${bTransceiver.label}(${transceiverMediaLabel(bTransceiver)}) 광 매체가 다릅니다.`;
+  if (aTransceiver.speedMbps !== bTransceiver.speedMbps) return `${label}: ${aTransceiver.speedMbps} Mbps optic과 ${bTransceiver.speedMbps} Mbps optic은 같은 fiber link로 올라오지 않습니다.`;
+  return "";
 }
 
 function explainBpduGuardRisk(aDevice: NetworkDevice, aPort: NetworkPort, bDevice: NetworkDevice, bPort: NetworkPort, label: string): string {

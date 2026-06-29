@@ -1,4 +1,4 @@
-import { canPortUseCable } from "../data/deviceCatalog";
+import { canPortUseCable, defaultTransceiverIdForMedia, effectivePortKind, getTransceiverSpec, transceiverCompatibleWithPort, transceiversShareFiberMedia } from "../data/deviceCatalog";
 import type { CableType, LinkStatus, NetworkDevice, NetworkLink, NetworkPort, NetworkProject } from "../types/network";
 import { createId } from "../utils/id";
 
@@ -21,7 +21,7 @@ export function validateConnection(project: NetworkProject, aDeviceId: string, b
     type,
     endpointA: { deviceId: a.id, portId: pair.a.id },
     endpointB: { deviceId: b.id, portId: pair.b.id },
-    status: linkStatus(a, pair.a, b, pair.b),
+    status: linkStatus(a, pair.a, b, pair.b, type),
     dceEndpoint: type === "serial-dce" ? "A" : type === "serial-dte" ? "B" : undefined,
     createdAt: Date.now()
   };
@@ -36,11 +36,22 @@ export function addLink(project: NetworkProject, link: NetworkLink): NetworkProj
       ports: device.ports.map((port) =>
         (device.id === link.endpointA.deviceId && port.id === link.endpointA.portId) ||
         (device.id === link.endpointB.deviceId && port.id === link.endpointB.portId)
-          ? { ...port, linkId: link.id }
+          ? { ...applyAutoSelectedMedia(port, link.type), linkId: link.id }
           : port
       )
     })),
     links: [...project.links, link]
+  };
+}
+
+function applyAutoSelectedMedia(port: NetworkPort, cableType: CableType): NetworkPort {
+  if (!port.mediaOptions?.length || (port.mediaSelection ?? "auto") !== "auto") return port;
+  const activeMedia = cableType === "fiber" ? "fiber" : cableType === "copper-straight" || cableType === "copper-cross" ? "gigabit-ethernet" : undefined;
+  if (!activeMedia || !port.mediaOptions.includes(activeMedia)) return port;
+  return {
+    ...port,
+    activeMedia,
+    transceiverId: defaultTransceiverIdForMedia(port.name, activeMedia, port.transceiverId)
   };
 }
 
@@ -61,7 +72,7 @@ export function recalc(project: NetworkProject): NetworkProject {
     links: project.links.map((link) => {
       const a = endpoint(project, link.endpointA);
       const b = endpoint(project, link.endpointB);
-      return a && b ? { ...link, status: linkStatus(a.device, a.port, b.device, b.port) } : { ...link, status: "down" };
+      return a && b ? { ...link, status: linkStatus(a.device, a.port, b.device, b.port, link.type) } : { ...link, status: "down" };
     })
   };
 }
@@ -128,20 +139,34 @@ function cableLabel(type: CableType): string {
 }
 
 function inferCable(aPort: NetworkPort, bPort: NetworkPort, aDevice: NetworkDevice, bDevice: NetworkDevice): CableType {
-  if (aPort.kind === "console" || bPort.kind === "console") return "console";
-  if (aPort.kind === "serial" && bPort.kind === "serial") return "serial-dce";
-  if (aPort.kind === "fiber" && bPort.kind === "fiber") return "fiber";
-  if (aPort.kind === "wireless" && bPort.kind === "wireless") return "wireless";
+  const aKind = effectivePortKind(aPort);
+  const bKind = effectivePortKind(bPort);
+  if (aKind === "console" || bKind === "console") return "console";
+  if (aKind === "serial" && bKind === "serial") return "serial-dce";
+  if (aKind === "fiber" && bKind === "fiber") return "fiber";
+  if (aKind === "wireless" && bKind === "wireless") return "wireless";
   if (aDevice.kind === bDevice.kind) return "copper-cross";
   return "copper-straight";
 }
 
-function linkStatus(a: NetworkDevice, aPort: NetworkPort, b: NetworkDevice, bPort: NetworkPort): LinkStatus {
+function linkStatus(a: NetworkDevice, aPort: NetworkPort, b: NetworkDevice, bPort: NetworkPort, cableType?: CableType): LinkStatus {
+  if (cableType && (!canPortUseCable(aPort, cableType) || !canPortUseCable(bPort, cableType))) return "down";
+  if (cableType === "fiber" && !fiberLinkOperational(aPort, bPort)) return "down";
   if (!a.powerOn || !b.powerOn || !aPort.adminUp || !bPort.adminUp) return "down";
   if (aPort.kind === "serial" && bPort.kind === "serial" && !aPort.clockRate && !bPort.clockRate) return "down";
   if (aPort.kind === "wireless" && bPort.kind === "wireless" && (!wirelessCompatible(a, b) || wirelessDistance(a, b) > Math.min(a.config.wireless.range || 180, b.config.wireless.range || 180))) return "down";
   if (aPort.mode === "trunk" && bPort.mode === "trunk" && !aPort.allowedVlans.some((vlan) => bPort.allowedVlans.includes(vlan))) return "blocked";
   return "up";
+}
+
+function fiberLinkOperational(aPort: NetworkPort, bPort: NetworkPort): boolean {
+  if (effectivePortKind(aPort) !== "fiber" || effectivePortKind(bPort) !== "fiber") return false;
+  const aTransceiver = getTransceiverSpec(aPort.transceiverId);
+  const bTransceiver = getTransceiverSpec(bPort.transceiverId);
+  if (!aTransceiver || !bTransceiver) return false;
+  if (aTransceiver.media === "copper" || bTransceiver.media === "copper") return false;
+  if (!transceiverCompatibleWithPort(aTransceiver, aPort) || !transceiverCompatibleWithPort(bTransceiver, bPort)) return false;
+  return aTransceiver.speedMbps === bTransceiver.speedMbps && transceiversShareFiberMedia(aTransceiver, bTransceiver);
 }
 
 function wirelessDistance(a: NetworkDevice, b: NetworkDevice): number {

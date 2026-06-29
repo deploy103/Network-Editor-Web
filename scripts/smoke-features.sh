@@ -12,26 +12,26 @@ trap 'rm -rf "$TMPDIR"' EXIT
   --skipLibCheck \
   --esModuleInterop \
   --outDir "$TMPDIR" \
-	  "$ROOT/web/src/data/sampleProject.ts" \
-	  "$ROOT/web/src/data/deviceCatalog.ts" \
-	  "$ROOT/web/src/engine/addressPlan.ts" \
-	  "$ROOT/web/src/engine/capacityPlan.ts" \
-	  "$ROOT/web/src/engine/configDrift.ts" \
-	  "$ROOT/web/src/engine/desktopTerminal.ts" \
-	  "$ROOT/web/src/engine/diagnostics.ts" \
-	  "$ROOT/web/src/engine/failureImpact.ts" \
-	  "$ROOT/web/src/engine/projectAudit.ts" \
-	  "$ROOT/web/src/engine/projectReport.ts" \
-	  "$ROOT/web/src/engine/routingMatrix.ts" \
-	  "$ROOT/web/src/engine/securityMatrix.ts" \
-	  "$ROOT/web/src/engine/serviceReachability.ts" \
-	  "$ROOT/web/src/engine/simulation.ts" \
-	  "$ROOT/web/src/engine/topology.ts" \
-	  "$ROOT/web/src/engine/verificationPlan.ts" \
-	  "$ROOT/web/src/engine/wirelessSurvey.ts" \
-	  "$ROOT/web/src/engine/ip.ts" \
-	  "$ROOT/web/src/engine/labWorkbook.ts" \
-	  "$ROOT/web/src/storage/importPreview.ts" \
+  "$ROOT/web/src/data/sampleProject.ts" \
+  "$ROOT/web/src/data/deviceCatalog.ts" \
+  "$ROOT/web/src/engine/addressPlan.ts" \
+  "$ROOT/web/src/engine/capacityPlan.ts" \
+  "$ROOT/web/src/engine/configDrift.ts" \
+  "$ROOT/web/src/engine/desktopTerminal.ts" \
+  "$ROOT/web/src/engine/diagnostics.ts" \
+  "$ROOT/web/src/engine/failureImpact.ts" \
+  "$ROOT/web/src/engine/projectAudit.ts" \
+  "$ROOT/web/src/engine/projectReport.ts" \
+  "$ROOT/web/src/engine/routingMatrix.ts" \
+  "$ROOT/web/src/engine/securityMatrix.ts" \
+  "$ROOT/web/src/engine/serviceReachability.ts" \
+  "$ROOT/web/src/engine/simulation.ts" \
+  "$ROOT/web/src/engine/topology.ts" \
+  "$ROOT/web/src/engine/verificationPlan.ts" \
+  "$ROOT/web/src/engine/wirelessSurvey.ts" \
+  "$ROOT/web/src/engine/ip.ts" \
+  "$ROOT/web/src/engine/labWorkbook.ts" \
+  "$ROOT/web/src/storage/importPreview.ts" \
   "$ROOT/web/src/storage/normalizeProject.ts" \
   "$ROOT/web/src/utils/id.ts"
 
@@ -39,7 +39,7 @@ node - "$TMPDIR" <<'NODE'
 const path = require("path");
 const tmpdir = process.argv[2];
 const { createRoutedSampleProject, createSampleProjectFromTemplate, sampleProjectTemplates } = require(path.join(tmpdir, "data/sampleProject.js"));
-const { createDevice, deviceCatalog, installModule } = require(path.join(tmpdir, "data/deviceCatalog.js"));
+const { canPortUseCable, createDevice, deviceCatalog, effectivePortKind, getTransceiverSpec, installModule } = require(path.join(tmpdir, "data/deviceCatalog.js"));
 const { analyzeAddressPlan, buildAddressPlanReportText } = require(path.join(tmpdir, "engine/addressPlan.js"));
 const { analyzeCapacityPlan, buildCapacityPlanReportText } = require(path.join(tmpdir, "engine/capacityPlan.js"));
 const { analyzeConfigDrift, buildConfigDriftReportText } = require(path.join(tmpdir, "engine/configDrift.js"));
@@ -55,7 +55,7 @@ const { fallbackPing, requestDhcp } = require(path.join(tmpdir, "engine/simulati
 const { buildVerificationPlan, buildVerificationPlanText } = require(path.join(tmpdir, "engine/verificationPlan.js"));
 const { analyzeWirelessSurvey, buildWirelessSurveyReportText } = require(path.join(tmpdir, "engine/wirelessSurvey.js"));
 const { buildLabWorkbook, buildLabWorkbookText } = require(path.join(tmpdir, "engine/labWorkbook.js"));
-const { addLink, endpoint, validateConnection } = require(path.join(tmpdir, "engine/topology.js"));
+const { addLink, endpoint, recalc, validateConnection } = require(path.join(tmpdir, "engine/topology.js"));
 const { normalizeProject } = require(path.join(tmpdir, "storage/normalizeProject.js"));
 const { readImportPreview } = require(path.join(tmpdir, "storage/importPreview.js"));
 
@@ -206,11 +206,92 @@ const highDensityNim = installModule(cold4451, "slot0", "NIM-8MFT-T1/E1");
 assert(highDensityNim.ok && highDensityNim.device.ports.some((port) => port.name === "Serial0/0/7:0"), "ISR 4451-X must accept high-density NIM-8MFT-T1/E1 and create channelized serial ports");
 cold4451 = highDensityNim.device;
 const dualGeNim = installModule(cold4451, "slot1", "NIM-2GE-CU-SFP");
-assert(dualGeNim.ok && dualGeNim.device.ports.some((port) => port.name === "GigabitEthernet0/1/1" && port.kind === "fiber"), "ISR 4451-X must accept NIM-2GE-CU-SFP and create routed SFP-capable GE ports");
+assert(dualGeNim.ok && dualGeNim.device.ports.some((port) => port.name === "GigabitEthernet0/1/1" && port.kind === "fiber" && port.mode === "routed" && port.mediaSelection === "auto" && port.mediaOptions?.includes("gigabit-ethernet")), "ISR 4451-X must accept NIM-2GE-CU-SFP and create routed dual-media GE ports");
 
 const cat2960x = createDevice("switch-2960x-24ps", { x: 20, y: 20 }, []);
 assert(cat2960x.ports.filter((port) => port.kind === "gigabit-ethernet").length >= 24, "2960X-24PS must expose 24 Gigabit access ports");
 assert(cat2960x.ports.filter((port) => port.kind === "fiber").length === 4, "2960X-24PS must expose 4 SFP uplinks");
+
+const cat2960tcA = createDevice("switch-2960-24tc", { x: 24, y: 20 }, []);
+const cat2960tcB = createDevice("switch-2960-24tc", { x: 28, y: 20 }, [cat2960tcA]);
+const dualA = cat2960tcA.ports.find((port) => port.name === "GigabitEthernet0/1");
+const dualB = cat2960tcB.ports.find((port) => port.name === "GigabitEthernet0/1");
+assert(dualA && dualB && dualA.mediaOptions?.includes("fiber") && dualA.mediaOptions?.includes("gigabit-ethernet"), "2960-24TC uplinks must model dual-purpose RJ-45/SFP media");
+assert(effectivePortKind(dualA) === "fiber" && getTransceiverSpec(dualA.transceiverId)?.media === "mmf", "2960-24TC dual-purpose uplink must default to an optical SFP");
+assert(dualA.mediaSelection === "auto" && canPortUseCable(dualA, "fiber") && canPortUseCable(dualA, "copper-straight"), "2960-24TC auto-select uplink must accept either SFP or RJ-45 cabling before link-up");
+let dualProject = { id: "project_dual_media_smoke", ownerId: "user_feature_smoke", name: "Dual media smoke", devices: [cat2960tcA, cat2960tcB], links: [], notes: [], drawings: [], simulationEvents: [] };
+let dualConnect = validateConnection(dualProject, cat2960tcA.id, cat2960tcB.id, "fiber", dualA.id, dualB.id);
+assert(dualConnect.ok && dualConnect.link.type === "fiber", "SFP-active dual-purpose ports must connect with fiber");
+const lxLhCompatibleProject = {
+  ...dualProject,
+  devices: dualProject.devices.map((device) => ({
+    ...device,
+    ports: device.ports.map((port) => port.id === dualB.id ? { ...port, transceiverId: "GLC-LH-SMD" } : port)
+  }))
+};
+const lxLhCompatibleA = lxLhCompatibleProject.devices[0].ports.find((port) => port.id === dualA.id);
+const lxLhCompatibleB = lxLhCompatibleProject.devices[1].ports.find((port) => port.id === dualB.id);
+const lxLhCompatibleConnect = validateConnection(lxLhCompatibleProject, cat2960tcA.id, cat2960tcB.id, "fiber", lxLhCompatibleA.id, lxLhCompatibleB.id);
+assert(lxLhCompatibleConnect.ok && lxLhCompatibleConnect.link.status === "up", "1000BASE-SX and 1000BASE-LX/LH optics must share MMF compatibility in short lab links");
+const tenGigBaseA = createDevice("switch-3560x-24t", { x: 30, y: 20 }, []);
+const tenGigBaseB = createDevice("switch-3560x-24t", { x: 34, y: 20 }, [tenGigBaseA]);
+const tenGigInstallA = installModule({ ...tenGigBaseA, powerOn: false }, "slot1", "C3KX-NM-10G");
+const tenGigInstallB = installModule({ ...tenGigBaseB, powerOn: false }, "slot1", "C3KX-NM-10G");
+assert(tenGigInstallA.ok && tenGigInstallB.ok, "Catalyst 3560X must accept C3KX-NM-10G for SR/LR optic compatibility checks");
+const tenGigA = { ...tenGigInstallA.device, powerOn: true };
+const tenGigB = { ...tenGigInstallB.device, powerOn: true };
+const tenGigPortA = tenGigA.ports.find((port) => port.name === "TenGigabitEthernet1/1/1");
+const tenGigPortB = tenGigB.ports.find((port) => port.name === "TenGigabitEthernet1/1/1");
+assert(tenGigPortA && tenGigPortB, "Catalyst 3560X C3KX-NM-10G must expose 10G fiber ports for SR/LR optic compatibility checks");
+const tenGigMismatchProject = {
+  ...project,
+  devices: [
+    tenGigA,
+    { ...tenGigB, ports: tenGigB.ports.map((port) => port.id === tenGigPortB.id ? { ...port, transceiverId: "SFP-10G-LR" } : port) }
+  ],
+  links: []
+};
+const tenGigMismatchB = tenGigMismatchProject.devices[1].ports.find((port) => port.id === tenGigPortB.id);
+const tenGigMismatchConnect = validateConnection(tenGigMismatchProject, tenGigA.id, tenGigB.id, "fiber", tenGigPortA.id, tenGigMismatchB.id);
+assert(tenGigMismatchConnect.ok && tenGigMismatchConnect.link.status === "down", "10GBASE-SR MMF and 10GBASE-LR SMF optics must keep the same fiber link down");
+const tenGigMismatchLinked = addLink(tenGigMismatchProject, tenGigMismatchConnect.link);
+assert(diagnoseProject(recalc(tenGigMismatchLinked)).some((issue) => issue.title.includes("광 모듈 불일치")), "diagnostics must explain fiber optic media mismatch");
+dualConnect = validateConnection(dualProject, cat2960tcA.id, cat2960tcB.id, "copper-cross", dualA.id, dualB.id);
+assert(dualConnect.ok && dualConnect.link.type === "copper-cross", "auto-select dual-purpose ports must also validate explicit RJ-45 copper cabling");
+const copperAutoProject = addLink(dualProject, dualConnect.link);
+const copperAutoPort = copperAutoProject.devices[0].ports.find((port) => port.id === dualA.id);
+assert(effectivePortKind(copperAutoPort) === "gigabit-ethernet" && !copperAutoPort.transceiverId, "auto-select dual-purpose ports must activate built-in RJ-45 media after copper link-up");
+dualProject = { ...dualProject, devices: [
+  { ...cat2960tcA, ports: cat2960tcA.ports.map((port) => port.id === dualA.id ? { ...port, mediaSelection: "rj45", activeMedia: "gigabit-ethernet", transceiverId: undefined } : port) },
+  { ...cat2960tcB, ports: cat2960tcB.ports.map((port) => port.id === dualB.id ? { ...port, mediaSelection: "rj45", activeMedia: "gigabit-ethernet", transceiverId: undefined } : port) }
+] };
+const dualCopperA = dualProject.devices[0].ports.find((port) => port.id === dualA.id);
+const dualCopperB = dualProject.devices[1].ports.find((port) => port.id === dualB.id);
+assert(effectivePortKind(dualCopperA) === "gigabit-ethernet" && !dualCopperA.transceiverId, "RJ-45 active dual-purpose uplink must expose built-in copper media without an SFP transceiver");
+assert(canPortUseCable(dualCopperA, "copper-straight") && !canPortUseCable(dualCopperA, "fiber"), "RJ-45 active dual-purpose uplink must accept copper and reject fiber");
+dualConnect = validateConnection(dualProject, cat2960tcA.id, cat2960tcB.id, "fiber", dualCopperA.id, dualCopperB.id);
+assert(!dualConnect.ok, "RJ-45 active dual-purpose ports must reject explicit fiber cable");
+dualConnect = validateConnection(dualProject, cat2960tcA.id, cat2960tcB.id, "auto", dualCopperA.id, dualCopperB.id);
+assert(dualConnect.ok && dualConnect.link.type === "copper-cross", "RJ-45 active dual-purpose switch-to-switch auto cable must infer copper crossover");
+const staleFiberLink = {
+  id: "link_stale_fiber_media",
+  type: "fiber",
+  endpointA: { deviceId: cat2960tcA.id, portId: dualCopperA.id },
+  endpointB: { deviceId: cat2960tcB.id, portId: dualCopperB.id },
+  status: "up",
+  createdAt: Date.now()
+};
+const staleFiberProject = {
+  ...dualProject,
+  links: [staleFiberLink],
+  devices: dualProject.devices.map((device) => ({
+    ...device,
+    ports: device.ports.map((port) => port.id === dualCopperA.id || port.id === dualCopperB.id ? { ...port, linkId: staleFiberLink.id } : port)
+  }))
+};
+const staleFiberRecalc = recalc(staleFiberProject);
+assert(staleFiberRecalc.links[0].status === "down", "recalc must mark links down when cable type no longer matches manual media selection");
+assert(diagnoseProject(staleFiberRecalc).some((issue) => issue.title === "케이블/media 불일치"), "diagnostics must report stale cable/media mismatches");
 
 const cat3750x = createDevice("switch-3750x-24t", { x: 30, y: 20 }, []);
 const c3kxInstall = installModule({ ...cat3750x, powerOn: false }, "slot1", "C3KX-NM-10GT");
@@ -237,10 +318,53 @@ assert(!c9200Reject.ok, "Catalyst 9200 must reject Catalyst 9300-only network mo
 const cat9300 = createDevice("switch-9300-48p", { x: 55, y: 20 }, []);
 const c9300Install = installModule({ ...cat9300, powerOn: false }, "slot1", "C9300-NM-8X");
 assert(c9300Install.ok && c9300Install.device.ports.filter((port) => port.name.startsWith("TenGigabitEthernet1/1/")).length === 8, "Catalyst 9300 must accept C9300 8x10G network modules");
+const cat9300x24y = createDevice("switch-9300x-24y", { x: 58, y: 20 }, [cat9300]);
+assert(cat9300x24y.ports.filter((port) => port.name.startsWith("TwentyFiveGigabitEthernet1/0/")).length === 24, "Catalyst 9300X-24Y must expose 24 25G SFP28 fiber ports");
+assert(!cat9300x24y.ports.some((port) => port.name.startsWith("GigabitEthernet1/0/")), "Catalyst 9300X-24Y must not downgrade SFP28 ports to generic GigabitEthernet names");
+assert(getTransceiverSpec(cat9300x24y.ports.find((port) => port.name === "TwentyFiveGigabitEthernet1/0/1")?.transceiverId)?.speedMbps === 25000, "Catalyst 9300X-24Y ports must default to 25G SFP28 optics");
 
 const cat9500 = createDevice("switch-9500-32c", { x: 60, y: 20 }, []);
 assert(cat9500.modules.length === 0, "Catalyst 9500 fixed distribution models must not expose removable network modules");
 assert(cat9500.ports.filter((port) => port.name.startsWith("HundredGigabitEthernet1/0/") && port.ipCapable).length === 32, "Catalyst 9500-32C must expose routed 100G fiber ports");
+const cat9500y4c = createDevice("switch-9500-24y4c", { x: 61, y: 20 }, [cat9500]);
+assert(cat9500y4c.ports.filter((port) => port.name.startsWith("TwentyFiveGigabitEthernet1/0/")).length === 24, "Catalyst 9500-24Y4C must expose 24 routed 25G SFP28 ports");
+assert(cat9500y4c.ports.filter((port) => port.name.startsWith("HundredGigabitEthernet1/0/")).length === 4, "Catalyst 9500-24Y4C must expose four routed 100G QSFP28 uplinks");
+assert(getTransceiverSpec(cat9500y4c.ports.find((port) => port.name === "TwentyFiveGigabitEthernet1/0/1")?.transceiverId)?.speedMbps === 25000, "Catalyst 9500-24Y4C 25G ports must default to SFP28 optics");
+assert(getTransceiverSpec(cat9500y4c.ports.find((port) => port.name === "HundredGigabitEthernet1/0/25")?.transceiverId)?.speedMbps === 100000, "Catalyst 9500-24Y4C 100G uplinks must default to QSFP28 optics");
+const cat9500y48 = createDevice("switch-9500-48y4c", { x: 62, y: 20 }, [cat9500, cat9500y4c]);
+assert(cat9500y48.ports.filter((port) => port.name.startsWith("TwentyFiveGigabitEthernet1/0/")).length === 48, "Catalyst 9500-48Y4C must expose 48 routed 25G SFP28 ports");
+assert(cat9500y48.ports.filter((port) => port.name.startsWith("HundredGigabitEthernet1/0/")).length === 4, "Catalyst 9500-48Y4C must expose four routed 100G QSFP28 uplinks");
+const cat9500Port = cat9500.ports.find((port) => port.name === "HundredGigabitEthernet1/0/1");
+assert(cat9500Port && getTransceiverSpec(cat9500Port.transceiverId)?.speedMbps === 100000, "Catalyst 9500 100G ports must default to a 100G QSFP28 transceiver");
+const badOpticsProject = {
+  ...project,
+  devices: [{ ...cat9500, ports: cat9500.ports.map((port) => port.id === cat9500Port.id ? { ...port, transceiverId: "GLC-SX-MMD" } : port) }],
+  links: []
+};
+assert(diagnoseProject(badOpticsProject).some((issue) => issue.title.includes("transceiver speed 불일치")), "diagnostics must reject a 1G SFP installed in a 100G port");
+const cat9500Peer = createDevice("switch-9500-32c", { x: 62, y: 20 }, [cat9500]);
+const badOpticsA = { ...cat9500, ports: cat9500.ports.map((port) => port.id === cat9500Port.id ? { ...port, transceiverId: "GLC-SX-MMD" } : port) };
+const cat9500PeerPort = cat9500Peer.ports.find((port) => port.name === "HundredGigabitEthernet1/0/1");
+const badOpticsLinkProject = { ...project, devices: [badOpticsA, cat9500Peer], links: [] };
+const badOpticsConnect = validateConnection(badOpticsLinkProject, badOpticsA.id, cat9500Peer.id, "fiber", cat9500Port.id, cat9500PeerPort.id);
+assert(badOpticsConnect.ok && badOpticsConnect.link.status === "down", "1G optic in a 100G port must keep the fiber link down");
+const badOpticsLinked = addLink(badOpticsLinkProject, badOpticsConnect.link);
+assert(recalc(badOpticsLinked).links[0].status === "down", "recalc must keep mismatched 100G optics down");
+assert(diagnoseProject(recalc(badOpticsLinked)).some((issue) => issue.title.includes("광 모듈 불일치")), "diagnostics must explain 100G fiber optic speed mismatch on connected links");
+const normalizedOpticsProject = normalizeProject({
+  ...project,
+  devices: [{ ...cat9500, ports: cat9500.ports.map((port) => port.id === cat9500Port.id ? { ...port, transceiverId: undefined } : port) }],
+  links: []
+});
+const normalizedOpticsPort = normalizedOpticsProject.devices[0].ports.find((port) => port.id === cat9500Port.id);
+assert(getTransceiverSpec(normalizedOpticsPort?.transceiverId)?.speedMbps === 100000, "normalizeProject must restore missing 100G optics with a 100G transceiver");
+const normalizedUnknownOpticsProject = normalizeProject({
+  ...project,
+  devices: [{ ...cat9500, ports: cat9500.ports.map((port) => port.id === cat9500Port.id ? { ...port, transceiverId: "UNKNOWN-QSFP" } : port) }],
+  links: []
+});
+const normalizedUnknownOpticsPort = normalizedUnknownOpticsProject.devices[0].ports.find((port) => port.id === cat9500Port.id);
+assert(getTransceiverSpec(normalizedUnknownOpticsPort?.transceiverId)?.speedMbps === 100000, "normalizeProject must replace unknown optics with a port-speed default transceiver");
 
 const firepower = createDevice("firewall-fpr1010", { x: 65, y: 20 }, []);
 assert(firepower.kind === "firewall" && firepower.ports.some((port) => port.name === "Ethernet1/1"), "Firepower 1010 must expose routed Ethernet firewall ports");
@@ -612,6 +736,20 @@ assert(normalized.activity.commandSequences.some((sequence) => sequence.deviceId
 assert(normalized.activity.commandOutputAssertions.some((assertion) => assertion.deviceId === router.id && assertion.expectedText === "Configuration register"), "normalizeProject must preserve Activity Wizard command output assertions");
 assert(normalized.activity.interfaceExpectations.some((expectation) => expectation.deviceId === pc.id && expectation.ipAddress === "192.168.10.10"), "normalizeProject must preserve Activity Wizard interface expectations");
 assert(normalized.activity.headerAssertions.some((assertion) => assertion.protocol === "HTTP" && assertion.field === "Ports"), "normalizeProject must preserve Activity Wizard header assertions");
+
+const corruptMediaSwitch = createDevice("switch-2960-24tt", { x: 15, y: 15 }, []);
+const corruptMediaPort = corruptMediaSwitch.ports.find((port) => port.kind === "fast-ethernet");
+assert(corruptMediaPort, "corrupt media normalize smoke must find a fixed copper switchport");
+const fixedMediaProject = normalizeProject({
+  ...project,
+  devices: [{
+    ...corruptMediaSwitch,
+    ports: corruptMediaSwitch.ports.map((port) => port.id === corruptMediaPort.id ? { ...port, activeMedia: "fiber", transceiverId: "GLC-SX-MMD" } : port)
+  }],
+  links: []
+});
+const fixedMediaPort = fixedMediaProject.devices[0].ports.find((port) => port.id === corruptMediaPort.id);
+assert(fixedMediaPort.activeMedia === "fast-ethernet" && !canPortUseCable(fixedMediaPort, "fiber"), "normalizeProject must reject activeMedia values unsupported by a fixed copper port");
 
 assert(desktopConsoleTargets(project, pc).length === 0, "Desktop Terminal must ignore data links without a console cable");
 const pcConsole = pc.ports.find((port) => port.kind === "console");

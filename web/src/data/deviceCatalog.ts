@@ -1,8 +1,19 @@
-import type { CableType, DeviceConfig, DeviceKind, DeviceModel, ModuleSpec, NetworkDevice, NetworkPort, PortKind, PortTemplate } from "../types/network";
+import type { CableType, DeviceConfig, DeviceKind, DeviceModel, ModuleSpec, NetworkDevice, NetworkPort, PortKind, PortTemplate, TransceiverMedia, TransceiverSpec } from "../types/network";
 import { createId } from "../utils/id";
 
 const routedTabs = ["physical", "config", "cli"] as const;
 const hostTabs = ["physical", "config", "desktop"] as const;
+
+export const transceiverCatalog: TransceiverSpec[] = [
+  { id: "GLC-SX-MMD", label: "1000BASE-SX SFP", media: "mmf", speedMbps: 1000, maxDistanceMeters: 550, connector: "LC duplex" },
+  { id: "GLC-LH-SMD", label: "1000BASE-LX/LH SFP", media: "smf", compatibleMedia: ["mmf", "smf"], speedMbps: 1000, maxDistanceMeters: 10000, connector: "LC duplex" },
+  { id: "GLC-T", label: "1000BASE-T SFP", media: "copper", speedMbps: 1000, maxDistanceMeters: 100, connector: "RJ-45" },
+  { id: "SFP-10G-SR", label: "10GBASE-SR SFP+", media: "mmf", speedMbps: 10000, maxDistanceMeters: 400, connector: "LC duplex" },
+  { id: "SFP-10G-LR", label: "10GBASE-LR SFP+", media: "smf", speedMbps: 10000, maxDistanceMeters: 10000, connector: "LC duplex" },
+  { id: "SFP-25G-SR-S", label: "25GBASE-SR SFP28", media: "mmf", speedMbps: 25000, maxDistanceMeters: 100, connector: "LC duplex" },
+  { id: "QSFP-40G-SR4", label: "40GBASE-SR4 QSFP+", media: "mmf", speedMbps: 40000, maxDistanceMeters: 100, connector: "MPO-12" },
+  { id: "QSFP-100G-SR4-S", label: "100GBASE-SR4 QSFP28", media: "mmf", speedMbps: 100000, maxDistanceMeters: 100, connector: "MPO-12" }
+];
 
 export const moduleCatalog: ModuleSpec[] = [
   {
@@ -93,8 +104,8 @@ export const moduleCatalog: ModuleSpec[] = [
   {
     id: "EHWIC-1GE-SFP-CU",
     label: "EHWIC-1GE-SFP-CU",
-    description: "Dual-media Gigabit EHWIC, modeled in SFP mode.",
-    ports: [{ name: "GigabitEthernet0/{slot}/0", kind: "fiber", mode: "routed", ipCapable: true }]
+    description: "Dual-media Gigabit EHWIC with RJ-45/SFP media selection.",
+    ports: dualPurposeGigabit(1, "GigabitEthernet0/{slot}/", 0, "fiber", "routed")
   },
   {
     id: "EHWIC-4ESG",
@@ -123,8 +134,8 @@ export const moduleCatalog: ModuleSpec[] = [
   {
     id: "NIM-1GE-CU-SFP",
     label: "NIM-1GE-CU-SFP",
-    description: "ISR 4000 dual-media routed Gigabit NIM, modeled in SFP mode.",
-    ports: [{ name: "GigabitEthernet0/{slot}/0", kind: "fiber", mode: "routed", ipCapable: true }]
+    description: "ISR 4000 dual-media routed Gigabit NIM with RJ-45/SFP media selection.",
+    ports: dualPurposeGigabit(1, "GigabitEthernet0/{slot}/", 0, "fiber", "routed")
   },
   {
     id: "NIM-ES2-4",
@@ -210,11 +221,8 @@ export const moduleCatalog: ModuleSpec[] = [
   {
     id: "NIM-2GE-CU-SFP",
     label: "NIM-2GE-CU-SFP",
-    description: "2-port routed Gigabit dual-media NIM, modeled with SFP-capable routed ports.",
-    ports: [
-      { name: "GigabitEthernet0/{slot}/0", kind: "fiber", mode: "routed", ipCapable: true },
-      { name: "GigabitEthernet0/{slot}/1", kind: "fiber", mode: "routed", ipCapable: true }
-    ]
+    description: "2-port routed Gigabit dual-media NIM with RJ-45/SFP media selection.",
+    ports: dualPurposeGigabit(2, "GigabitEthernet0/{slot}/", 0, "fiber", "routed")
   },
   {
     id: "C3850-NM-4-1G",
@@ -387,6 +395,20 @@ function gigabit(count: number, prefix = "GigabitEthernet0/", start = 1): PortTe
   return Array.from({ length: count }, (_, index) => ({ name: `${prefix}${index + start}`, kind: "gigabit-ethernet", mode: "access", vlan: 1 }));
 }
 
+function dualPurposeGigabit(count: number, prefix = "GigabitEthernet0/", start = 1, activeMedia: PortKind = "fiber", mode: PortTemplate["mode"] = "access"): PortTemplate[] {
+  return Array.from({ length: count }, (_, index) => ({
+    name: `${prefix}${index + start}`,
+    kind: "fiber",
+    mode,
+    vlan: mode === "access" ? 1 : undefined,
+    ipCapable: mode === "routed",
+    mediaOptions: ["gigabit-ethernet", "fiber"],
+    activeMedia,
+    mediaSelection: "auto",
+    transceiverId: activeMedia === "fiber" ? "GLC-SX-MMD" : undefined
+  }));
+}
+
 function routedGigabit(count: number, prefix = "GigabitEthernet0/", start = 0): PortTemplate[] {
   return Array.from({ length: count }, (_, index) => ({ name: `${prefix}${index + start}`, kind: "gigabit-ethernet", mode: "routed", ipCapable: true }));
 }
@@ -555,6 +577,22 @@ function catalyst9300Switch(id: string, model: string, description: string, acce
   };
 }
 
+function catalyst9300x24ySwitch(): DeviceModel {
+  return {
+    id: "switch-9300x-24y",
+    kind: "switch",
+    model: "Catalyst 9300X-24Y",
+    labelPrefix: "Switch",
+    description: "High-performance campus switch with 24 25G SFP28 fiber ports and high-speed modular uplinks.",
+    tabs: [...routedTabs],
+    ports: [...fiberPorts(24, "TwentyFiveGigabitEthernet1/0/"), svi(1), consolePort()],
+    modules: [{ id: "slot1", label: "Network Module 1", accepts: c9300xModules }],
+    softwareVersion: "17.09.05",
+    softwareTrain: "CAT9K_IOSXE",
+    iosImage: "cat9k_iosxe.17.09.05.SPA.bin"
+  };
+}
+
 function catalyst9500Switch(id: string, model: string, description: string, portCount: number, portPrefix: string): DeviceModel {
   return {
     id,
@@ -564,6 +602,27 @@ function catalyst9500Switch(id: string, model: string, description: string, port
     description,
     tabs: [...routedTabs],
     ports: [...fiberPorts(portCount, portPrefix, 1, "routed"), svi(1), consolePort()],
+    modules: [],
+    softwareVersion: "17.09.05",
+    softwareTrain: "CAT9K_IOSXE",
+    iosImage: "cat9k_iosxe.17.09.05.SPA.bin"
+  };
+}
+
+function catalyst9500Y4cSwitch(id: string, model: string, description: string, twentyFiveGigPorts: number): DeviceModel {
+  return {
+    id,
+    kind: "switch",
+    model,
+    labelPrefix: "DistSwitch",
+    description,
+    tabs: [...routedTabs],
+    ports: [
+      ...fiberPorts(twentyFiveGigPorts, "TwentyFiveGigabitEthernet1/0/", 1, "routed"),
+      ...fiberPorts(4, "HundredGigabitEthernet1/0/", twentyFiveGigPorts + 1, "routed"),
+      svi(1),
+      consolePort()
+    ],
     modules: [],
     softwareVersion: "17.09.05",
     softwareTrain: "CAT9K_IOSXE",
@@ -747,9 +806,9 @@ export const deviceCatalog: DeviceModel[] = [
     kind: "switch",
     model: "Catalyst 2960-24TC-L",
     labelPrefix: "Switch",
-    description: "Fixed access switch: 24 FE + 2 dual-purpose copper/SFP uplinks, modeled in SFP mode.",
+    description: "Fixed access switch: 24 FE + 2 dual-purpose copper/SFP uplinks.",
     tabs: [...routedTabs],
-    ports: [...fastEthernet(24), ...sfp(2), consolePort()],
+    ports: [...fastEthernet(24), ...dualPurposeGigabit(2), consolePort()],
     modules: [],
     softwareVersion: "15.0(2)SE4",
     softwareTrain: "C2960-LANBASEK9-M",
@@ -881,12 +940,12 @@ export const deviceCatalog: DeviceModel[] = [
   catalyst9300Switch("switch-9300-48u", "Catalyst 9300-48U", "Stackable IOS XE campus switch with 48 UPOE Gigabit ports and modular uplinks.", 48),
   catalyst9300Switch("switch-9300-24ux", "Catalyst 9300-24UX", "Stackable IOS XE campus switch with 24 multigigabit access ports and modular uplinks.", 24, c9300Modules, true),
   catalyst9300Switch("switch-9300-48uxm", "Catalyst 9300-48UXM", "Stackable IOS XE campus switch with 48 mixed multigigabit access ports and modular uplinks.", 48, c9300Modules, true),
-  catalyst9300Switch("switch-9300x-24y", "Catalyst 9300X-24Y", "High-performance campus switch with 24 25G fiber access/uplink ports and high-speed modular uplinks.", 24, c9300xModules),
+  catalyst9300x24ySwitch(),
   catalyst9300Switch("switch-9300x-48hx", "Catalyst 9300X-48HX", "High-density UPOE+ multigigabit campus switch with high-speed uplink module support.", 48, c9300xModules, true),
   catalyst9500Switch("switch-9500-16x", "Catalyst 9500-16X", "Fixed core/distribution switch with 16 routed 10G SFP+ ports.", 16, "TenGigabitEthernet1/0/"),
-  catalyst9500Switch("switch-9500-24y4c", "Catalyst 9500-24Y4C", "Fixed core/distribution switch with 24 routed 25G SFP28 ports and 100G-class uplinks modeled as fiber.", 28, "TwentyFiveGigabitEthernet1/0/"),
+  catalyst9500Y4cSwitch("switch-9500-24y4c", "Catalyst 9500-24Y4C", "Fixed core/distribution switch with 24 routed 25G SFP28 ports and four 100G QSFP28 uplinks.", 24),
   catalyst9500Switch("switch-9500-32c", "Catalyst 9500-32C", "Fixed core/distribution switch with 32 routed 100G QSFP28 ports modeled as fiber.", 32, "HundredGigabitEthernet1/0/"),
-  catalyst9500Switch("switch-9500-48y4c", "Catalyst 9500-48Y4C", "Fixed core/distribution switch with 48 routed 25G SFP28 ports and high-speed uplinks modeled as fiber.", 52, "TwentyFiveGigabitEthernet1/0/"),
+  catalyst9500Y4cSwitch("switch-9500-48y4c", "Catalyst 9500-48Y4C", "Fixed core/distribution switch with 48 routed 25G SFP28 ports and four 100G QSFP28 uplinks.", 48),
   {
     id: "firewall-asa5505",
     kind: "firewall",
@@ -1051,6 +1110,10 @@ export function createPort(template: PortTemplate, index: number, moduleMeta?: {
     id: createId("port"),
     name,
     kind: template.kind,
+    mediaOptions: template.mediaOptions,
+    activeMedia: template.activeMedia ?? template.kind,
+    mediaSelection: template.mediaSelection ?? (template.mediaOptions?.length ? "auto" : undefined),
+    transceiverId: template.transceiverId ?? defaultTransceiverId(template),
     description: "",
     macAddress: createMac(index),
     mode: template.mode,
@@ -1130,12 +1193,18 @@ export function defaultConfig(hostname: string, kind: DeviceKind): DeviceConfig 
 
 export function canPortUseCable(port: NetworkPort, cable: CableType): boolean {
   const ethernet: PortKind[] = ["ethernet", "fast-ethernet", "gigabit-ethernet"];
+  if (port.mediaOptions?.length && (port.mediaSelection ?? "auto") === "auto") {
+    if (cable === "auto") return true;
+    if (cable === "copper-straight" || cable === "copper-cross") return port.mediaOptions.some((media) => ethernet.includes(media));
+    if (cable === "fiber") return port.mediaOptions.includes("fiber");
+  }
+  const kind = effectivePortKind(port);
   if (cable === "auto") return true;
-  if (cable === "console") return port.kind === "console";
-  if (cable === "copper-straight" || cable === "copper-cross") return ethernet.includes(port.kind);
-  if (cable === "serial-dce" || cable === "serial-dte") return port.kind === "serial";
-  if (cable === "fiber") return port.kind === "fiber";
-  if (cable === "wireless") return port.kind === "wireless";
+  if (cable === "console") return kind === "console";
+  if (cable === "copper-straight" || cable === "copper-cross") return ethernet.includes(kind);
+  if (cable === "serial-dce" || cable === "serial-dte") return kind === "serial";
+  if (cable === "fiber") return kind === "fiber";
+  if (cable === "wireless") return kind === "wireless";
   return false;
 }
 
@@ -1151,6 +1220,55 @@ export function getDeviceModel(modelId: string): DeviceModel {
 
 export function getModuleSpec(moduleId: string): ModuleSpec | undefined {
   return moduleCatalog.find((module) => module.id === moduleId);
+}
+
+export function getTransceiverSpec(transceiverId: string | undefined): TransceiverSpec | undefined {
+  return transceiverCatalog.find((transceiver) => transceiver.id === transceiverId);
+}
+
+export function expectedTransceiverSpeedMbps(name: string): number | undefined {
+  if (/HundredGigabit|100G/i.test(name)) return 100000;
+  if (/FortyGigabit|40G/i.test(name)) return 40000;
+  if (/TwentyFiveGigabit|25G/i.test(name)) return 25000;
+  if (/TenGigabit|10G/i.test(name)) return 10000;
+  if (/Gigabit/i.test(name)) return 1000;
+  return undefined;
+}
+
+export function transceiverCompatibleWithPort(transceiver: TransceiverSpec, port: Pick<NetworkPort, "name">): boolean {
+  const expectedSpeed = expectedTransceiverSpeedMbps(port.name);
+  return !expectedSpeed || transceiver.speedMbps === expectedSpeed;
+}
+
+export function transceiverFiberMedia(transceiver: TransceiverSpec): TransceiverMedia[] {
+  if (transceiver.media === "copper") return ["copper"];
+  return transceiver.compatibleMedia?.length ? transceiver.compatibleMedia : [transceiver.media];
+}
+
+export function transceiverMediaLabel(transceiver: TransceiverSpec): string {
+  return transceiverFiberMedia(transceiver).map((media) => media.toUpperCase()).join("/");
+}
+
+export function transceiversShareFiberMedia(left: TransceiverSpec, right: TransceiverSpec): boolean {
+  if (left.media === "copper" || right.media === "copper") return false;
+  const rightMedia = new Set(transceiverFiberMedia(right).filter((media) => media !== "copper"));
+  return transceiverFiberMedia(left).some((media) => media !== "copper" && rightMedia.has(media));
+}
+
+export function defaultTransceiverIdForMedia(name: string, activeMedia: PortKind, currentTransceiverId?: string): string | undefined {
+  if (activeMedia === "gigabit-ethernet") return undefined;
+  if (activeMedia !== "fiber") return undefined;
+  const current = getTransceiverSpec(currentTransceiverId);
+  if (current && current.media !== "copper" && transceiverCompatibleWithPort(current, { name })) return current.id;
+  if (/HundredGigabit|100G/i.test(name)) return "QSFP-100G-SR4-S";
+  if (/FortyGigabit|40G/i.test(name)) return "QSFP-40G-SR4";
+  if (/TwentyFiveGigabit|25G/i.test(name)) return "SFP-25G-SR-S";
+  if (/TenGigabit|10G/i.test(name)) return "SFP-10G-SR";
+  return "GLC-SX-MMD";
+}
+
+export function effectivePortKind(port: NetworkPort): PortKind {
+  return port.activeMedia ?? port.kind;
 }
 
 export function installedModuleForSlot(device: NetworkDevice, slotId: string): NetworkDevice["modules"][number] | undefined {
@@ -1254,6 +1372,11 @@ function modulePortName(name: string, slotId: string): string {
     return `Wireless${slotIndex}`;
   }
   return name;
+}
+
+function defaultTransceiverId(template: PortTemplate): string | undefined {
+  const media = template.activeMedia ?? template.kind;
+  return defaultTransceiverIdForMedia(template.name, media, template.transceiverId);
 }
 
 function occupiedSlotsForModule(model: DeviceModel, slotId: string, spec: ModuleSpec): string[] {
