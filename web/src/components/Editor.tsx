@@ -3,7 +3,7 @@ import { ArrowLeft, Cable, CircleDot, CircleHelp, Copy, Cpu, Download, Edit3, Fi
 import { cableCatalog, canPortUseCable, createDevice, defaultTransceiverIdForMedia, deviceCatalog, displayKind, effectivePortKind, getDeviceModel, getModuleSpec, getTransceiverSpec, installModule, installedModuleForSlot, removeModule, transceiverCatalog, transceiverCompatibleWithPort, transceiverMediaLabel } from "../data/deviceCatalog";
 import { bootBanner, bootDevice, initialCliSession, initialConsoleSession, runCliCommand, type CliSession } from "../engine/cli";
 import { cliEngine } from "../engine/cliEngine";
-import { clearDesktopArpEntries, desktopArpTable, desktopGetmacTable, desktopHostname, desktopIpconfigAll, desktopNetstatListening, desktopRoutePrint, parseDesktopNslookupCommand, parseDesktopPingCommand, parseDesktopTraceCommand } from "../engine/desktopDiagnostics";
+import { clearDesktopArpEntries, desktopArpTable, desktopDnsCache, desktopGetmacTable, desktopHostname, desktopIpconfigAll, desktopNetstatListening, desktopRoutePrint, parseDesktopNslookupCommand, parseDesktopPingCommand, parseDesktopTraceCommand } from "../engine/desktopDiagnostics";
 import { desktopConsoleTargets } from "../engine/desktopTerminal";
 import { diagnoseProject, type NetworkIssueSeverity } from "../engine/diagnostics";
 import { ipInSubnet, ipToNumber, isIpv4, isSubnetMask, maskToPrefix } from "../engine/ip";
@@ -7685,25 +7685,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
   if (lower === "getmac") return desktopGetmacTable(device);
   if (lower === "getmac /v") return desktopGetmacTable(device, { verbose: true });
   if (lower === "ipconfig" || lower === "ipconfig /all") return desktopIpconfigAll(device);
-  if (lower === "ipconfig /displaydns") {
-    const dnsServerIp = device.ports.find((port) => port.dnsServer)?.dnsServer ?? "";
-    if (!dnsServerIp) return "DNS 확인자 캐시에 표시할 서버가 없습니다.";
-    const server = project.devices.find((item) => item.config.services.dns && item.ports.some((port) => port.ipAddress === dnsServerIp));
-    if (!server) return `DNS 서버 ${dnsServerIp}을(를) 찾을 수 없습니다.`;
-    return [
-      "Windows IP Configuration",
-      "",
-      "DNS Resolver Cache",
-      `Server: ${server.label} (${dnsServerIp})`,
-      "",
-      ...(server.config.dnsRecords.length ? server.config.dnsRecords.flatMap((record) => [
-        `Record Name . . . . . : ${record.name}`,
-        `Record Type . . . . . : A`,
-        `A (Host) Record . . . : ${record.value}`,
-        ""
-      ]) : ["캐시된 DNS 레코드가 없습니다."])
-    ].join("\n").trimEnd();
-  }
+  if (lower === "ipconfig /displaydns") return desktopDnsCache(project, device);
   if (lower === "ipconfig /flushdns") {
     return "Windows IP Configuration\n\nSuccessfully flushed the DNS Resolver Cache.";
   }
