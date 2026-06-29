@@ -223,6 +223,8 @@
 - 23:56 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 - 00:03 (2026-06-30 KST) Added Desktop `Resolve-DnsName` parsing and PowerShell-style A/PTR answer output, including directed DNS server selection, DNS reachability checks, server log entries, Command Prompt quick command/help exposure, and Verification Plan/Lab Workbook DNS evidence guidance.
 - 00:03 (2026-06-30 KST) Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
+- 00:08 (2026-06-30 KST) Added Desktop `Get-NetRoute` and `Get-NetNeighbor` helpers/parsers for PowerShell-style active route and ARP/neighbor evidence, then exposed them in Command Prompt quick commands, help text, Verification Plan, Lab Workbook, README, and feature smoke coverage.
+- 00:08 (2026-06-30 KST) Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 
 ### Next
 

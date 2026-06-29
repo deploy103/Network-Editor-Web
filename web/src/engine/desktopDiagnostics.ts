@@ -1,4 +1,4 @@
-import { isIpv4, networkAddress } from "./ip";
+import { isIpv4, maskToPrefix, networkAddress } from "./ip";
 import type { NetworkDevice, NetworkPort, NetworkProject, PortKind } from "../types/network";
 
 type ServiceName = keyof NetworkDevice["config"]["services"];
@@ -265,6 +265,43 @@ function routePrintRow(destination: string, netmask: string, gateway: string, if
   return `${destination.padEnd(27)}${netmask.padEnd(17)}${gateway.padEnd(16)}${iface.padEnd(16)}${metric}`;
 }
 
+export function desktopGetNetRoute(device: NetworkDevice, options: { addressFamily?: string; destinationPrefix?: string } = {}): string {
+  const family = (options.addressFamily ?? "IPv4").trim().toLowerCase();
+  if (family && family !== "ipv4" && family !== "2") return "Get-NetRoute : No matching MSFT_NetRoute objects found.";
+  const destinationFilter = (options.destinationPrefix ?? "").trim().toLowerCase();
+  const rows = desktopNetRouteRows(device).filter((row) => !destinationFilter || row.destinationPrefix.toLowerCase().includes(destinationFilter));
+  if (!rows.length) return "Get-NetRoute : No matching MSFT_NetRoute objects found.";
+  return [
+    "ifIndex DestinationPrefix             NextHop          RouteMetric ifMetric PolicyStore",
+    "------- -----------------             -------          ----------- -------- -----------",
+    ...rows.map((row) => `${row.ifIndex.padStart(7)} ${row.destinationPrefix.padEnd(29)} ${row.nextHop.padEnd(16)} ${row.routeMetric.padStart(11)} ${row.ifMetric.padStart(8)} ${row.policyStore}`)
+  ].join("\n");
+}
+
+export function desktopGetNetNeighbor(device: NetworkDevice, options: { addressFamily?: string; ipAddress?: string } = {}): string {
+  const family = (options.addressFamily ?? "IPv4").trim().toLowerCase();
+  if (family && family !== "ipv4" && family !== "2") return "Get-NetNeighbor : No matching MSFT_NetNeighbor objects found.";
+  const ipFilter = (options.ipAddress ?? "").trim();
+  const rows = device.runtime.arpTable
+    .filter((entry) => !ipFilter || entry.ipAddress === ipFilter)
+    .map((entry) => {
+      const port = device.ports.find((item) => item.name === entry.portName);
+      return {
+        ifIndex: port ? desktopIfIndex(device, port) : "0",
+        ipAddress: entry.ipAddress,
+        linkLayerAddress: windowsMacAddress(entry.macAddress),
+        state: "Reachable",
+        policyStore: "ActiveStore"
+      };
+    });
+  if (!rows.length) return "Get-NetNeighbor : No matching MSFT_NetNeighbor objects found.";
+  return [
+    "ifIndex IPAddress        LinkLayerAddress  State       PolicyStore",
+    "------- ---------        ----------------  -----       -----------",
+    ...rows.map((row) => `${row.ifIndex.padStart(7)} ${row.ipAddress.padEnd(16)} ${row.linkLayerAddress.padEnd(17)} ${row.state.padEnd(11)} ${row.policyStore}`)
+  ].join("\n");
+}
+
 export function desktopNetstatListening(device: NetworkDevice, options: { includePid?: boolean; includeProcess?: boolean } = {}): string {
   const rows = desktopNetstatListeningRows(device);
   const includePid = options.includePid ?? false;
@@ -467,6 +504,28 @@ export function parseDesktopGetNetAdapterCommand(command: string): { valid: bool
   const commandName = tokens.shift()?.toLowerCase();
   if (commandName !== "get-netadapter") return { valid: false, nameFilter: "" };
   return { valid: true, nameFilter: parseDesktopPowerShellOption(tokens, ["-name", "-interfacealias"]) };
+}
+
+export function parseDesktopGetNetRouteCommand(command: string): { valid: boolean; addressFamily: string; destinationPrefix: string } {
+  const tokens = command.trim().split(/\s+/);
+  const commandName = tokens.shift()?.toLowerCase();
+  if (commandName !== "get-netroute") return { valid: false, addressFamily: "", destinationPrefix: "" };
+  return {
+    valid: true,
+    addressFamily: parseDesktopPowerShellOption(tokens, ["-addressfamily"]),
+    destinationPrefix: parseDesktopPowerShellOption(tokens, ["-destinationprefix"])
+  };
+}
+
+export function parseDesktopGetNetNeighborCommand(command: string): { valid: boolean; addressFamily: string; ipAddress: string } {
+  const tokens = command.trim().split(/\s+/);
+  const commandName = tokens.shift()?.toLowerCase();
+  if (commandName !== "get-netneighbor") return { valid: false, addressFamily: "", ipAddress: "" };
+  return {
+    valid: true,
+    addressFamily: parseDesktopPowerShellOption(tokens, ["-addressfamily"]),
+    ipAddress: parseDesktopPowerShellOption(tokens, ["-ipaddress"])
+  };
 }
 
 export function parseDesktopGetNetIpConfigurationCommand(command: string): { valid: boolean; all: boolean; nameFilter: string } {
@@ -769,6 +828,37 @@ function filterDesktopPortsByName(ports: NetworkDevice["ports"], nameFilter = ""
 
 function desktopIfIndex(device: NetworkDevice, port: NetworkPort): string {
   return String(desktopNetworkPorts(device).findIndex((item) => item.id === port.id) + 1);
+}
+
+function desktopNetRouteRows(device: NetworkDevice): Array<{ ifIndex: string; destinationPrefix: string; nextHop: string; routeMetric: string; ifMetric: string; policyStore: string }> {
+  return desktopNetworkPorts(device)
+    .filter((port) => port.ipAddress && port.subnetMask && isIpv4(port.ipAddress) && isIpv4(port.subnetMask))
+    .flatMap((port) => [
+      ...(port.gateway ? [{
+        ifIndex: desktopIfIndex(device, port),
+        destinationPrefix: "0.0.0.0/0",
+        nextHop: port.gateway,
+        routeMetric: "0",
+        ifMetric: "25",
+        policyStore: "ActiveStore"
+      }] : []),
+      {
+        ifIndex: desktopIfIndex(device, port),
+        destinationPrefix: `${networkAddress(port.ipAddress, port.subnetMask)}/${maskToPrefix(port.subnetMask)}`,
+        nextHop: "0.0.0.0",
+        routeMetric: "256",
+        ifMetric: "25",
+        policyStore: "ActiveStore"
+      },
+      {
+        ifIndex: desktopIfIndex(device, port),
+        destinationPrefix: `${port.ipAddress}/32`,
+        nextHop: "0.0.0.0",
+        routeMetric: "256",
+        ifMetric: "25",
+        policyStore: "ActiveStore"
+      }
+    ]);
 }
 
 function desktopAdapterDescription(kind: PortKind): string {
