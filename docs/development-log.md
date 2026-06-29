@@ -233,6 +233,8 @@
 - 00:22 (2026-06-30 KST) Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 - 00:28 (2026-06-30 KST) Added Desktop `Get-EventLog`/`Get-WinEvent` helpers/parsers for PowerShell-style runtime service log evidence with `-Newest`/`-Source` filtering, then connected them to Command Prompt quick commands/help, Verification Plan, Lab Workbook, README, and feature smoke coverage.
 - 00:28 (2026-06-30 KST) Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
+- 00:33 (2026-06-30 KST) Added Desktop `Send-MailMessage` parsing and EMAIL delivery output for PowerShell-style SMTP service checks, including EMAIL reachability logging and Verification Plan/Lab Workbook/README guidance.
+- 00:33 (2026-06-30 KST) Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 
 ### Next
 

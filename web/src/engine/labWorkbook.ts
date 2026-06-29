@@ -166,6 +166,7 @@ function serviceSection(project: NetworkProject): WorkbookSection {
       "- Use Desktop or Complex PDU tests for DNS and HTTP when those services are enabled.",
       "- Use Desktop Command Prompt Test-Connection <server> -Count 4 to capture ICMP reply evidence.",
       "- Use Desktop Command Prompt Invoke-WebRequest http://<server> to capture HTTP status-code evidence.",
+      "- Use Desktop Command Prompt Send-MailMessage -SmtpServer <server> -To <recipient> to capture EMAIL delivery evidence.",
       "- Use Desktop Command Prompt Test-NetConnection <server> -Port <port> to capture service port success or failure.",
       "- Use Desktop Command Prompt netstat -an, netstat -ano, or netstat -abno plus tasklist /svc, Get-NetTCPConnection -State Listen, Get-Process -Id <pid>, Get-Service <service>, and sc queryex <service> on service devices to confirm listening application ports, PID evidence, process names, owning processes, and service state.",
       "- Use show services summary on service devices to confirm enabled and disabled service counts.",

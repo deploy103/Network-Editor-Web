@@ -296,7 +296,7 @@ function serviceVerificationCommands(device: NetworkDevice): string[] {
   if (services.includes("dns")) commands.push("show hosts", "show hosts summary", "Desktop > Command Prompt > nslookup <record> [dns-server]", "Desktop > Command Prompt > Resolve-DnsName <record> -Server <dns-server> -Type A", "show service logs dns");
   if (services.includes("http")) commands.push("Desktop > Web Browser", "Desktop > Command Prompt > Invoke-WebRequest http://<server>", "show service logs http");
   if (services.includes("ftp")) commands.push("Desktop > FTP", "show service logs ftp");
-  if (services.includes("email")) commands.push("Desktop > Email", "show service logs email");
+  if (services.includes("email")) commands.push("Desktop > Email", "Desktop > Command Prompt > Send-MailMessage -SmtpServer <server> -To <recipient>", "show service logs email");
   if (services.includes("tftp")) commands.push("Desktop > TFTP", "show service logs tftp");
   if (services.includes("syslog")) commands.push("Desktop > Syslog", "show logging", "show service logs syslog");
   return Array.from(new Set(commands));
@@ -309,7 +309,7 @@ function serviceVerificationExpected(device: NetworkDevice): string[] {
   if (device.config.services.dns) expected.push(`${device.config.dnsRecords.length} DNS records available`, "Desktop Resolve-DnsName returns A/PTR answer records when DNS is reachable", "DNS lookups create DNS service log entries");
   if (device.config.services.http) expected.push("HTTP client request creates a service log entry", "Desktop Invoke-WebRequest returns StatusCode 200 when HTTP is reachable");
   if (device.config.services.ftp) expected.push("FTP client request creates a service log entry");
-  if (device.config.services.email) expected.push("EMAIL client request creates a service log entry");
+  if (device.config.services.email) expected.push("EMAIL client request creates a service log entry", "Desktop Send-MailMessage reports accepted EMAIL delivery when reachable");
   if (device.config.services.tftp) expected.push("TFTP client request creates a service log entry");
   if (device.config.services.syslog) expected.push("SYSLOG messages are visible in buffered logs");
   return expected;
