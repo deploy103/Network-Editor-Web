@@ -1,5 +1,6 @@
 import { analyzeAddressPlan } from "./addressPlan";
 import { ipInSubnet, isIpv4, isSubnetMask, maskToPrefix, networkAddress } from "./ip";
+import { activeDefaultRoutes, activeStaticRoutes, compareStaticRoutes, staticRouteActive, staticRouteDistance } from "./routeState";
 import type { NetworkDevice, NetworkProject, StaticRoute } from "../types/network";
 
 export type RouteCoverage = "connected" | "static" | "dynamic" | "default" | "missing";
@@ -49,10 +50,21 @@ export interface RoutingMatrixReport {
   };
 }
 
+export interface DeviceRoutingCoverageSummary {
+  deviceId: string;
+  deviceLabel: string;
+  total: number;
+  connected: number;
+  static: number;
+  dynamic: number;
+  defaults: number;
+  missing: number;
+}
+
 export function analyzeRoutingMatrix(project: NetworkProject): RoutingMatrixReport {
   const subnets = routedSubnets(project);
   const l3Devices = project.devices.filter(isL3Device);
-  const coverage = l3Devices.flatMap((device) => subnets.map((subnet) => coverageForDevice(device, subnet)));
+  const coverage = l3Devices.flatMap((device) => subnets.map((subnet) => coverageForDevice(project, device, subnet)));
   const pathChecks = pairwiseSubnetChecks(subnets, coverage);
   const warnings = routingWarnings(project, subnets, coverage, pathChecks);
   return {
@@ -79,6 +91,7 @@ export function buildRoutingMatrixReportText(project: NetworkProject): string {
 
 export function buildRoutingMatrixReportLines(project: NetworkProject): string[] {
   const matrix = analyzeRoutingMatrix(project);
+  const deviceSummary = summarizeRoutingCoverageByDevice(matrix);
   return [
     "Network Editor Web Routing Matrix",
     `Project: ${project.name}`,
@@ -93,6 +106,17 @@ export function buildRoutingMatrixReportLines(project: NetworkProject): string[]
     `- Default coverage: ${matrix.totals.defaults}`,
     `- Missing coverage: ${matrix.totals.missing}`,
     `- Warnings: ${matrix.totals.warnings}`,
+    "",
+    "Device Coverage Summary",
+    ...table(["Device", "Total", "Connected", "Static", "Dynamic", "Default", "Missing"], deviceSummary.map((summary) => [
+      summary.deviceLabel,
+      String(summary.total),
+      String(summary.connected),
+      String(summary.static),
+      String(summary.dynamic),
+      String(summary.defaults),
+      String(summary.missing)
+    ])),
     "",
     "Routed Subnets",
     ...table(["Subnet", "Gateways", "Connected devices", "Hosts"], matrix.subnets.map((subnet) => [
@@ -126,6 +150,25 @@ export function buildRoutingMatrixReportLines(project: NetworkProject): string[]
   ];
 }
 
+export function summarizeRoutingCoverageByDevice(matrix: RoutingMatrixReport): DeviceRoutingCoverageSummary[] {
+  const labelsById = new Map(matrix.coverage.map((coverage) => [coverage.deviceId, coverage.deviceLabel]));
+  return Array.from(labelsById.entries())
+    .map(([deviceId, deviceLabel]) => {
+      const rows = matrix.coverage.filter((coverage) => coverage.deviceId === deviceId);
+      return {
+        deviceId,
+        deviceLabel,
+        total: rows.length,
+        connected: rows.filter((coverage) => coverage.coverage === "connected").length,
+        static: rows.filter((coverage) => coverage.coverage === "static").length,
+        dynamic: rows.filter((coverage) => coverage.coverage === "dynamic").length,
+        defaults: rows.filter((coverage) => coverage.coverage === "default").length,
+        missing: rows.filter((coverage) => coverage.coverage === "missing").length
+      };
+    })
+    .sort((left, right) => right.missing - left.missing || left.deviceLabel.localeCompare(right.deviceLabel));
+}
+
 function routedSubnets(project: NetworkProject): RoutedSubnet[] {
   const addressPlan = analyzeAddressPlan(project);
   return addressPlan.subnets.map((subnet) => ({
@@ -141,14 +184,18 @@ function routedSubnets(project: NetworkProject): RoutedSubnet[] {
 
 function connectedDevicesForSubnet(project: NetworkProject, network: string, mask: string): string[] {
   return project.devices
-    .filter((device) => device.ports.some((port) =>
-      isIpv4(port.ipAddress) && isSubnetMask(port.subnetMask) && networkAddress(port.ipAddress, port.subnetMask) === network && port.subnetMask === mask
+    .filter((device) => device.powerOn && device.ports.some((port) =>
+      port.adminUp &&
+      ((isIpv4(port.ipAddress) && isSubnetMask(port.subnetMask) && networkAddress(port.ipAddress, port.subnetMask) === network && port.subnetMask === mask) ||
+        (port.secondaryIpAddresses ?? []).some((address) => isIpv4(address.ipAddress) && isSubnetMask(address.subnetMask) && networkAddress(address.ipAddress, address.subnetMask) === network && address.subnetMask === mask))
     ))
     .map((device) => device.label);
 }
 
-function coverageForDevice(device: NetworkDevice, subnet: RoutedSubnet): DeviceRouteCoverage {
+function coverageForDevice(project: NetworkProject, device: NetworkDevice, subnet: RoutedSubnet): DeviceRouteCoverage {
   const connected = device.ports.find((port) =>
+    device.powerOn &&
+    port.adminUp &&
     isIpv4(port.ipAddress) &&
     isSubnetMask(port.subnetMask) &&
     networkAddress(port.ipAddress, port.subnetMask) === subnet.network &&
@@ -164,7 +211,7 @@ function coverageForDevice(device: NetworkDevice, subnet: RoutedSubnet): DeviceR
       detail: `${connected.ipAddress}/${maskToPrefix(connected.subnetMask)}`
     };
   }
-  const staticRoute = matchingStaticRoute(device.config.staticRoutes, subnet);
+  const staticRoute = matchingStaticRoute(activeStaticRoutes(project, device), subnet);
   if (staticRoute) {
     return {
       deviceId: device.id,
@@ -172,10 +219,10 @@ function coverageForDevice(device: NetworkDevice, subnet: RoutedSubnet): DeviceR
       subnetKey: subnet.key,
       coverage: "static",
       via: staticRoute.nextHop,
-      detail: `${staticRoute.network}/${maskToPrefix(staticRoute.mask)} distance ${staticRoute.distance ?? 1}${staticRoute.trackId ? ` track ${staticRoute.trackId}` : ""}`
+      detail: `${staticRoute.network}/${maskToPrefix(staticRoute.mask)} distance ${staticRouteDistance(staticRoute)}${staticRoute.trackId ? ` track ${staticRoute.trackId}` : ""}`
     };
   }
-  const dynamic = (device.config.routingProtocols ?? []).find((protocol) => protocol.networks.some((network) => routingNetworkMatches(network, subnet)));
+  const dynamic = device.powerOn ? (device.config.routingProtocols ?? []).find((protocol) => protocol.networks.some((network) => routingNetworkMatches(network, subnet))) : undefined;
   if (dynamic) {
     return {
       deviceId: device.id,
@@ -186,7 +233,7 @@ function coverageForDevice(device: NetworkDevice, subnet: RoutedSubnet): DeviceR
       detail: `${dynamic.protocol}${dynamic.processId ? ` ${dynamic.processId}` : ""} advertises ${dynamic.networks.join(", ")}`
     };
   }
-  const defaultRoute = device.config.staticRoutes.find((route) => route.network === "0.0.0.0" && route.mask === "0.0.0.0");
+  const defaultRoute = activeDefaultRoutes(project, device)[0];
   if (defaultRoute) {
     return {
       deviceId: device.id,
@@ -194,7 +241,7 @@ function coverageForDevice(device: NetworkDevice, subnet: RoutedSubnet): DeviceR
       subnetKey: subnet.key,
       coverage: "default",
       via: defaultRoute.nextHop,
-      detail: `default route distance ${defaultRoute.distance ?? 1}${defaultRoute.trackId ? ` track ${defaultRoute.trackId}` : ""}`
+      detail: `default route distance ${staticRouteDistance(defaultRoute)}${defaultRoute.trackId ? ` track ${defaultRoute.trackId}` : ""}`
     };
   }
   return {
@@ -208,8 +255,9 @@ function coverageForDevice(device: NetworkDevice, subnet: RoutedSubnet): DeviceR
 }
 
 function matchingStaticRoute(routes: StaticRoute[], subnet: RoutedSubnet): StaticRoute | undefined {
-  return routes.find((route) => {
+  return [...routes].sort(compareStaticRoutes).find((route) => {
     if (!isIpv4(route.network) || !isSubnetMask(route.mask)) return false;
+    if (route.network === "0.0.0.0" && route.mask === "0.0.0.0") return false;
     const routePrefix = maskToPrefix(route.mask);
     if (route.network === subnet.network && routePrefix === subnet.prefix) return true;
     return routePrefix <= subnet.prefix && ipInSubnet(subnet.network, route.network, route.mask);
@@ -276,9 +324,20 @@ function routingWarnings(project: NetworkProject, subnets: RoutedSubnet[], cover
   if (missingPairs.length) {
     warnings.push(`${missingPairs.length} subnet pairs have no route coverage.`);
   }
-  const trackedRoutes = project.devices.flatMap((device) => device.config.staticRoutes.filter((route) => route.trackId).map((route) => `${device.label} ${route.network}/${route.mask} track ${route.trackId}`));
-  if (trackedRoutes.length && !project.devices.some((device) => (device.config.ipSlaOperations ?? []).length > 0)) {
+  const trackedRoutes = project.devices.flatMap((device) => device.config.staticRoutes
+    .filter((route) => route.trackId)
+    .map((route) => ({ device, route })));
+  const ipSlaTrackedRoutes = trackedRoutes.filter(({ device, route }) =>
+    (device.config.trackObjects ?? []).some((track) => track.trackId === route.trackId && track.type === "ip-sla")
+  );
+  if (ipSlaTrackedRoutes.length && !project.devices.some((device) => (device.config.ipSlaOperations ?? []).length > 0)) {
     warnings.push("Tracked static routes exist but no IP SLA operation is configured.");
+  }
+  const inactiveTrackedRoutes = trackedRoutes
+    .filter(({ device, route }) => !staticRouteActive(project, device, route))
+    .map(({ device, route }) => `${device.label} ${route.network}/${route.mask} track ${route.trackId}`);
+  if (inactiveTrackedRoutes.length) {
+    warnings.push(`Tracked static routes currently inactive: ${inactiveTrackedRoutes.slice(0, 5).join(", ")}${inactiveTrackedRoutes.length > 5 ? ", ..." : ""}`);
   }
   return warnings;
 }

@@ -16,14 +16,22 @@ trap cleanup EXIT
 npm run preview --workspace web -- --host 127.0.0.1 --port "$PORT" >"$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 
+READY=0
 for _ in {1..60}; do
   if node -e "fetch('http://127.0.0.1:${PORT}').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
+    READY=1
     break
   fi
   sleep 0.5
 done
 
 if ! kill -0 "$SERVER_PID" >/dev/null 2>&1; then
+  cat "$LOG_FILE"
+  exit 1
+fi
+
+if [[ "$READY" != "1" ]]; then
+  echo "Vite preview did not become ready on http://127.0.0.1:${PORT} within 30 seconds."
   cat "$LOG_FILE"
   exit 1
 fi

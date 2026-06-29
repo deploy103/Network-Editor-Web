@@ -3,23 +3,14 @@ import { ArrowLeft, Cable, CircleDot, CircleHelp, Copy, Cpu, Download, Edit3, Fi
 import { cableCatalog, canPortUseCable, createDevice, defaultTransceiverIdForMedia, deviceCatalog, displayKind, effectivePortKind, getDeviceModel, getModuleSpec, getTransceiverSpec, installModule, installedModuleForSlot, removeModule, transceiverCatalog, transceiverCompatibleWithPort, transceiverMediaLabel } from "../data/deviceCatalog";
 import { bootBanner, bootDevice, initialCliSession, initialConsoleSession, runCliCommand, type CliSession } from "../engine/cli";
 import { cliEngine } from "../engine/cliEngine";
-import { buildAddressPlanReportLines } from "../engine/addressPlan";
-import { buildCapacityPlanReportLines } from "../engine/capacityPlan";
-import { buildConfigDriftReportLines } from "../engine/configDrift";
+import { clearDesktopArpEntries, desktopArpTable, desktopGetmacTable, desktopHostname, desktopIpconfigAll, desktopNetstatListening, desktopRoutePrint, parseDesktopNslookupCommand, parseDesktopPingCommand, parseDesktopTraceCommand } from "../engine/desktopDiagnostics";
 import { desktopConsoleTargets } from "../engine/desktopTerminal";
 import { diagnoseProject, type NetworkIssueSeverity } from "../engine/diagnostics";
-import { buildFailureImpactReportLines } from "../engine/failureImpact";
-import { ipInSubnet, ipToNumber, isIpv4, isSubnetMask, maskToPrefix, networkAddress } from "../engine/ip";
-import { buildLabWorkbookLines, type WorkbookAudience } from "../engine/labWorkbook";
-import { downloadProject } from "../exporters/packetTracerExport";
-import { buildProjectReportLines } from "../engine/projectReport";
-import { buildRoutingMatrixReportLines } from "../engine/routingMatrix";
-import { buildSecurityMatrixReportLines } from "../engine/securityMatrix";
-import { buildServiceReachabilityReportLines } from "../engine/serviceReachability";
+import { ipInSubnet, ipToNumber, isIpv4, isSubnetMask, maskToPrefix } from "../engine/ip";
+import type { WorkbookAudience } from "../engine/labWorkbook";
+import { buildPduHeaders } from "../engine/pduHeaders";
 import { requestDhcp } from "../engine/simulation";
 import { addLink, endpoint, linkLabel, recalc, removeLink, validateConnection } from "../engine/topology";
-import { buildVerificationPlanLines } from "../engine/verificationPlan";
-import { buildWirelessSurveyReportLines } from "../engine/wirelessSurvey";
 import { createId } from "../utils/id";
 import { engineLabel, simulatePing } from "../wasm/engine";
 import type { AccessRule, ActivityRequirementKind, CableType, DeviceKind, DeviceTab, ModuleSpec, NatRule, NetworkDevice, NetworkLink, NetworkPort, NetworkProject, PortKind, PortMediaSelection, SimulationEvent, User, WorkspaceDrawing, WorkspaceDrawingKind, WorkspaceNote } from "../types/network";
@@ -489,7 +480,7 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     const complexPacketId = createId("packet");
     for (let index = 0; index < repeatCount; index += 1) {
       const eventStart = nextProject.simulationEvents.length;
-      const reachability = await simulatePing(nextProject, sourceId, targetId);
+      const reachability = await simulatePing(nextProject, sourceId, targetId, complexPduProtocol);
       nextProject = annotateComplexPduEvents(reachability.project, eventStart, ttl, intervalMs, index, repeatCount);
       let status: SimulationEvent["status"] = "delivered";
       let info = "";
@@ -1358,7 +1349,14 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage("Activity Wizard Check Results를 내보냈습니다.");
   }
 
-  function exportProjectReport() {
+  async function exportProjectFile(extension: "json" | "ptweb") {
+    const { downloadProject } = await import("../exporters/packetTracerExport");
+    downloadProject(project, extension);
+    if (extension === "ptweb") setMessage(".ptweb 프로젝트 파일을 내보냈습니다. Cisco Packet Tracer .pkt 바이너리 내보내기는 지원하지 않습니다.");
+  }
+
+  async function exportProjectReport() {
+    const { buildProjectReportLines } = await import("../engine/projectReport");
     const lines = buildProjectReportLines(project);
     const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1374,7 +1372,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage("프로젝트 리포트를 내보냈습니다.");
   }
 
-  function exportAddressPlanReport() {
+  async function exportAddressPlanReport() {
+    const { buildAddressPlanReportLines } = await import("../engine/addressPlan");
     const lines = buildAddressPlanReportLines(project);
     const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1390,7 +1389,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage("주소 계획 리포트를 내보냈습니다.");
   }
 
-  function exportCapacityPlanReport() {
+  async function exportCapacityPlanReport() {
+    const { buildCapacityPlanReportLines } = await import("../engine/capacityPlan");
     const lines = buildCapacityPlanReportLines(project);
     const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1406,7 +1406,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage("Capacity Plan 리포트를 내보냈습니다.");
   }
 
-  function exportRoutingMatrixReport() {
+  async function exportRoutingMatrixReport() {
+    const { buildRoutingMatrixReportLines } = await import("../engine/routingMatrix");
     const lines = buildRoutingMatrixReportLines(project);
     const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1422,7 +1423,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage("Routing Matrix 리포트를 내보냈습니다.");
   }
 
-  function exportConfigDriftReport() {
+  async function exportConfigDriftReport() {
+    const { buildConfigDriftReportLines } = await import("../engine/configDrift");
     const lines = buildConfigDriftReportLines(project);
     const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1438,7 +1440,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage("Configuration Drift 리포트를 내보냈습니다.");
   }
 
-  function exportFailureImpactReport() {
+  async function exportFailureImpactReport() {
+    const { buildFailureImpactReportLines } = await import("../engine/failureImpact");
     const lines = buildFailureImpactReportLines(project);
     const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1454,7 +1457,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage("Failure Impact 리포트를 내보냈습니다.");
   }
 
-  function exportServiceReachabilityReport() {
+  async function exportServiceReachabilityReport() {
+    const { buildServiceReachabilityReportLines } = await import("../engine/serviceReachability");
     const lines = buildServiceReachabilityReportLines(project);
     const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1470,7 +1474,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage("Service Reachability 리포트를 내보냈습니다.");
   }
 
-  function exportSecurityMatrixReport() {
+  async function exportSecurityMatrixReport() {
+    const { buildSecurityMatrixReportLines } = await import("../engine/securityMatrix");
     const lines = buildSecurityMatrixReportLines(project);
     const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1486,7 +1491,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage("Security Matrix 리포트를 내보냈습니다.");
   }
 
-  function exportWirelessSurveyReport() {
+  async function exportWirelessSurveyReport() {
+    const { buildWirelessSurveyReportLines } = await import("../engine/wirelessSurvey");
     const lines = buildWirelessSurveyReportLines(project);
     const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1502,7 +1508,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage("Wireless Survey 리포트를 내보냈습니다.");
   }
 
-  function exportVerificationPlan() {
+  async function exportVerificationPlan() {
+    const { buildVerificationPlanLines } = await import("../engine/verificationPlan");
     const lines = buildVerificationPlanLines(project);
     const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1518,7 +1525,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     setMessage("Verification Plan을 내보냈습니다.");
   }
 
-  function exportLabWorkbook(audience: WorkbookAudience) {
+  async function exportLabWorkbook(audience: WorkbookAudience) {
+    const { buildLabWorkbookLines } = await import("../engine/labWorkbook");
     const lines = buildLabWorkbookLines(project, audience);
     const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1987,8 +1995,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
     if (name === "파일") {
       return [
         { label: "저장", action: () => { onSave(project); setMessage("프로젝트 저장을 요청했습니다."); } },
-        { label: "JSON 내보내기", action: () => downloadProject(project, "json") },
-        { label: "PTWEB 내보내기", action: () => { downloadProject(project, "ptweb"); setMessage(".ptweb 프로젝트 파일을 내보냈습니다. Cisco Packet Tracer .pkt 바이너리 내보내기는 지원하지 않습니다."); } },
+        { label: "JSON 내보내기", action: () => { void exportProjectFile("json"); } },
+        { label: "PTWEB 내보내기", action: () => { void exportProjectFile("ptweb"); } },
         { label: "프로젝트 리포트 내보내기", action: exportProjectReport },
         { label: "주소 계획 내보내기", action: exportAddressPlanReport },
         { label: "Capacity Plan 내보내기", action: exportCapacityPlanReport },
@@ -2108,8 +2116,8 @@ export function Editor({ project, user, saveError, saveStatus, lastSavedAt, onBa
         </nav>
         <div className="packet-toolbar">
           <button className="icon-button" onClick={() => { onSave(project); setMessage("프로젝트 저장을 요청했습니다."); }} title="저장" type="button"><Save size={18} /></button>
-          <button className="icon-button" onClick={() => downloadProject(project, "json")} title="JSON 내보내기" type="button"><FileJson size={18} /></button>
-          <button className="icon-button" onClick={() => { downloadProject(project, "ptweb"); setMessage(".ptweb 프로젝트 파일을 내보냈습니다. Cisco Packet Tracer .pkt 바이너리 내보내기는 지원하지 않습니다."); }} title="PTWEB 프로젝트 내보내기 (Cisco .pkt 아님)" type="button"><Download size={18} /></button>
+          <button className="icon-button" onClick={() => { void exportProjectFile("json"); }} title="JSON 내보내기" type="button"><FileJson size={18} /></button>
+          <button className="icon-button" onClick={() => { void exportProjectFile("ptweb"); }} title="PTWEB 프로젝트 내보내기 (Cisco .pkt 아님)" type="button"><Download size={18} /></button>
           <button className="icon-button" onClick={exportProjectReport} title="프로젝트 리포트 내보내기" type="button"><Info size={18} /></button>
           <button className="icon-button" onClick={openActivityWizard} title="Activity Wizard / Check Results" type="button"><CircleHelp size={18} /></button>
           <button className="icon-button" onClick={onThemeToggle} title={theme === "dark" ? "Light mode" : "Dark mode"} type="button">{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button>
@@ -7333,7 +7341,7 @@ function transportAllows(transportInput: string, protocol: "ssh" | "telnet"): bo
   return tokens.includes("all") || tokens.includes(protocol);
 }
 
-const desktopQuickCommands = ["help", "ipconfig /all", "ipconfig /displaydns", "ipconfig /flushdns", "ipconfig /renew", "ipconfig /release", "arp -a", "route print", "netstat -r", "ping -n 4 www.lab.local", "tracert www.lab.local", "nslookup www.lab.local", "web www.lab.local", "ftp www.lab.local", "mail www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
+const desktopQuickCommands = ["help", "hostname", "getmac", "getmac /v", "ipconfig /all", "ipconfig /displaydns", "ipconfig /flushdns", "ipconfig /renew", "ipconfig /release", "arp -a", "arp -d *", "route print", "route print -4", "netstat -r", "netstat -rn", "netstat -an", "netstat -ano", "ping -n 4 www.lab.local", "tracert www.lab.local", "pathping www.lab.local", "nslookup www.lab.local", "web www.lab.local", "ftp www.lab.local", "mail www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
 
 type DesktopApp = "ip" | "prompt" | "browser" | "terminal" | "ftp" | "email" | "tftp" | "syslog";
 
@@ -7579,9 +7587,9 @@ function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: Ne
           <pre>{output}</pre>
           <form className="desktop-input-row" onSubmit={(event) => { event.preventDefault(); void runDesktopCommand(); }}>
             <span>{device.config.hostname || device.label}&gt;</span>
-            <input value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handlePromptKeyDown} placeholder="ipconfig | ping 192.168.1.1 | tracert www.lab.local | http www.lab.local" />
+            <input value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handlePromptKeyDown} placeholder="ipconfig | ping 192.168.1.1 | tracert www.lab.local | pathping www.lab.local | http www.lab.local" />
           </form>
-          <small>프로젝트 장비 {project.devices.length}개 | ipconfig, arp -a, route print, ping, tracert, nslookup, http, ftp, email, ssh, telnet, tftp, syslog</small>
+          <small>프로젝트 장비 {project.devices.length}개 | hostname, getmac, ipconfig, arp -a, arp -d, route print, netstat, ping, tracert, pathping, nslookup, http, ftp, email, ssh, telnet, tftp, syslog</small>
         </section>
       )}
       {activeApp === "browser" && (
@@ -7665,25 +7673,18 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
   if (lower === "help" || lower === "?") {
     return [
       "지원 명령:",
+      "  hostname | getmac [/v]",
       "  ipconfig /all | ipconfig /displaydns | ipconfig /flushdns | ipconfig /renew | ipconfig /release",
-      "  arp -a | route print | netstat -r",
-      "  ping [-n 횟수] <ip|이름> | tracert <ip|이름> | nslookup <이름|ip>",
+      "  arp -a | arp -d <ip|*> | route print [-4] | netstat -r|-rn | netstat -an|-ano",
+      "  ping [-4] [-n 횟수] <ip|이름> | tracert [-d] <ip|이름> | pathping [-n] <ip|이름> | nslookup [-type=A|PTR] <이름|ip> [dns-server]",
       "  http|web|browser <ip|이름> | ftp <ip|이름> [ls|get 파일] | email|mail <서버> <받는사람> [메시지]",
       "  ssh <ip|이름> | telnet <ip|이름> | tftp <ip|이름> | syslog <ip|이름> <메시지>"
     ].join("\n");
   }
-  if (lower === "ipconfig" || lower === "ipconfig /all") {
-    return device.ports
-      .filter((port) => port.kind !== "console")
-      .map((port) => [
-        `${port.name}:`,
-        `  IPv4 주소 . . . . . . . . . . . : ${port.ipAddress || "0.0.0.0"}`,
-        `  서브넷 마스크 . . . . . . . . . : ${port.subnetMask || "0.0.0.0"}`,
-        `  기본 게이트웨이 . . . . . . . . : ${port.gateway || "0.0.0.0"}`,
-        `  DNS 서버 . . . . . . . . . . . . : ${port.dnsServer || "0.0.0.0"}`
-      ].join("\n"))
-      .join("\n");
-  }
+  if (lower === "hostname") return desktopHostname(device);
+  if (lower === "getmac") return desktopGetmacTable(device);
+  if (lower === "getmac /v") return desktopGetmacTable(device, { verbose: true });
+  if (lower === "ipconfig" || lower === "ipconfig /all") return desktopIpconfigAll(device);
   if (lower === "ipconfig /displaydns") {
     const dnsServerIp = device.ports.find((port) => port.dnsServer)?.dnsServer ?? "";
     if (!dnsServerIp) return "DNS 확인자 캐시에 표시할 서버가 없습니다.";
@@ -7716,22 +7717,24 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     onProjectChange(released.project, released.message);
     return released.message;
   }
-  if (lower === "arp -a") {
-    return device.runtime.arpTable.map((entry) => `${entry.ipAddress.padEnd(16)}${entry.macAddress.padEnd(20)}${entry.portName}`).join("\n") || "ARP 항목이 없습니다.";
+  if (lower === "arp -a") return desktopArpTable(device);
+  if (lower === "arp -d" || lower.startsWith("arp -d ")) {
+    const target = command.slice("arp -d".length).trim() || "*";
+    const cleared = clearDesktopArpEntries(device, target);
+    if (cleared.device !== device) {
+      onProjectChange({
+        ...project,
+        devices: project.devices.map((item) => item.id === device.id ? cleared.device : item)
+      }, cleared.message);
+    }
+    return cleared.message;
   }
-  if (lower === "route print" || lower === "netstat -r") {
-    const routes = device.ports
-      .filter((port) => port.ipAddress && port.subnetMask && isIpv4(port.ipAddress) && isIpv4(port.subnetMask))
-      .flatMap((port) => [
-        `${networkAddress(port.ipAddress, port.subnetMask)}/${maskToPrefix(port.subnetMask)} 직접 연결 ${port.name}`,
-        `${port.ipAddress}/32 직접 연결 ${port.name}`,
-        ...(port.gateway ? [`0.0.0.0/0 via ${port.gateway} dev ${port.name}`] : [])
-      ]);
-    return routes.join("\n") || "설치된 라우트가 없습니다.";
-  }
+  if (lower === "route print" || lower === "route print -4" || lower === "netstat -r" || lower === "netstat -rn") return desktopRoutePrint(device);
+  if (lower === "netstat" || lower === "netstat -a" || lower === "netstat -an" || lower === "netstat -na") return desktopNetstatListening(device);
+  if (lower === "netstat -ano" || lower === "netstat -aon" || lower === "netstat -oan" || lower === "netstat -nao" || lower === "netstat -noa") return desktopNetstatListening(device, { includePid: true });
   if (lower.startsWith("ping ")) {
     const parsed = parseDesktopPingCommand(command);
-    if (!parsed.targetText.trim()) return "사용법: ping [-n 횟수] <ip|이름>";
+    if (!parsed.targetText.trim()) return "사용법: ping [-4] [-n 횟수] <ip|이름>";
     const resolved = await resolveDesktopNetworkTarget(project, device, parsed.targetText, onProjectChange);
     if (!resolved.target) return `Ping 대상 ${parsed.targetText.trim()}을(를) 찾을 수 없습니다: ${resolved.error}`;
     let nextProject = resolved.project;
@@ -7760,7 +7763,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     ].join("\n");
   }
   if (lower.startsWith("tracert ") || lower.startsWith("traceroute ")) {
-    const targetText = command.split(/\s+/).slice(1).join(" ");
+    const { targetText } = parseDesktopTraceCommand(command);
     if (!targetText.trim()) return "사용법: tracert <ip|이름>";
     const resolved = await resolveDesktopNetworkTarget(project, device, targetText, onProjectChange);
     if (!resolved.target) return `대상 ${targetText}을(를) 찾을 수 없습니다: ${resolved.error}`;
@@ -7777,14 +7780,47 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
       result.success ? "추적 완료." : `추적 실패: ${result.message}`
     ].join("\n");
   }
+  if (lower.startsWith("pathping ")) {
+    const { targetText } = parseDesktopTraceCommand(command);
+    if (!targetText.trim()) return "사용법: pathping <ip|이름>";
+    const resolved = await resolveDesktopNetworkTarget(project, device, targetText, onProjectChange);
+    if (!resolved.target) return `대상 ${targetText}을(를) 찾을 수 없습니다: ${resolved.error}`;
+    const before = resolved.project.simulationEvents.length;
+    const result = await simulatePing(resolved.project, device.id, resolved.target.id);
+    onProjectChange(result.project, result.message);
+    const targetAddress = primaryDeviceIp(resolved.target) || targetText.trim();
+    const hops = [device.label, ...result.project.simulationEvents
+      .slice(before)
+      .map((event) => result.project.devices.find((item) => item.id === event.atDeviceId)?.label ?? event.atDeviceId)
+      .filter((label, index, list) => list.indexOf(label) === index)];
+    const uniqueHops = hops.filter((label, index, list) => list.indexOf(label) === index);
+    const sent = 4;
+    const lost = result.success ? 0 : sent;
+    return [
+      `${resolved.target.label} [${targetAddress}](으)로 경로 추적 및 통계 계산`,
+      "",
+      ...uniqueHops.map((hop, index) => `${String(index).padStart(2)}    <1 ms    ${hop}`),
+      "",
+      "Computing statistics for 4 seconds...",
+      "            Source to Here   This Node/Link",
+      "Hop  RTT    Lost/Sent = Pct  Lost/Sent = Pct  Address",
+      ...uniqueHops.map((hop, index) => `${String(index).padStart(2)}   <1ms   ${lost}/${sent} = ${result.success ? "0" : "100"}%       ${lost}/${sent} = ${result.success ? "0" : "100"}%       ${hop}`),
+      "",
+      result.success ? "Trace complete." : `Trace failed: ${result.message}`
+    ].join("\n");
+  }
   if (lower.startsWith("nslookup ")) {
-    const name = cleanHost(command.slice("nslookup ".length));
-    if (!name) return "사용법: nslookup <이름>";
-    const dnsServerIp = device.ports.find((port) => port.dnsServer)?.dnsServer ?? "";
+    const parsed = parseDesktopNslookupCommand(command);
+    const name = cleanHost(parsed.name);
+    if (!name) return "사용법: nslookup [-type=A|PTR] <이름|ip> [dns-server]";
+    let dnsServerIp = parsed.serverText ? cleanHost(parsed.serverText) : (device.ports.find((port) => port.dnsServer)?.dnsServer ?? "");
+    if (dnsServerIp && !isIpv4(dnsServerIp)) {
+      dnsServerIp = primaryDeviceIp(resolveDesktopTarget(project, dnsServerIp) ?? undefined) || "";
+    }
     if (!dnsServerIp) return "DNS 요청 실패: DNS 서버가 설정되지 않았습니다.";
     const server = project.devices.find((item) => item.config.services.dns && item.ports.some((port) => port.ipAddress === dnsServerIp));
     if (!server) return `DNS 요청 실패: 서버 ${dnsServerIp}을(를) 찾을 수 없습니다.`;
-    const reachability = await simulatePing(project, device.id, server.id);
+    const reachability = await simulatePing(project, device.id, server.id, "dns");
     if (!reachability.success) {
       const nextProject = appendDesktopEvent(reachability.project, device.id, server.id, "DNS", `${name} DNS 질의 시간 초과: ${reachability.message}`, "dropped");
       onProjectChange(nextProject, reachability.message);
@@ -7793,20 +7829,24 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     if (isIpv4(name)) {
       const reverse = server.config.dnsRecords.find((item) => item.value === name);
       if (!reverse) {
-        const nextProject = appendDesktopEvent(reachability.project, device.id, server.id, "DNS", `${name} PTR 질의가 NXDOMAIN을 반환했습니다.`, "dropped");
+        const loggedProject = appendServerLog(reachability.project, server.id, "warning", `DNS PTR ${name} from ${device.label}: NXDOMAIN`);
+        const nextProject = appendDesktopEvent(loggedProject, device.id, server.id, "DNS", `${name} PTR 질의가 NXDOMAIN을 반환했습니다.`, "dropped");
         onProjectChange(nextProject, "PTR 레코드를 찾을 수 없습니다.");
         return `서버: ${server.label}\n주소: ${dnsServerIp}\n*** ${name} PTR 레코드가 없습니다.`;
       }
-      onProjectChange(appendDesktopEvent(reachability.project, device.id, server.id, "DNS", `${name}을(를) ${reverse.name}(으)로 역조회했습니다.`, "delivered"), `DNS가 ${name}을(를) 역조회했습니다.`);
+      const loggedProject = appendServerLog(reachability.project, server.id, "info", `DNS PTR ${name} from ${device.label}: ${reverse.name}`);
+      onProjectChange(appendDesktopEvent(loggedProject, device.id, server.id, "DNS", `${name}을(를) ${reverse.name}(으)로 역조회했습니다.`, "delivered"), `DNS가 ${name}을(를) 역조회했습니다.`);
       return `서버: ${server.label}\n주소: ${dnsServerIp}\n이름: ${reverse.name}\n주소: ${name}`;
     }
     const record = server.config.dnsRecords.find((item) => item.name.toLowerCase() === name.toLowerCase());
     if (!record) {
-      const nextProject = appendDesktopEvent(reachability.project, device.id, server.id, "DNS", `${name} DNS 질의가 NXDOMAIN을 반환했습니다.`, "dropped");
+      const loggedProject = appendServerLog(reachability.project, server.id, "warning", `DNS QUERY ${name} from ${device.label}: NXDOMAIN`);
+      const nextProject = appendDesktopEvent(loggedProject, device.id, server.id, "DNS", `${name} DNS 질의가 NXDOMAIN을 반환했습니다.`, "dropped");
       onProjectChange(nextProject, "DNS 레코드를 찾을 수 없습니다.");
       return `서버: ${server.label}\n이름: ${name}\n*** 주소 레코드가 없습니다.`;
     }
-    onProjectChange(appendDesktopEvent(reachability.project, device.id, server.id, "DNS", `${record.name}을(를) ${record.value}(으)로 확인했습니다.`, "delivered"), `DNS가 ${record.name}을(를) 확인했습니다.`);
+    const loggedProject = appendServerLog(reachability.project, server.id, "info", `DNS QUERY ${record.name} from ${device.label}: ${record.value}`);
+    onProjectChange(appendDesktopEvent(loggedProject, device.id, server.id, "DNS", `${record.name}을(를) ${record.value}(으)로 확인했습니다.`, "delivered"), `DNS가 ${record.name}을(를) 확인했습니다.`);
     return `서버: ${server.label}\n이름: ${record.name}\n주소: ${record.value}`;
   }
   if (lower.startsWith("http ") || lower.startsWith("web ") || lower.startsWith("browser ")) {
@@ -7815,7 +7855,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     const resolved = await resolveDesktopNetworkTarget(project, device, targetText, onProjectChange);
     if (!resolved.target) return resolved.error;
     const { target, project: resolvedProject } = resolved;
-    const result = await simulatePing(resolvedProject, device.id, target.id);
+    const result = await simulatePing(resolvedProject, device.id, target.id, "http");
     if (!result.success) {
       onProjectChange(appendDesktopEvent(result.project, device.id, target.id, "HTTP", `HTTP 요청 실패: ${result.message}`, "dropped"), result.message);
       return `HTTP 요청 실패: ${result.message}`;
@@ -7836,7 +7876,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     const resolved = await resolveDesktopNetworkTarget(project, device, targetText, onProjectChange);
     if (!resolved.target) return resolved.error;
     const { target, project: resolvedProject } = resolved;
-    const result = await simulatePing(resolvedProject, device.id, target.id);
+    const result = await simulatePing(resolvedProject, device.id, target.id, "ftp");
     if (!result.success) {
       onProjectChange(appendDesktopEvent(result.project, device.id, target.id, "FTP", `FTP 연결 실패: ${result.message}`, "dropped"), result.message);
       return `FTP 연결 실패: ${result.message}`;
@@ -7863,7 +7903,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     const resolved = await resolveDesktopNetworkTarget(project, device, targetText, onProjectChange);
     if (!resolved.target) return resolved.error;
     const { target, project: resolvedProject } = resolved;
-    const result = await simulatePing(resolvedProject, device.id, target.id);
+    const result = await simulatePing(resolvedProject, device.id, target.id, "email");
     if (!result.success) {
       onProjectChange(appendDesktopEvent(result.project, device.id, target.id, "EMAIL", `EMAIL 전송 실패: ${result.message}`, "dropped"), result.message);
       return `EMAIL 전송 실패: ${result.message}`;
@@ -7897,7 +7937,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     const resolved = await resolveDesktopNetworkTarget(project, device, targetText, onProjectChange);
     if (!resolved.target) return resolved.error;
     const { target, project: resolvedProject } = resolved;
-    const result = await simulatePing(resolvedProject, device.id, target.id);
+    const result = await simulatePing(resolvedProject, device.id, target.id, protocol);
     if (!result.success) {
       onProjectChange(appendDesktopEvent(result.project, device.id, target.id, protocol.toUpperCase(), `${protocol.toUpperCase()} 연결 실패: ${result.message}`, "dropped"), result.message);
       return `${protocol.toUpperCase()} 연결 실패: ${result.message}`;
@@ -7926,7 +7966,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     const resolved = await resolveDesktopNetworkTarget(project, device, targetText, onProjectChange);
     if (!resolved.target) return resolved.error;
     const { target, project: resolvedProject } = resolved;
-    const result = await simulatePing(resolvedProject, device.id, target.id);
+    const result = await simulatePing(resolvedProject, device.id, target.id, "tftp");
     if (!result.success) {
       onProjectChange(appendDesktopEvent(result.project, device.id, target.id, "TFTP", `TFTP 연결 실패: ${result.message}`, "dropped"), result.message);
       return `TFTP 연결 실패: ${result.message}`;
@@ -7947,7 +7987,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     const resolved = await resolveDesktopNetworkTarget(project, device, targetText, onProjectChange);
     if (!resolved.target) return resolved.error;
     const { target, project: resolvedProject } = resolved;
-    const result = await simulatePing(resolvedProject, device.id, target.id);
+    const result = await simulatePing(resolvedProject, device.id, target.id, "syslog");
     if (!result.success) {
       onProjectChange(appendDesktopEvent(result.project, device.id, target.id, "SYSLOG", `SYSLOG 전송 실패: ${result.message}`, "dropped"), result.message);
       return `SYSLOG 전송 실패: ${result.message}`;
@@ -7961,18 +8001,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     onProjectChange(appendDesktopEvent(loggedProject, device.id, target.id, "SYSLOG", `${target.label}에 SYSLOG 메시지를 기록했습니다.`, "delivered"), "SYSLOG 메시지를 기록했습니다.");
     return `SYSLOG sent to ${target.label}: ${logMessage}`;
   }
-  return "알 수 없는 데스크톱 명령입니다. help, ipconfig, arp -a, route print, netstat -r, ping [-n 횟수] <ip|이름>, tracert <ip|이름>, nslookup <이름|ip>, http/web <ip|이름>, ftp <ip|이름>, email/mail <ip|이름> <받는사람>, ssh <ip|이름>, telnet <ip|이름>, tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
-}
-
-function parseDesktopPingCommand(command: string): { count: number; targetText: string } {
-  const tokens = command.trim().split(/\s+/).slice(1);
-  if (tokens[0]?.toLowerCase() === "-n") {
-    return { count: boundedNumber(tokens[1] ?? "4", 1, 10), targetText: tokens.slice(2).join(" ") };
-  }
-  if (tokens[0]?.toLowerCase().startsWith("-n") && tokens[0].length > 2) {
-    return { count: boundedNumber(tokens[0].slice(2), 1, 10), targetText: tokens.slice(1).join(" ") };
-  }
-  return { count: 4, targetText: tokens.join(" ") };
+  return "알 수 없는 데스크톱 명령입니다. help, hostname, getmac [/v], ipconfig, arp -a, arp -d <ip|*>, route print [-4], netstat -r|-rn, netstat -an, netstat -ano, ping [-4] [-n 횟수] <ip|이름>, tracert [-d] <ip|이름>, pathping [-n] <ip|이름>, nslookup [-type=A|PTR] <이름|ip> [dns-server], http/web <ip|이름>, ftp <ip|이름>, email/mail <ip|이름> <받는사람>, ssh <ip|이름>, telnet <ip|이름>, tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
 }
 
 function resolveDesktopTarget(project: NetworkProject, value: string): NetworkDevice | null {
@@ -8051,7 +8080,7 @@ async function resolveDesktopNetworkTarget(project: NetworkProject, device: Netw
   if (!dnsServerIp) return { target: null, project, error: `${host}을(를) 확인할 수 없습니다: DNS 서버가 설정되지 않았습니다.` };
   const server = project.devices.find((item) => item.config.services.dns && item.ports.some((port) => port.ipAddress === dnsServerIp));
   if (!server) return { target: null, project, error: `${host}을(를) 확인할 수 없습니다: DNS 서버 ${dnsServerIp}을(를) 찾을 수 없습니다.` };
-  const dnsReachability = await simulatePing(project, device.id, server.id);
+  const dnsReachability = await simulatePing(project, device.id, server.id, "dns");
   if (!dnsReachability.success) {
     const nextProject = appendDesktopEvent(dnsReachability.project, device.id, server.id, "DNS", `${host} DNS 질의 실패: ${dnsReachability.message}`, "dropped");
     onProjectChange(nextProject, dnsReachability.message);
@@ -8059,11 +8088,13 @@ async function resolveDesktopNetworkTarget(project: NetworkProject, device: Netw
   }
   const record = server.config.dnsRecords.find((item) => item.name.toLowerCase() === host.toLowerCase());
   if (!record) {
-    const nextProject = appendDesktopEvent(dnsReachability.project, device.id, server.id, "DNS", `${host} DNS 질의가 NXDOMAIN을 반환했습니다.`, "dropped");
+    const loggedProject = appendServerLog(dnsReachability.project, server.id, "warning", `DNS QUERY ${host} from ${device.label}: NXDOMAIN`);
+    const nextProject = appendDesktopEvent(loggedProject, device.id, server.id, "DNS", `${host} DNS 질의가 NXDOMAIN을 반환했습니다.`, "dropped");
     onProjectChange(nextProject, "DNS 레코드를 찾을 수 없습니다.");
     return { target: null, project: nextProject, error: `${host}을(를) 확인할 수 없습니다: DNS 레코드가 없습니다.` };
   }
-  const nextProject = appendDesktopEvent(dnsReachability.project, device.id, server.id, "DNS", `${host}을(를) ${record.value}(으)로 확인했습니다.`, "delivered");
+  const loggedProject = appendServerLog(dnsReachability.project, server.id, "info", `DNS QUERY ${host} from ${device.label}: ${record.value}`);
+  const nextProject = appendDesktopEvent(loggedProject, device.id, server.id, "DNS", `${host}을(를) ${record.value}(으)로 확인했습니다.`, "delivered");
   onProjectChange(nextProject, `DNS가 ${host}을(를) 확인했습니다.`);
   return { target: resolveDesktopTarget(nextProject, record.value), project: nextProject, error: `DNS 레코드 ${record.value}와 일치하는 장비가 없습니다.` };
 }
@@ -8873,25 +8904,7 @@ function inferredPduHeaders(project: NetworkProject, event: SimulationEvent): No
   const target = project.devices.find((device) => device.id === (event.targetDeviceId ?? event.atDeviceId));
   const sourceAddress = primaryDeviceIp(source) || source?.label || event.sourceDeviceId || event.lastDeviceId;
   const targetAddress = primaryDeviceIp(target) || target?.label || event.targetDeviceId || event.atDeviceId;
-  if (protocol === "ARP" || protocol === "SWITCH" || protocol === "HUB") {
-    return [
-      { layer: "Layer 2", field: "Frame type", value: protocol },
-      { layer: "Layer 2", field: "Source", value: source?.label ?? event.lastDeviceId },
-      { layer: "Layer 2", field: "Destination", value: target?.label ?? event.atDeviceId },
-      { layer: "Layer 2", field: "Action", value: eventStatusLabel(event.status) }
-    ];
-  }
-  const transport = pduTransportForProtocol(protocol);
-  return [
-    { layer: "Layer 2", field: "EtherType", value: "IPv4" },
-    { layer: "Layer 3", field: "Source", value: sourceAddress },
-    { layer: "Layer 3", field: "Destination", value: targetAddress },
-    { layer: "Layer 3", field: "Protocol", value: transport.protocol === "ICMP" ? "ICMP" : "IP" },
-    { layer: "Layer 4", field: "Protocol", value: transport.protocol },
-    ...(transport.ports ? [{ layer: "Layer 4", field: "Ports", value: transport.ports }] : []),
-    { layer: "Layer 7", field: "Application", value: protocol },
-    { layer: "Packet", field: "Disposition", value: eventStatusLabel(event.status) }
-  ];
+  return buildPduHeaders(protocol, eventStatusLabel(event.status), sourceAddress, targetAddress);
 }
 
 function pduHeaderValue(project: NetworkProject, value: string): string {
@@ -8899,20 +8912,6 @@ function pduHeaderValue(project: NetworkProject, value: string): string {
   if (!device) return value;
   const ip = primaryDeviceIp(device);
   return ip ? `${device.label} (${ip})` : device.label;
-}
-
-function pduTransportForProtocol(protocol: string): { protocol: string; ports?: string } {
-  if (protocol === "ICMP") return { protocol: "ICMP" };
-  if (protocol === "DHCP") return { protocol: "UDP", ports: "67/68" };
-  if (protocol === "DNS") return { protocol: "UDP", ports: "53" };
-  if (protocol === "HTTP") return { protocol: "TCP", ports: "80" };
-  if (protocol === "FTP") return { protocol: "TCP", ports: "21" };
-  if (protocol === "EMAIL") return { protocol: "TCP", ports: "25" };
-  if (protocol === "TFTP") return { protocol: "UDP", ports: "69" };
-  if (protocol === "SYSLOG") return { protocol: "UDP", ports: "514" };
-  if (protocol === "SSH") return { protocol: "TCP", ports: "22" };
-  if (protocol === "TELNET") return { protocol: "TCP", ports: "23" };
-  return { protocol: "IP" };
 }
 
 function pduDetailRowsFor(

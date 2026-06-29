@@ -75,6 +75,21 @@ export function buildConfigDriftReportText(project: NetworkProject): string {
 
 export function buildConfigDriftReportLines(project: NetworkProject): string[] {
   const report = analyzeConfigDrift(project);
+  const statusRows = [
+    ["In sync", String(report.totals.inSync)],
+    ["Unsaved", String(report.totals.unsaved)],
+    ["Drifted", String(report.totals.drifted)],
+    ["Not applicable", String(report.totals.notApplicable)]
+  ];
+  const deviceRows = report.devices.map((device) => [
+    device.label,
+    device.hostname,
+    device.kind,
+    device.status,
+    String(device.runningLineCount),
+    String(device.startupLineCount),
+    `+${device.addedLineCount}/-${device.removedLineCount}`
+  ]);
   return [
     "Network Editor Web Configuration Drift Report",
     `Project: ${project.name}`,
@@ -89,8 +104,11 @@ export function buildConfigDriftReportLines(project: NetworkProject): string[] {
     `- Startup-only lines: ${report.totals.removedLines}`,
     `- Changed lines: ${report.totals.changedLines}`,
     "",
-    "Devices",
-    ...report.devices.map((device) => `- ${device.label} (${device.hostname}) ${device.status}: running ${device.runningLineCount}, startup ${device.startupLineCount}, +${device.addedLineCount}/-${device.removedLineCount}`),
+    "Status Summary",
+    ...table(["Status", "Devices"], statusRows),
+    "",
+    "Device Status",
+    ...table(["Device", "Hostname", "Kind", "Status", "Running", "Startup", "Delta"], deviceRows),
     "",
     ...report.devices.flatMap(renderDeviceDrift)
   ];
@@ -336,4 +354,18 @@ function importantCommands(lines: string[]): string[] {
     .filter((line) => line && line !== "!" && line !== "end")
     .filter((line) => interestingPrefixes.some((prefix) => line.startsWith(prefix) || line.trimStart().startsWith(prefix.trimStart())));
   return Array.from(new Set(normalized)).slice(0, 40);
+}
+
+function table(headers: string[], rows: string[][]): string[] {
+  if (!rows.length) return ["- none"];
+  const widths = headers.map((header, index) => Math.max(header.length, ...rows.map((row) => sanitize(row[index] ?? "").length)));
+  return [
+    `| ${headers.map((header, index) => header.padEnd(widths[index])).join(" | ")} |`,
+    `| ${widths.map((width) => "-".repeat(width)).join(" | ")} |`,
+    ...rows.map((row) => `| ${row.map((cell, index) => sanitize(cell).padEnd(widths[index])).join(" | ")} |`)
+  ];
+}
+
+function sanitize(value: string): string {
+  return value.replace(/\s+/g, " ").replace(/\|/g, "/").trim() || "-";
 }

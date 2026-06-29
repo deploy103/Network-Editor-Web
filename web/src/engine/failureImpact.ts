@@ -1,4 +1,4 @@
-import { linkLabel } from "./topology";
+import { endpoint, linkLabel } from "./topology";
 import type { NetworkDevice, NetworkLink, NetworkProject } from "../types/network";
 
 export interface FailureImpactEndpoint {
@@ -30,20 +30,30 @@ export interface FailureImpactReport {
   scenarios: FailureImpactScenario[];
 }
 
+export interface FailureImpactSeveritySummary {
+  severity: FailureImpactScenario["severity"];
+  scenarios: number;
+  links: number;
+  devices: number;
+  worstAffectedPairs: number;
+}
+
 interface Graph {
   nodes: Set<string>;
   adjacency: Map<string, Set<string>>;
 }
+
+const severityOrder: Array<FailureImpactScenario["severity"]> = ["high", "medium", "low", "none"];
 
 export function analyzeFailureImpact(project: NetworkProject): FailureImpactReport {
   const endpoints = endpointDevices(project);
   const baseline = connectedComponents(activeGraph(project));
   const baselineReachablePairs = reachableEndpointPairKeys(project, endpoints, baseline);
   const linkScenarios = project.links
-    .filter((link) => link.status === "up")
+    .filter((link) => linkOperational(project, link))
     .map((link) => analyzeLinkFailure(project, endpoints, baselineReachablePairs, link));
   const deviceScenarios = project.devices
-    .filter((device) => device.kind === "router" || device.kind === "switch" || device.kind === "firewall" || device.kind === "wireless")
+    .filter((device) => device.powerOn && (device.kind === "router" || device.kind === "switch" || device.kind === "firewall" || device.kind === "wireless"))
     .map((device) => analyzeDeviceFailure(project, endpoints, baselineReachablePairs, device));
   const scenarios = [...linkScenarios, ...deviceScenarios].sort((left, right) =>
     severityRank(right.severity) - severityRank(left.severity) ||
@@ -68,6 +78,7 @@ export function buildFailureImpactReportText(project: NetworkProject): string {
 
 export function buildFailureImpactReportLines(project: NetworkProject): string[] {
   const report = analyzeFailureImpact(project);
+  const severitySummary = summarizeFailureImpactBySeverity(report);
   return [
     "Network Editor Web Failure Impact Report",
     `Project: ${project.name}`,
@@ -79,6 +90,15 @@ export function buildFailureImpactReportLines(project: NetworkProject): string[]
     `- Bridge links: ${report.bridgeLinks.length}`,
     `- Critical network devices: ${report.criticalDevices.length}`,
     `- Worst-case affected endpoint pairs: ${report.vulnerableEndpointPairs}`,
+    "",
+    "Severity Summary",
+    ...table(["Severity", "Scenarios", "Links", "Devices", "Worst pairs"], severitySummary.map((summary) => [
+      summary.severity,
+      String(summary.scenarios),
+      String(summary.links),
+      String(summary.devices),
+      String(summary.worstAffectedPairs)
+    ])),
     "",
     "Top Scenarios",
     ...table(
@@ -107,6 +127,19 @@ export function buildFailureImpactReportLines(project: NetworkProject): string[]
         ""
       ])
   ];
+}
+
+export function summarizeFailureImpactBySeverity(report: FailureImpactReport): FailureImpactSeveritySummary[] {
+  return severityOrder.map((severity) => {
+    const scenarios = report.scenarios.filter((scenario) => scenario.severity === severity);
+    return {
+      severity,
+      scenarios: scenarios.length,
+      links: scenarios.filter((scenario) => scenario.kind === "link").length,
+      devices: scenarios.filter((scenario) => scenario.kind === "device").length,
+      worstAffectedPairs: scenarios.reduce((max, scenario) => Math.max(max, scenario.affectedPairCount), 0)
+    };
+  });
 }
 
 function analyzeLinkFailure(project: NetworkProject, endpoints: NetworkDevice[], baselineReachablePairs: Set<string>, link: NetworkLink): FailureImpactScenario {
@@ -163,11 +196,11 @@ function scenarioFromComponents(
 }
 
 function activeGraph(project: NetworkProject, options: { excludedLinkId?: string; excludedDeviceId?: string } = {}): Graph {
-  const nodes = new Set(project.devices.filter((device) => device.id !== options.excludedDeviceId).map((device) => device.id));
+  const nodes = new Set(project.devices.filter((device) => device.id !== options.excludedDeviceId && device.powerOn).map((device) => device.id));
   const adjacency = new Map<string, Set<string>>();
   for (const node of nodes) adjacency.set(node, new Set());
   for (const link of project.links) {
-    if (link.status !== "up") continue;
+    if (!linkOperational(project, link)) continue;
     if (link.id === options.excludedLinkId) continue;
     if (link.endpointA.deviceId === options.excludedDeviceId || link.endpointB.deviceId === options.excludedDeviceId) continue;
     if (!nodes.has(link.endpointA.deviceId) || !nodes.has(link.endpointB.deviceId)) continue;
@@ -175,6 +208,13 @@ function activeGraph(project: NetworkProject, options: { excludedLinkId?: string
     adjacency.get(link.endpointB.deviceId)?.add(link.endpointA.deviceId);
   }
   return { nodes, adjacency };
+}
+
+function linkOperational(project: NetworkProject, link: NetworkLink): boolean {
+  if (link.status !== "up") return false;
+  const a = endpoint(project, link.endpointA);
+  const b = endpoint(project, link.endpointB);
+  return Boolean(a?.device.powerOn && b?.device.powerOn && a.port.adminUp && b.port.adminUp);
 }
 
 function connectedComponents(graph: Graph): string[][] {

@@ -6,6 +6,7 @@ export { createId };
 
 const USERS_KEY = "new-network-editor-users";
 const PROJECTS_KEY = "new-network-editor-projects";
+const PROJECTS_BACKUP_KEY = "new-network-editor-projects-backup";
 const SESSION_KEY = "new-network-editor-session";
 const SESSION_COOKIE_KEY = "new-network-editor-session";
 const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
@@ -172,12 +173,12 @@ export function saveProject(project: NetworkProject): NetworkProject {
   if (JSON.stringify(next).length > 5_000_000) {
     throw new Error("프로젝트가 너무 큽니다.");
   }
-  localStorage.setItem(PROJECTS_KEY, JSON.stringify(stored));
+  persistProjects(stored);
   return next;
 }
 
 export function deleteProject(ownerId: string, projectId: string): void {
-  localStorage.setItem(PROJECTS_KEY, JSON.stringify(loadAllProjects().filter((item) => !(item.ownerId === ownerId && item.id === projectId))));
+  persistProjects(loadAllProjects().filter((item) => !(item.ownerId === ownerId && item.id === projectId)));
 }
 
 export function exportProject(project: NetworkProject): string {
@@ -333,11 +334,43 @@ function saveUsers(users: Array<User & { passwordHash: string }>): void {
 }
 
 function loadAllProjects(): NetworkProject[] {
+  const primary = parseStoredProjects(localStorage.getItem(PROJECTS_KEY));
+  if (primary) return primary;
+  const backupRaw = localStorage.getItem(PROJECTS_BACKUP_KEY);
+  const backup = parseStoredProjects(backupRaw);
+  if (backup) {
+    restorePrimaryProjects(backupRaw);
+    return backup;
+  }
+  return [];
+}
+
+function parseStoredProjects(raw: string | null): NetworkProject[] | null {
+  if (raw === null) return null;
   try {
-    const parsed = JSON.parse(localStorage.getItem(PROJECTS_KEY) ?? "[]") as NetworkProject[];
-    return Array.isArray(parsed) ? parsed.map(normalizeProject) : [];
+    const parsed = JSON.parse(raw) as NetworkProject[];
+    return Array.isArray(parsed) ? parsed.map(normalizeProject) : null;
   } catch {
-    return [];
+    return null;
+  }
+}
+
+function persistProjects(projects: NetworkProject[]): void {
+  const payload = JSON.stringify(projects);
+  localStorage.setItem(PROJECTS_KEY, payload);
+  try {
+    localStorage.setItem(PROJECTS_BACKUP_KEY, payload);
+  } catch {
+    // Best-effort recovery copy. Quota errors should not turn a successful primary save into a failed save.
+  }
+}
+
+function restorePrimaryProjects(raw: string | null): void {
+  if (!raw) return;
+  try {
+    localStorage.setItem(PROJECTS_KEY, raw);
+  } catch {
+    // Loading from backup still succeeds even if the primary key cannot be rewritten.
   }
 }
 

@@ -1,4 +1,7 @@
+import { desktopNetstatListeningRows } from "./desktopDiagnostics";
 import { ipInSubnet, isIpv4, isSubnetMask } from "./ip";
+import { fallbackPing } from "./simulation";
+import { endpoint } from "./topology";
 import type { NetworkDevice, NetworkPort, NetworkProject } from "../types/network";
 
 export type ServiceName = "dhcp" | "dns" | "http" | "ftp" | "email" | "tftp" | "syslog";
@@ -46,6 +49,16 @@ export interface ServiceReachabilityReport {
   };
 }
 
+export interface ServiceReachabilityServiceSummary {
+  service: ServiceName;
+  total: number;
+  reachable: number;
+  localOnly: number;
+  blocked: number;
+  unconfigured: number;
+  unknown: number;
+}
+
 const serviceOrder: ServiceName[] = ["dhcp", "dns", "http", "ftp", "email", "tftp", "syslog"];
 
 export function analyzeServiceReachability(project: NetworkProject): ServiceReachabilityReport {
@@ -75,6 +88,28 @@ export function buildServiceReachabilityReportText(project: NetworkProject): str
 
 export function buildServiceReachabilityReportLines(project: NetworkProject): string[] {
   const report = analyzeServiceReachability(project);
+  const serviceSummary = summarizeServiceReachabilityByService(report);
+  const serviceLogRows = project.devices
+    .filter((device) => Object.values(device.config.services).some(Boolean) || device.runtime.logs.length > 0)
+    .map((device) => [
+      device.label,
+      String(serviceLogCount(device, "DNS")),
+      String(serviceLogCount(device, "HTTP")),
+      String(serviceLogCount(device, "FTP")),
+      String(serviceLogCount(device, "EMAIL")),
+      String(serviceLogCount(device, "TFTP")),
+      String(device.runtime.logs.length)
+    ]);
+  const listeningRows = project.devices.flatMap((device) =>
+    desktopNetstatListeningRows(device).map((row) => [
+      device.label,
+      row.service,
+      row.protocol,
+      row.localAddress,
+      row.state || "-",
+      row.pid
+    ])
+  );
   return [
     "Network Editor Web Service Reachability Report",
     `Project: ${project.name}`,
@@ -88,6 +123,17 @@ export function buildServiceReachabilityReportLines(project: NetworkProject): st
     `- Blocked checks: ${report.totals.blocked}`,
     `- Unconfigured checks: ${report.totals.unconfigured}`,
     `- Unknown checks: ${report.totals.unknown}`,
+    "",
+    "Service Status Summary",
+    ...table(["Service", "Total", "Reachable", "Local-only", "Blocked", "Unconfigured", "Unknown"], serviceSummary.map((summary) => [
+      summary.service.toUpperCase(),
+      String(summary.total),
+      String(summary.reachable),
+      String(summary.localOnly),
+      String(summary.blocked),
+      String(summary.unconfigured),
+      String(summary.unknown)
+    ])),
     "",
     "Clients",
     ...table(["Client", "Port", "IP", "Gateway", "DNS"], report.clients.map((client) => [
@@ -106,6 +152,12 @@ export function buildServiceReachabilityReportLines(project: NetworkProject): st
       server.services.join(", ")
     ])),
     "",
+    "Service Log Summary",
+    ...table(["Device", "DNS", "HTTP", "FTP", "EMAIL", "TFTP", "SYSLOG"], serviceLogRows),
+    "",
+    "Listening Ports",
+    ...table(["Device", "Service", "Protocol", "Local address", "State", "PID"], listeningRows),
+    "",
     "Checks",
     ...table(["Client", "Service", "Status", "Server", "Scope", "Reason"], report.checks.map((check) => [
       check.client.label,
@@ -116,6 +168,25 @@ export function buildServiceReachabilityReportLines(project: NetworkProject): st
       check.reason
     ]))
   ];
+}
+
+export function summarizeServiceReachabilityByService(report: ServiceReachabilityReport): ServiceReachabilityServiceSummary[] {
+  return serviceOrder.map((service) => {
+    const checks = report.checks.filter((check) => check.service === service);
+    return {
+      service,
+      total: checks.length,
+      reachable: checks.filter((check) => check.status === "reachable").length,
+      localOnly: checks.filter((check) => check.status === "local-only").length,
+      blocked: checks.filter((check) => check.status === "blocked").length,
+      unconfigured: checks.filter((check) => check.status === "unconfigured").length,
+      unknown: checks.filter((check) => check.status === "unknown").length
+    };
+  });
+}
+
+function serviceLogCount(device: NetworkDevice, prefix: string): number {
+  return device.runtime.logs.filter((log) => log.message.startsWith(prefix)).length;
 }
 
 function checkService(
@@ -139,22 +210,35 @@ function checkService(
   if (!clientDevice || !serverDevice || !clientPort || !serverPort) {
     return reachabilityCheck(client, service, server, "unknown", "Client or server port could not be found.", "missing-address");
   }
+  if (!clientDevice.powerOn || !serverDevice.powerOn || !clientPort.adminUp || !serverPort.adminUp) {
+    return reachabilityCheck(client, service, server, "blocked", "Client or service endpoint device/port is down.", "routed");
+  }
   if (components.get(client.deviceId) !== components.get(server.deviceId)) {
     return reachabilityCheck(client, service, server, "blocked", "Client and service endpoint are not in the same active topology component.", "routed");
   }
-  if (sameSubnet(clientPort, serverPort)) {
-    return reachabilityCheck(client, service, server, "reachable", "Client and service endpoint share a subnet.", "same-subnet");
-  }
-  if (!isIpv4(client.gateway)) {
+  const sameSubnetPath = sameSubnet(clientPort, serverPort);
+  if (!sameSubnetPath && !isIpv4(client.gateway)) {
     return reachabilityCheck(client, service, server, "local-only", "Client needs a default gateway to reach this remote service.", "routed");
   }
-  if (!gatewayCandidateExists(project, clientPort, client.gateway)) {
+  if (!sameSubnetPath && !gatewayCandidateExists(project, clientPort, client.gateway)) {
     return reachabilityCheck(client, service, server, "blocked", `Gateway ${client.gateway} is not present in the project.`, "routed");
   }
   if (service === "dns" && client.dnsServer && client.dnsServer !== server.ipAddress && !servers.some((candidate) => candidate.ipAddress === client.dnsServer && candidate.services.includes("dns"))) {
     return reachabilityCheck(client, service, server, "blocked", `Client DNS points to ${client.dnsServer}, but no DNS server owns that address.`, "routed");
   }
-  return reachabilityCheck(client, service, server, "reachable", "Client has an active path and gateway for remote service reachability.", "routed");
+  const pathScope = sameSubnetPath ? "same-subnet" : "routed";
+  const simulated = fallbackPing(project, clientDevice.id, serverDevice.id, service);
+  if (!simulated.success) {
+    return reachabilityCheck(client, service, server, "blocked", `Simulation path failed: ${simulated.message}`, pathScope);
+  }
+  return reachabilityCheck(
+    client,
+    service,
+    server,
+    "reachable",
+    sameSubnetPath ? "Client and service endpoint share a simulated reachable subnet." : "Client has a simulated routed path to the remote service.",
+    pathScope
+  );
 }
 
 function reachabilityCheck(
@@ -230,27 +314,33 @@ function sameSubnet(left: NetworkPort, right: NetworkPort): boolean {
 
 function gatewayCandidateExists(project: NetworkProject, clientPort: NetworkPort, gateway: string): boolean {
   if (!isIpv4(gateway) || !isIpv4(clientPort.ipAddress) || !isSubnetMask(clientPort.subnetMask)) return false;
+  if (!ipInSubnet(gateway, clientPort.ipAddress, clientPort.subnetMask)) return false;
   return project.devices.some((device) => device.ports.some((port) => {
     if (port.id === clientPort.id) return false;
-    if (port.ipAddress === gateway) return true;
-    if ((port.secondaryIpAddresses ?? []).some((secondary) => secondary.ipAddress === gateway)) return true;
-    if ((port.hsrpGroups ?? []).some((group) => group.virtualIp === gateway)) return true;
-    if ((port.vrrpGroups ?? []).some((group) => group.virtualIp === gateway)) return true;
+    if (!device.powerOn || !port.adminUp) return false;
+    if (port.ipAddress === gateway && sameSubnetOwner(gateway, port.ipAddress, port.subnetMask)) return true;
+    if ((port.secondaryIpAddresses ?? []).some((secondary) => secondary.ipAddress === gateway && sameSubnetOwner(gateway, secondary.ipAddress, secondary.subnetMask))) return true;
+    if ((port.hsrpGroups ?? []).some((group) => group.virtualIp === gateway && sameSubnetOwner(gateway, port.ipAddress, port.subnetMask))) return true;
+    if ((port.vrrpGroups ?? []).some((group) => group.virtualIp === gateway && sameSubnetOwner(gateway, port.ipAddress, port.subnetMask))) return true;
     return false;
   }));
 }
 
+function sameSubnetOwner(gateway: string, ownerIp: string, ownerMask: string): boolean {
+  return isIpv4(ownerIp) && isSubnetMask(ownerMask) && ipInSubnet(gateway, ownerIp, ownerMask);
+}
+
 function activeComponents(project: NetworkProject): Map<string, number> {
   const adjacency = new Map<string, Set<string>>();
-  for (const device of project.devices) adjacency.set(device.id, new Set());
+  for (const device of project.devices.filter((item) => item.powerOn)) adjacency.set(device.id, new Set());
   for (const link of project.links) {
-    if (link.status !== "up") continue;
+    if (!linkOperational(project, link)) continue;
     adjacency.get(link.endpointA.deviceId)?.add(link.endpointB.deviceId);
     adjacency.get(link.endpointB.deviceId)?.add(link.endpointA.deviceId);
   }
   const componentByDevice = new Map<string, number>();
   let component = 0;
-  for (const device of project.devices) {
+  for (const device of project.devices.filter((item) => item.powerOn)) {
     if (componentByDevice.has(device.id)) continue;
     const stack = [device.id];
     componentByDevice.set(device.id, component);
@@ -265,6 +355,13 @@ function activeComponents(project: NetworkProject): Map<string, number> {
     component += 1;
   }
   return componentByDevice;
+}
+
+function linkOperational(project: NetworkProject, link: NetworkProject["links"][number]): boolean {
+  if (link.status !== "up") return false;
+  const a = endpoint(project, link.endpointA);
+  const b = endpoint(project, link.endpointB);
+  return Boolean(a?.device.powerOn && b?.device.powerOn && a.port.adminUp && b.port.adminUp);
 }
 
 function table(headers: string[], rows: string[][]): string[] {

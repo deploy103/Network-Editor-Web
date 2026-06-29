@@ -85,7 +85,7 @@ export function analyzeAddressPlan(project: NetworkProject): AddressPlanReport {
     current.dhcpPools.push(pool);
     subnetsByKey.set(key, current);
   }
-  const duplicateIps = duplicateValues(hosts.map((host) => host.ipAddress));
+  const duplicateIps = duplicateValues(hosts.filter((host) => host.role === "interface" || host.role === "secondary").map((host) => host.ipAddress));
   const overlaps = overlappingSubnetPairs(Array.from(subnetsByKey.values()));
   const subnets = Array.from(subnetsByKey.values())
     .sort((left, right) => ipToNumber(left.network) - ipToNumber(right.network) || left.prefix - right.prefix)

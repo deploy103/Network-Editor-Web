@@ -1,27 +1,30 @@
-import { ipInSubnet, ipToNumber, isIpv4, isSubnetMask } from "./ip";
+import { ipInSubnet, ipToNumber, isIpv4, isSubnetMask, networkAddress } from "./ip";
+import { buildPduHeaders } from "./pduHeaders";
+import { compareStaticRoutes, interfaceLineProtocolUp, trackObjectUp } from "./routeState";
 import { endpoint } from "./topology";
-import type { DhcpPool, NetworkDevice, NetworkPort, NetworkProject, SimulationEvent } from "../types/network";
+import type { AccessRule, DhcpPool, NetworkDevice, NetworkPort, NetworkProject, SimulationEvent } from "../types/network";
 
-export function fallbackPing(project: NetworkProject, sourceId: string, targetId: string): { project: NetworkProject; success: boolean; message: string } {
+export function fallbackPing(project: NetworkProject, sourceId: string, targetId: string, protocol = "icmp"): { project: NetworkProject; success: boolean; message: string } {
+  const trafficProtocol = normalizeTrafficProtocol(protocol);
   const source = project.devices.find((device) => device.id === sourceId && device.powerOn);
   const target = project.devices.find((device) => device.id === targetId && device.powerOn);
   const now = Date.now();
-  if (!source || !target) return append(project, false, "출발지 또는 목적지 장비가 없거나 전원이 꺼져 있습니다.", sourceId, targetId, now);
+  if (!source || !target) return append(project, false, "출발지 또는 목적지 장비가 없거나 전원이 꺼져 있습니다.", sourceId, targetId, now, trafficProtocol);
   const sourcePort = source.ports.find((port) => port.adminUp && port.ipAddress && port.subnetMask);
   const targetPort = target.ports.find((port) => port.adminUp && port.ipAddress && port.subnetMask);
-  if (!sourcePort || !targetPort) return append(project, false, "두 장비 모두 활성 IPv4 인터페이스가 필요합니다.", source.id, target.id, now);
+  if (!sourcePort || !targetPort) return append(project, false, "두 장비 모두 활성 IPv4 인터페이스가 필요합니다.", source.id, target.id, now, trafficProtocol);
 
   let route = resolveRoute(project, source, sourcePort, target, targetPort);
   let evaluatedProject = applyPolicyHits(project, route.policyHits ?? []);
   if (route.reachable) {
-    const firewall = applyFirewallRules(evaluatedProject, route.hops, sourcePort.ipAddress, targetPort.ipAddress);
+    const firewall = applyFirewallRules(evaluatedProject, route.hops, sourcePort.ipAddress, targetPort.ipAddress, trafficProtocol);
     evaluatedProject = firewall.project;
     if (!firewall.allowed) {
       route = { ...route, reachable: false, message: firewall.message };
     }
   }
   const learned = route.reachable ? learnRuntime(evaluatedProject, source, sourcePort, target, targetPort, route.hops) : evaluatedProject;
-  const withEvents = appendRouteEvents(learned, route, source, target, targetPort, now);
+  const withEvents = appendRouteEvents(learned, route, source, target, targetPort, now, trafficProtocol);
   return {
     project: withEvents,
     success: route.reachable,
@@ -239,7 +242,7 @@ function routeFromDevice(project: NetworkProject, router: NetworkDevice, target:
     }
   }
 
-  for (const route of [...router.config.staticRoutes].sort((left, right) => staticRouteDistance(left) - staticRouteDistance(right))) {
+  for (const route of [...router.config.staticRoutes].sort(compareStaticRoutes)) {
     if (route.trackId && !trackObjectUp(project, router, route.trackId)) continue;
     if (!ipInSubnet(targetPort.ipAddress, route.network, route.mask)) continue;
     const exitEntry = interfaceIpEntries(router).find((entry) => ipInSubnet(route.nextHop, entry.ipAddress, entry.subnetMask));
@@ -253,12 +256,12 @@ function routeFromDevice(project: NetworkProject, router: NetworkDevice, target:
   }
 
   for (const neighbor of dynamicRoutingNeighbors(project, router)) {
+    if (!dynamicNeighborCanAdvertiseTarget(neighbor, targetPort)) continue;
     if (seenRouters.has(neighbor.device.id)) continue;
     const nextHopPath = hasLayer2Path(project, router.id, neighbor.device.id, portVlan(neighbor.localPort));
     if (!nextHopPath.reachable) continue;
     seenRouters.add(neighbor.device.id);
-    const ingress = routedIpPorts(neighbor.device).find((port) => ipInSubnet(port.ipAddress, neighbor.localPort.ipAddress, neighbor.localPort.subnetMask));
-    return appendPolicyHits(routeFromDevice(project, neighbor.device, target, targetPort, seenRouters, mergeHops(hops, nextHopPath.hops), sourceIp, ingress), policyHits);
+    return appendPolicyHits(routeFromDevice(project, neighbor.device, target, targetPort, seenRouters, mergeHops(hops, nextHopPath.hops), sourceIp, neighbor.peerPort), policyHits);
   }
 
   return appendPolicyHits({ reachable: false, message: `${router.label}에서 ${targetPort.ipAddress}(으)로 가는 라우트가 없습니다.`, hops, routed: true }, policyHits);
@@ -313,19 +316,36 @@ function appendPolicyHits(route: RouteResult, hits: RoutePolicyHit[]): RouteResu
   return { ...route, policyHits: [...hits, ...(route.policyHits ?? [])] };
 }
 
-function dynamicRoutingNeighbors(project: NetworkProject, router: NetworkDevice): Array<{ device: NetworkDevice; localPort: NetworkPort }> {
+interface DynamicRoutingNeighbor {
+  device: NetworkDevice;
+  localPort: NetworkPort;
+  peerPort: NetworkPort;
+  localProtocol: RoutingProtocolConfig;
+  peerProtocol: RoutingProtocolConfig;
+}
+
+function dynamicRoutingNeighbors(project: NetworkProject, router: NetworkDevice): DynamicRoutingNeighbor[] {
   if (!routingProtocols(router).length) return [];
-  const neighbors: Array<{ device: NetworkDevice; localPort: NetworkPort }> = [];
-  for (const candidate of project.devices.filter((device) => device.id !== router.id && device.powerOn && isRoutingDevice(device) && shareRoutingProtocol(router, device))) {
+  const neighbors: DynamicRoutingNeighbor[] = [];
+  const seen = new Set<string>();
+  for (const candidate of project.devices.filter((device) => device.id !== router.id && device.powerOn && isRoutingDevice(device))) {
     for (const localPort of routedIpPorts(router)) {
-      const peerPort = routedIpPorts(candidate).find((port) => ipInSubnet(port.ipAddress, localPort.ipAddress, localPort.subnetMask));
-      if (peerPort && hasLayer2Path(project, router.id, candidate.id, portVlan(localPort)).reachable) {
-        neighbors.push({ device: candidate, localPort });
+      const peerPort = routedIpPorts(candidate).find((port) => ipInSubnet(port.ipAddress, localPort.ipAddress, localPort.subnetMask) && routingAdjacency(router, candidate, localPort, port));
+      const adjacency = peerPort ? routingAdjacency(router, candidate, localPort, peerPort) : null;
+      const key = peerPort ? `${candidate.id}:${localPort.id}:${peerPort.id}` : "";
+      if (peerPort && adjacency && !seen.has(key) && hasLayer2Path(project, router.id, candidate.id, portVlan(localPort)).reachable) {
+        seen.add(key);
+        neighbors.push({ device: candidate, localPort, peerPort, ...adjacency });
         break;
       }
     }
   }
   return neighbors;
+}
+
+function dynamicNeighborCanAdvertiseTarget(neighbor: DynamicRoutingNeighbor, targetPort: NetworkPort): boolean {
+  const connectedTarget = interfaceIpEntries(neighbor.device).find((entry) => ipInSubnet(targetPort.ipAddress, entry.ipAddress, entry.subnetMask));
+  return !connectedTarget || routingProtocolAdvertisesPort(neighbor.peerProtocol, connectedTarget.port);
 }
 
 function routedIpPorts(device: NetworkDevice): NetworkPort[] {
@@ -336,41 +356,73 @@ function routingProtocols(device: NetworkDevice): NonNullable<NetworkDevice["con
   return device.config.routingProtocols ?? [];
 }
 
-function staticRouteDistance(route: NetworkDevice["config"]["staticRoutes"][number]): number {
-  return Number.isInteger(route.distance) && route.distance! >= 1 && route.distance! <= 255 ? route.distance! : 1;
-}
+type RoutingProtocolConfig = NonNullable<NetworkDevice["config"]["routingProtocols"]>[number];
 
-function trackObjectUp(project: NetworkProject, device: NetworkDevice, trackId: number): boolean {
-  const track = (device.config.trackObjects ?? []).find((item) => item.trackId === trackId);
-  if (!track) return false;
-  if (track.type === "interface") {
-    const port = track.interfaceName ? device.ports.find((item) => portNameMatches(item.name, track.interfaceName!)) : undefined;
-    return Boolean(port && device.powerOn && port.adminUp && port.linkId);
+function routingAdjacency(a: NetworkDevice, b: NetworkDevice, aPort: NetworkPort, bPort: NetworkPort): { localProtocol: RoutingProtocolConfig; peerProtocol: RoutingProtocolConfig } | null {
+  for (const left of routingProtocols(a)) {
+    for (const right of routingProtocols(b)) {
+      if (
+        routingProtocolsCompatible(left, right) &&
+        routingProtocolAdvertisesPort(left, aPort) &&
+        routingProtocolAdvertisesPort(right, bPort) &&
+        !routingPortPassive(left, aPort) &&
+        !routingPortPassive(right, bPort)
+      ) {
+        return { localProtocol: left, peerProtocol: right };
+      }
+    }
   }
-  const operation = (device.config.ipSlaOperations ?? []).find((item) => item.operationId === track.ipSlaOperationId);
-  return Boolean(operation && ipSlaReachable(project, device, operation));
+  return null;
 }
 
-function ipSlaReachable(project: NetworkProject, device: NetworkDevice, operation: NonNullable<NetworkDevice["config"]["ipSlaOperations"]>[number]): boolean {
-  if (!device.powerOn || !operation.enabled || !operation.targetIp || !isIpv4(operation.targetIp)) return false;
-  const target = findInterfaceByIp(project, operation.targetIp);
-  if (!target) return false;
-  if (target.device.id === device.id) return target.port.adminUp;
-  const sourcePorts = operation.sourceInterface
-    ? device.ports.filter((port) => portNameMatches(port.name, operation.sourceInterface!))
-    : device.ports;
-  for (const entry of interfaceIpEntries({ ...device, ports: sourcePorts })) {
-    if (!ipInSubnet(operation.targetIp, entry.ipAddress, entry.subnetMask)) continue;
-    if (hasLayer2Path(project, device.id, target.device.id, portVlan(entry.port)).reachable) return true;
+function routingProtocolsCompatible(left: RoutingProtocolConfig, right: RoutingProtocolConfig): boolean {
+  if (left.protocol !== right.protocol) return false;
+  if (left.protocol === "eigrp") return (left.processId ?? "") === (right.processId ?? "");
+  return true;
+}
+
+function routingProtocolAdvertisesPort(protocol: RoutingProtocolConfig, port: NetworkPort): boolean {
+  if (!port.ipAddress || !port.subnetMask || !protocol.networks.length) return false;
+  return protocol.networks.some((network) => routingNetworkIncludesPort(network, port, protocol.protocol));
+}
+
+function routingNetworkIncludesPort(network: string, port: NetworkPort, protocol: RoutingProtocolConfig["protocol"]): boolean {
+  const statement = network.trim();
+  if (!statement || !isIpv4(port.ipAddress) || !isSubnetMask(port.subnetMask)) return false;
+  const cidr = statement.match(/^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/);
+  if (cidr) {
+    const [, base, prefixText] = cidr;
+    const prefix = Number(prefixText);
+    return Number.isInteger(prefix) && prefix >= 0 && prefix <= 32 && ipInSubnet(port.ipAddress, base, prefixToMask(prefix));
   }
-  return false;
+  const [base, maskOrWildcard] = statement.split(/\s+/);
+  if (!isIpv4(base)) return false;
+  if (maskOrWildcard) {
+    if (!isIpv4(maskOrWildcard)) return false;
+    return isSubnetMask(maskOrWildcard) ? ipInSubnet(port.ipAddress, base, maskOrWildcard) : ipMatchesWildcard(port.ipAddress, base, maskOrWildcard);
+  }
+  const connectedNetwork = networkAddressForPort(port);
+  if (connectedNetwork === base) return true;
+  if (protocol === "ospf") return false;
+  return ipInSubnet(port.ipAddress, base, classfulMask(base));
 }
 
-function shareRoutingProtocol(a: NetworkDevice, b: NetworkDevice): boolean {
-  return routingProtocols(a).some((left) => routingProtocols(b).some((right) =>
-    left.protocol === right.protocol &&
-    (left.protocol !== "eigrp" || (left.processId ?? "") === (right.processId ?? ""))
-  ));
+function networkAddressForPort(port: NetworkPort): string {
+  return networkAddress(port.ipAddress, port.subnetMask);
+}
+
+function classfulMask(ipAddress: string): string {
+  const firstOctet = Number(ipAddress.split(".")[0]);
+  if (firstOctet < 128) return "255.0.0.0";
+  if (firstOctet < 192) return "255.255.0.0";
+  return "255.255.255.0";
+}
+
+function routingPortPassive(protocol: RoutingProtocolConfig, port: NetworkPort): boolean {
+  if (protocol.passiveInterfaceDefault) {
+    return !(protocol.passiveInterfaceExceptions ?? []).some((name) => portNameMatches(port.name, name));
+  }
+  return protocol.passiveInterfaces.some((name) => portNameMatches(port.name, name));
 }
 
 function hasLayer2Path(project: NetworkProject, sourceId: string, targetId: string, vlan: number): { reachable: boolean; hops: string[] } {
@@ -387,7 +439,7 @@ function hasLayer2Path(project: NetworkProject, sourceId: string, targetId: stri
       const other = link.endpointA.deviceId === current ? link.endpointB.deviceId : link.endpointA.deviceId;
       const currentPort = endpoint(project, link.endpointA.deviceId === current ? link.endpointA : link.endpointB)?.port;
       const otherEndpoint = endpoint(project, link.endpointA.deviceId === current ? link.endpointB : link.endpointA);
-      if (!currentPort || !otherEndpoint || !linkCarriesVlan(currentPort, otherEndpoint.port, vlan) || !otherEndpoint.device.powerOn) continue;
+      if (!currentPort || !otherEndpoint || !currentPort.adminUp || !otherEndpoint.port.adminUp || !linkCarriesVlan(currentPort, otherEndpoint.port, vlan) || !otherEndpoint.device.powerOn) continue;
       if (!seen.has(other)) {
         seen.add(other);
         previous.set(other, current);
@@ -432,12 +484,13 @@ function learnRuntime(project: NetworkProject, source: NetworkDevice, sourcePort
   };
 }
 
-function appendRouteEvents(project: NetworkProject, route: RouteResult, source: NetworkDevice, target: NetworkDevice, targetPort: NetworkPort, now: number): NetworkProject {
+function appendRouteEvents(project: NetworkProject, route: RouteResult, source: NetworkDevice, target: NetworkDevice, targetPort: NetworkPort, now: number, protocol: string): NetworkProject {
   const packetId = `pdu_${now}_${source.id}_${target.id}`;
+  const eventType = protocolLabel(protocol);
   if (!route.reachable) {
     return {
       ...project,
-      simulationEvents: [...project.simulationEvents, event(route.hops.at(-1) ?? source.id, target.id, "ICMP", route.message, "dropped", now, ["Layer 2", "Layer 3"], { sourceId: source.id, targetId: target.id, packetId })]
+      simulationEvents: [...project.simulationEvents, event(route.hops.at(-1) ?? source.id, target.id, eventType, route.message, "dropped", now, ["Layer 2", "Layer 3"], { sourceId: source.id, targetId: target.id, packetId })]
     };
   }
   const events: SimulationEvent[] = [
@@ -450,15 +503,18 @@ function appendRouteEvents(project: NetworkProject, route: RouteResult, source: 
     } else if (hop?.kind === "switch" || hop?.kind === "wireless") {
       events.push(event(route.hops[index - 1], route.hops[index], "SWITCH", `${hop.label}이(가) VLAN/MAC 상태로 프레임을 전달했습니다.`, "forwarded", now + index, ["Layer 2"], { sourceId: source.id, targetId: target.id, packetId }));
     } else {
-      events.push(event(route.hops[index - 1], route.hops[index], "ICMP", `${deviceLabel(project, route.hops[index])}을(를) 통해 echo 요청을 전달했습니다.`, "forwarded", now + index, ["Layer 2", "Layer 3"], { sourceId: source.id, targetId: target.id, packetId }));
+      const detail = protocol === "icmp" ? "echo 요청" : `${eventType} 트래픽`;
+      events.push(event(route.hops[index - 1], route.hops[index], eventType, `${deviceLabel(project, route.hops[index])}을(를) 통해 ${detail}을 전달했습니다.`, "forwarded", now + index, ["Layer 2", "Layer 3"], { sourceId: source.id, targetId: target.id, packetId }));
     }
   }
-  events.push(event(route.hops.at(-2) ?? source.id, target.id, "ICMP", `${target.label}에서 echo 응답을 받았습니다.`, "delivered", now + route.hops.length, ["Layer 2", "Layer 3"], { sourceId: source.id, targetId: target.id, packetId }));
+  const deliveredDetail = protocol === "icmp" ? `${target.label}에서 echo 응답을 받았습니다.` : `${target.label}에 ${eventType} 트래픽이 도달했습니다.`;
+  events.push(event(route.hops.at(-2) ?? source.id, target.id, eventType, deliveredDetail, "delivered", now + route.hops.length, ["Layer 2", "Layer 3"], { sourceId: source.id, targetId: target.id, packetId }));
   return { ...project, simulationEvents: [...project.simulationEvents, ...events] };
 }
 
-function applyFirewallRules(project: NetworkProject, hops: string[], sourceIp: string, targetIp: string): { project: NetworkProject; allowed: boolean; message: string } {
+function applyFirewallRules(project: NetworkProject, hops: string[], sourceIp: string, targetIp: string, protocol: string): { project: NetworkProject; allowed: boolean; message: string } {
   let blocked = "";
+  const eventType = protocolLabel(protocol);
   const accessHits = new Map<string, Set<string>>();
   const natHits = new Map<string, Set<string>>();
   const natTranslationAdds = new Map<string, NonNullable<NetworkDevice["runtime"]["natTranslations"]>>();
@@ -483,17 +539,17 @@ function applyFirewallRules(project: NetworkProject, hops: string[], sourceIp: s
       { port: egressPort, listName: egressPort?.accessGroupOut, direction: "out" }
     ]) {
       if (!binding.listName) continue;
-      const decision = evaluateAcl(policyDevice, binding.listName, sourceIp, targetIp);
+      const decision = evaluateAcl(policyDevice, binding.listName, sourceIp, targetIp, protocol);
       if (!decision) continue;
       if (decision.ruleId) addHit(accessHits, policyDevice.id, decision.ruleId);
       if (!decision.allowed) {
-        blocked = `${policyDevice.label} ${binding.port?.name ?? ""} ${binding.direction} ACL ${binding.listName}이(가) ${sourceIp}에서 ${targetIp}(으)로 가는 ICMP를 차단했습니다.`;
+        blocked = `${policyDevice.label} ${binding.port?.name ?? ""} ${binding.direction} ACL ${binding.listName}이(가) ${sourceIp}에서 ${targetIp}(으)로 가는 ${eventType}를 차단했습니다.`;
         break;
       }
     }
     if (blocked) break;
 
-    const natMatches = matchingNatRules(policyDevice, sourceIp, targetIp);
+    const natMatches = matchingNatRules(policyDevice, sourceIp, targetIp, protocol);
     if (natMatches.length > 0) {
       natHits.set(policyDevice.id, new Set(natMatches.map((match) => match.rule.id)));
       const translations = natMatches.map((match) => match.translation).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
@@ -504,7 +560,7 @@ function applyFirewallRules(project: NetworkProject, hops: string[], sourceIp: s
     const legacyRule = policyDevice.config.accessRules.find((item) =>
       !item.remark &&
       !item.listName &&
-      (item.protocol === "ip" || item.protocol === "icmp") &&
+      aclProtocolMatches(item.protocol, protocol) &&
       addressMatches(item.source, sourceIp) &&
       addressMatches(item.destination, targetIp) &&
       (!item.interfaceName || adjacentPorts.has(item.interfaceName))
@@ -512,7 +568,7 @@ function applyFirewallRules(project: NetworkProject, hops: string[], sourceIp: s
     if (!legacyRule) continue;
     addHit(accessHits, policyDevice.id, legacyRule.id);
     if (legacyRule.action === "deny") {
-      blocked = `${policyDevice.label}이(가) ${sourceIp}에서 ${targetIp}(으)로 가는 ICMP를 차단했습니다.`;
+      blocked = `${policyDevice.label}이(가) ${sourceIp}에서 ${targetIp}(으)로 가는 ${eventType}를 차단했습니다.`;
       break;
     }
   }
@@ -541,11 +597,11 @@ function applyFirewallRules(project: NetworkProject, hops: string[], sourceIp: s
   return { project: nextProject, allowed: !blocked, message: blocked };
 }
 
-function evaluateAcl(device: NetworkDevice, listName: string, sourceIp: string, targetIp: string): { allowed: boolean; ruleId?: string } | null {
+function evaluateAcl(device: NetworkDevice, listName: string, sourceIp: string, targetIp: string, protocol = "icmp"): { allowed: boolean; ruleId?: string } | null {
   const rules = orderedAccessRules(device.config.accessRules.filter((rule) => !rule.remark && aclListName(rule).toLowerCase() === listName.toLowerCase()));
   if (!rules.length) return null;
   const rule = rules.find((item) =>
-    (item.protocol === "ip" || item.protocol === "icmp") &&
+    aclProtocolMatches(item.protocol, protocol) &&
     addressMatches(item.source, sourceIp) &&
     addressMatches(item.destination, targetIp)
   );
@@ -553,18 +609,18 @@ function evaluateAcl(device: NetworkDevice, listName: string, sourceIp: string, 
   return { allowed: rule.action === "permit", ruleId: rule.id };
 }
 
-function matchingNatRules(device: NetworkDevice, sourceIp: string, targetIp: string): Array<{ rule: NetworkDevice["config"]["natRules"][number]; translation?: NonNullable<NetworkDevice["runtime"]["natTranslations"]>[number] }> {
+function matchingNatRules(device: NetworkDevice, sourceIp: string, targetIp: string, protocol: string): Array<{ rule: NetworkDevice["config"]["natRules"][number]; translation?: NonNullable<NetworkDevice["runtime"]["natTranslations"]>[number] }> {
   return device.config.natRules.flatMap((rule) => {
     if (rule.type === "overload") {
       if (!rule.aclName) return [];
-      const decision = evaluateAcl(device, rule.aclName, sourceIp, targetIp);
+      const decision = evaluateAcl(device, rule.aclName, sourceIp, targetIp, protocol);
       if (!decision?.allowed) return [];
       const outside = findPortByName(device, rule.interfaceName ?? rule.outsideInterface);
       const insideGlobal = outside?.ipAddress || rule.interfaceName || rule.outsideInterface || "interface";
       return [{
         rule,
         translation: {
-          protocol: "icmp",
+          protocol: normalizeTrafficProtocol(protocol),
           insideLocal: sourceIp,
           insideGlobal,
           outsideLocal: targetIp,
@@ -598,6 +654,23 @@ function aclListName(rule: NetworkDevice["config"]["accessRules"][number]): stri
   return rule.listName || rule.interfaceName || "ACL";
 }
 
+function normalizeTrafficProtocol(protocol: string): string {
+  return (protocol || "icmp").trim().toLowerCase() || "icmp";
+}
+
+function protocolLabel(protocol: string): string {
+  return normalizeTrafficProtocol(protocol).toUpperCase();
+}
+
+function aclProtocolMatches(ruleProtocol: AccessRule["protocol"], trafficProtocol: string): boolean {
+  const protocol = normalizeTrafficProtocol(trafficProtocol);
+  if (ruleProtocol === "ip") return true;
+  if (ruleProtocol === protocol) return true;
+  if (ruleProtocol === "tcp") return protocol === "tcp" || ["http", "ftp", "email", "ssh", "telnet"].includes(protocol);
+  if (ruleProtocol === "udp") return protocol === "udp" || ["dns", "dhcp", "tftp", "syslog"].includes(protocol);
+  return false;
+}
+
 function orderedAccessRules(rules: NetworkDevice["config"]["accessRules"]): NetworkDevice["config"]["accessRules"] {
   return [...rules].sort((a, b) => {
     const aSequence = a.sequence ?? Number.MAX_SAFE_INTEGER;
@@ -611,12 +684,12 @@ function addHit(map: Map<string, Set<string>>, deviceId: string, ruleId: string)
   map.set(deviceId, new Set([...(map.get(deviceId) ?? []), ruleId]));
 }
 
-function append(project: NetworkProject, success: boolean, message: string, sourceId: string, targetId: string, now: number) {
+function append(project: NetworkProject, success: boolean, message: string, sourceId: string, targetId: string, now: number, protocol = "icmp") {
   const packetId = `pdu_${now}_${sourceId}_${targetId}`;
   return {
     project: {
       ...project,
-      simulationEvents: [...project.simulationEvents, event(sourceId, targetId, "ICMP", message, success ? "delivered" : "dropped", now, ["Layer 2", "Layer 3"], { sourceId, targetId, packetId })]
+      simulationEvents: [...project.simulationEvents, event(sourceId, targetId, protocolLabel(protocol), message, success ? "delivered" : "dropped", now, ["Layer 2", "Layer 3"], { sourceId, targetId, packetId })]
     },
     success,
     message
@@ -624,41 +697,7 @@ function append(project: NetworkProject, success: boolean, message: string, sour
 }
 
 function event(lastDeviceId: string, atDeviceId: string, type: string, info: string, status: SimulationEvent["status"], time = Date.now(), osiLayers = ["Layer 2", "Layer 3"], packet?: { sourceId: string; targetId: string; packetId?: string }): SimulationEvent {
-  return { id: `evt_${time}_${Math.random().toString(36).slice(2)}`, time, lastDeviceId, atDeviceId, sourceDeviceId: packet?.sourceId, targetDeviceId: packet?.targetId, packetId: packet?.packetId, type, info, status, osiLayers, headers: pduHeaders(type, status, packet) };
-}
-
-function pduHeaders(type: string, status: SimulationEvent["status"], packet?: { sourceId: string; targetId: string; packetId?: string }): SimulationEvent["headers"] {
-  const protocol = type.toUpperCase();
-  const source = packet?.sourceId ?? "unknown";
-  const target = packet?.targetId ?? "unknown";
-  const base = [
-    { layer: "Layer 3", field: "Source", value: source },
-    { layer: "Layer 3", field: "Destination", value: target },
-    { layer: "Layer 3", field: "Disposition", value: status }
-  ];
-  if (protocol === "ARP" || protocol === "SWITCH" || protocol === "HUB") {
-    return [
-      { layer: "Layer 2", field: "Frame type", value: protocol },
-      { layer: "Layer 2", field: "Source", value: source },
-      { layer: "Layer 2", field: "Destination", value: target },
-      { layer: "Layer 2", field: "Action", value: status }
-    ];
-  }
-  if (protocol === "DHCP") {
-    return [
-      { layer: "Layer 2", field: "EtherType", value: "IPv4 / broadcast-capable" },
-      ...base,
-      { layer: "Layer 4", field: "Protocol", value: "UDP" },
-      { layer: "Layer 4", field: "Ports", value: "67/68" },
-      { layer: "Layer 7", field: "Application", value: "DHCP" }
-    ];
-  }
-  return [
-    { layer: "Layer 2", field: "EtherType", value: "IPv4" },
-    ...base,
-    { layer: "Layer 3", field: "Protocol", value: protocol === "ICMP" ? "ICMP" : "IP" },
-    { layer: "Layer 7", field: "Application", value: protocol }
-  ];
+  return { id: `evt_${time}_${Math.random().toString(36).slice(2)}`, time, lastDeviceId, atDeviceId, sourceDeviceId: packet?.sourceId, targetDeviceId: packet?.targetId, packetId: packet?.packetId, type, info, status, osiLayers, headers: buildPduHeaders(type, status, packet?.sourceId ?? "unknown", packet?.targetId ?? "unknown") };
 }
 
 function increment(ip: string, offset: number): string {
@@ -737,7 +776,7 @@ function findGatewayInterface(project: NetworkProject, ipAddress: string, source
 
 function hsrpEffectivePriority(project: NetworkProject, device: NetworkDevice, group: NonNullable<NetworkPort["hsrpGroups"]>[number]): number {
   const trackedPort = group.trackInterface ? device.ports.find((port) => portNameMatches(port.name, group.trackInterface!)) : undefined;
-  const trackedDown = Boolean(group.trackInterface && (!trackedPort || !device.powerOn || !trackedPort.adminUp || !trackedPort.linkId));
+  const trackedDown = Boolean(group.trackInterface && (!trackedPort || !interfaceLineProtocolUp(project, device, trackedPort)));
   const trackObjectDown = Boolean(group.trackObject && !trackObjectUp(project, device, group.trackObject));
   return Math.max(0, group.priority - (trackedDown || trackObjectDown ? group.trackDecrement ?? 10 : 0));
 }

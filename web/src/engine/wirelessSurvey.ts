@@ -1,5 +1,6 @@
 import { analyzeAddressPlan } from "./addressPlan";
 import { ipInSubnet, isIpv4, isSubnetMask, maskToPrefix, networkAddress } from "./ip";
+import { interfaceLineProtocolUp } from "./routeState";
 import type { NetworkDevice, NetworkLink, NetworkPort, NetworkProject } from "../types/network";
 
 export type WirelessInfrastructureRole = "controller" | "access-point" | "bridge" | "infrastructure";
@@ -376,7 +377,7 @@ function collectInfrastructure(project: NetworkProject): WirelessInfrastructureN
       const wirelessPorts = device.ports.filter((port) => port.kind === "wireless");
       const wiredPorts = device.ports.filter((port) => port.kind !== "wireless" && port.kind !== "console");
       const managementPorts = device.ports.filter((port) => isIpv4(port.ipAddress));
-      const uplinkCount = wiredPorts.filter((port) => port.linkId).length;
+      const uplinkCount = wiredPorts.filter((port) => interfaceLineProtocolUp(project, device, port)).length;
       return {
         deviceId: device.id,
         deviceLabel: device.label,
@@ -409,6 +410,7 @@ function collectWirelessClients(project: NetworkProject, infrastructure: Wireles
       .map((port) => {
         const link = wirelessLinkForPort(project, device.id, port.id);
         const peer = link ? peerInfrastructure(project, link, device.id, infrastructure) : undefined;
+        const linkUp = link ? interfaceLineProtocolUp(project, device, port) : false;
         return {
           deviceId: device.id,
           deviceLabel: device.label,
@@ -426,7 +428,7 @@ function collectWirelessClients(project: NetworkProject, infrastructure: Wireles
           x: device.position.x,
           y: device.position.y,
           linkedAp: peer?.deviceLabel,
-          linkStatus: link?.status
+          linkStatus: link ? (linkUp ? "up" as const : "down" as const) : undefined
         };
       }))
     .sort((left, right) => left.deviceLabel.localeCompare(right.deviceLabel) || left.portName.localeCompare(right.portName));
@@ -499,7 +501,7 @@ function analyzeClientCoverage(infrastructure: WirelessInfrastructureNode[], cli
 }
 
 function analyzeChannelReuse(infrastructure: WirelessInfrastructureNode[]): WirelessChannelReuseCheck[] {
-  const radios = infrastructure.filter(isRadioNode);
+  const radios = infrastructure.filter(isActiveRadioNode);
   const checks: WirelessChannelReuseCheck[] = [];
   for (let i = 0; i < radios.length; i += 1) {
     for (let j = i + 1; j < radios.length; j += 1) {
@@ -526,7 +528,7 @@ function analyzeChannelReuse(infrastructure: WirelessInfrastructureNode[]): Wire
 }
 
 function analyzeRoaming(infrastructure: WirelessInfrastructureNode[]): WirelessRoamingCandidate[] {
-  const radios = infrastructure.filter(isRadioNode);
+  const radios = infrastructure.filter(isActiveRadioNode);
   const candidates: WirelessRoamingCandidate[] = [];
   for (let i = 0; i < radios.length; i += 1) {
     for (let j = i + 1; j < radios.length; j += 1) {
@@ -562,7 +564,7 @@ function analyzeBackhaul(project: NetworkProject, infrastructure: WirelessInfras
   return infrastructure.map((node) => {
     const device = project.devices.find((item) => item.id === node.deviceId);
     const uplinks = device ? wiredUplinkLinks(project, device) : [];
-    const upLinks = uplinks.filter((link) => link.status === "up").length;
+    const upLinks = device ? wiredUplinkPorts(device).filter((port) => interfaceLineProtocolUp(project, device, port)).length : 0;
     const management = managementAddress(device);
     const network = management && isSubnetMask(management.subnetMask) ? `${networkAddress(management.ipAddress, management.subnetMask)}/${maskToPrefix(management.subnetMask)}` : "-";
     if (!node.powerOn) {
@@ -731,7 +733,7 @@ function analyzeWirelessSecurity(infrastructure: WirelessInfrastructureNode[], c
 }
 
 function buildCoverageGrid(project: NetworkProject, infrastructure: WirelessInfrastructureNode[]): WirelessCoverageCell[] {
-  const radios = infrastructure.filter(isRadioNode);
+  const radios = infrastructure.filter(isActiveRadioNode);
   if (!radios.length) return [];
   const points = [...project.devices.map((device) => device.position), ...radios.map((radio) => ({ x: radio.x, y: radio.y }))];
   const minX = Math.min(...points.map((point) => point.x)) - 120;
@@ -895,11 +897,16 @@ function coverageCellRecommendation(distance: number, best: WirelessInfrastructu
 }
 
 function wiredUplinkLinks(project: NetworkProject, device: NetworkDevice): NetworkLink[] {
-  const portIds = new Set(device.ports.filter((port) => port.kind !== "wireless" && port.kind !== "console").map((port) => port.id));
+  const portIds = new Set(wiredUplinkPorts(device).map((port) => port.id));
   return project.links.filter((link) =>
-    (link.endpointA.deviceId === device.id && portIds.has(link.endpointA.portId)) ||
-    (link.endpointB.deviceId === device.id && portIds.has(link.endpointB.portId))
+    link.type !== "wireless" &&
+    ((link.endpointA.deviceId === device.id && portIds.has(link.endpointA.portId)) ||
+      (link.endpointB.deviceId === device.id && portIds.has(link.endpointB.portId)))
   );
+}
+
+function wiredUplinkPorts(device: NetworkDevice): NetworkPort[] {
+  return device.ports.filter((port) => port.kind !== "wireless" && port.kind !== "console");
 }
 
 function wirelessLinkForPort(project: NetworkProject, deviceId: string, portId: string): NetworkLink | undefined {
@@ -938,6 +945,10 @@ function inferInfrastructureRole(device: NetworkDevice): WirelessInfrastructureR
 
 function isRadioNode(node: WirelessInfrastructureNode): boolean {
   return node.role === "access-point" || node.role === "bridge" || node.wirelessPorts.length > 0;
+}
+
+function isActiveRadioNode(node: WirelessInfrastructureNode): boolean {
+  return node.powerOn && isRadioNode(node);
 }
 
 function normalizedSsid(value: string): string {

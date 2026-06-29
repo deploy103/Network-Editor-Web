@@ -16,6 +16,8 @@ export function diagnoseProject(project: NetworkProject): NetworkIssue[] {
   return [
     ...diagnoseDevices(project),
     ...diagnoseLinks(project),
+    ...diagnoseDynamicRoutingLinks(project),
+    ...diagnoseLayer2Loops(project),
     ...diagnoseServices(project)
   ];
 }
@@ -159,6 +161,18 @@ function diagnoseDevices(project: NetworkProject): NetworkIssue[] {
       }
       if (port.gateway && port.ipAddress && port.subnetMask && isIpv4(port.gateway) && !ipInSubnet(port.gateway, port.ipAddress, port.subnetMask)) {
         issues.push(issue("warning", `${device.label} gateway가 subnet 밖에 있습니다`, `${port.gateway}는 ${networkAddress(port.ipAddress, port.subnetMask)}/${maskToPrefix(port.subnetMask)} 안에 없습니다.`));
+      }
+      if (
+        (device.kind === "pc" || device.kind === "server") &&
+        port.gateway &&
+        port.ipAddress &&
+        port.subnetMask &&
+        isIpv4(port.gateway) &&
+        isSubnetMask(port.subnetMask) &&
+        ipInSubnet(port.gateway, port.ipAddress, port.subnetMask) &&
+        !firstHopGatewayExists(project, port.gateway, port.ipAddress, port.subnetMask)
+      ) {
+        issues.push(issue("warning", `${device.label} gateway가 프로젝트에 없습니다`, `${port.gateway} 주소를 가진 router/SVI/HSRP/VRRP 인터페이스가 없습니다.`));
       }
     }
 
@@ -341,6 +355,9 @@ function diagnoseLinks(project: NetworkProject): NetworkIssue[] {
     if (link.status === "down") {
       issues.push(issue("warning", "링크 다운", explainDownLink(a.device, a.port, b.device, b.port, label)));
     }
+    if (link.status === "up" && !linkOperational(project, link)) {
+      issues.push(issue("warning", "링크 상태 불일치", `${label}: 링크는 up으로 저장되어 있지만 끝점 전원 또는 admin state 기준으로는 동작할 수 없습니다. 토폴로지 상태를 다시 계산하세요.`));
+    }
     if (link.status === "blocked") {
       issues.push(issue("warning", "링크 차단", `${label}에 공유되는 trunk VLAN이 없습니다.`));
     }
@@ -355,6 +372,132 @@ function diagnoseLinks(project: NetworkProject): NetworkIssue[] {
     const bpduProblem = explainBpduGuardRisk(a.device, a.port, b.device, b.port, label);
     if (bpduProblem) {
       issues.push(issue("warning", "BPDU Guard 위험", bpduProblem));
+    }
+    const etherChannelProblem = explainEtherChannelMismatch(a.port, b.port, label);
+    if (etherChannelProblem) {
+      issues.push(issue("warning", "EtherChannel 불일치", etherChannelProblem));
+    }
+  }
+  return issues;
+}
+
+type RoutingProtocolConfig = NonNullable<NetworkDevice["config"]["routingProtocols"]>[number];
+
+function diagnoseDynamicRoutingLinks(project: NetworkProject): NetworkIssue[] {
+  const issues: NetworkIssue[] = [];
+  for (const link of project.links.filter((item) => linkOperational(project, item))) {
+    const a = endpoint(project, link.endpointA);
+    const b = endpoint(project, link.endpointB);
+    if (!a || !b || !isRoutingDevice(a.device) || !isRoutingDevice(b.device)) continue;
+    if (!a.port.ipAddress || !a.port.subnetMask || !b.port.ipAddress || !b.port.subnetMask) continue;
+    if (!ipInSubnet(a.port.ipAddress, b.port.ipAddress, a.port.subnetMask)) continue;
+    const leftProtocols = routingProtocols(a.device);
+    const rightProtocols = routingProtocols(b.device);
+    const compatiblePairs = leftProtocols.flatMap((left) => rightProtocols.filter((right) => routingProtocolsCompatible(left, right)).map((right) => ({ left, right })));
+    if (!compatiblePairs.length) {
+      const leftAdvertised = leftProtocols.filter((protocol) => routingProtocolAdvertisesPort(protocol, a.port));
+      const rightAdvertised = rightProtocols.filter((protocol) => routingProtocolAdvertisesPort(protocol, b.port));
+      if (leftAdvertised.length && rightAdvertised.length) {
+        issues.push(issue(
+          "warning",
+          "동적 라우팅 프로토콜 불일치",
+          `${a.device.label} ${a.port.name}=${leftAdvertised.map(routingProtocolLabel).join(", ")} / ${b.device.label} ${b.port.name}=${rightAdvertised.map(routingProtocolLabel).join(", ")}. 같은 subnet에서 transit network는 광고되지만 프로토콜 또는 EIGRP process/AS 번호가 맞지 않아 neighbor가 형성되지 않습니다.`
+        ));
+      }
+      continue;
+    }
+    for (const { left, right } of compatiblePairs) {
+      const protocolLabel = routingProtocolLabel(left);
+      const leftAdvertises = routingProtocolAdvertisesPort(left, a.port);
+      const rightAdvertises = routingProtocolAdvertisesPort(right, b.port);
+      if (!leftAdvertises || !rightAdvertises) {
+        issues.push(issue(
+          "warning",
+          `동적 라우팅 transit network 누락 (${protocolLabel})`,
+          `${a.device.label} ${a.port.name}=${leftAdvertises ? "advertised" : "missing"} / ${b.device.label} ${b.port.name}=${rightAdvertises ? "advertised" : "missing"}. 같은 subnet의 라우팅 이웃은 양쪽 network statement가 transit interface를 포함해야 합니다.`
+        ));
+      }
+      const leftPassive = routingPortPassive(left, a.port);
+      const rightPassive = routingPortPassive(right, b.port);
+      if (leftPassive || rightPassive) {
+        issues.push(issue(
+          "warning",
+          `동적 라우팅 passive interface (${protocolLabel})`,
+          `${a.device.label} ${a.port.name}=${leftPassive ? "passive" : "active"} / ${b.device.label} ${b.port.name}=${rightPassive ? "passive" : "active"}. passive-interface에서는 라우팅 neighbor가 형성되지 않습니다.`
+        ));
+      }
+      if (leftAdvertises && rightAdvertises && !leftPassive && !rightPassive) {
+        const leftMissing = dynamicRoutingUnadvertisedConnectedNetworks(project, a.device, left, a.port);
+        const rightMissing = dynamicRoutingUnadvertisedConnectedNetworks(project, b.device, right, b.port);
+        if (leftMissing.length || rightMissing.length) {
+          const details = [
+            ...leftMissing.map((entry) => `${a.device.label} ${entry.portName} ${entry.prefix}`),
+            ...rightMissing.map((entry) => `${b.device.label} ${entry.portName} ${entry.prefix}`)
+          ];
+          issues.push(issue(
+            "warning",
+            `동적 라우팅 연결망 미광고 (${protocolLabel})`,
+            `${a.device.label}와 ${b.device.label}의 neighbor는 형성되지만 ${details.join(", ")} connected network가 network statement에 없습니다. 해당 LAN은 이웃 라우터가 동적으로 학습하지 못합니다.`
+          ));
+        }
+      }
+    }
+  }
+  return issues;
+}
+
+interface Layer2LoopEdge {
+  aDeviceId: string;
+  bDeviceId: string;
+  label: string;
+}
+
+function diagnoseLayer2Loops(project: NetworkProject): NetworkIssue[] {
+  const edgesByVlan = new Map<number, Map<string, Layer2LoopEdge>>();
+  for (const link of project.links.filter((item) => linkOperational(project, item))) {
+    const a = endpoint(project, link.endpointA);
+    const b = endpoint(project, link.endpointB);
+    if (!a || !b || !canForwardLayer2(a.device) || !canForwardLayer2(b.device)) continue;
+    for (const vlan of sharedVlans(a.port, b.port)) {
+      const bundleKey = logicalLayer2EdgeKey(link.id, a.device.id, a.port, b.device.id, b.port);
+      const byKey = edgesByVlan.get(vlan) ?? new Map<string, Layer2LoopEdge>();
+      byKey.set(bundleKey, { aDeviceId: a.device.id, bDeviceId: b.device.id, label: linkLabel(project, link) });
+      edgesByVlan.set(vlan, byKey);
+    }
+  }
+
+  const issues: NetworkIssue[] = [];
+  for (const [vlan, edgeMap] of edgesByVlan) {
+    const edges = [...edgeMap.values()];
+    const adjacency = new Map<string, Set<string>>();
+    for (const edge of edges) {
+      adjacency.set(edge.aDeviceId, new Set([...(adjacency.get(edge.aDeviceId) ?? []), edge.bDeviceId]));
+      adjacency.set(edge.bDeviceId, new Set([...(adjacency.get(edge.bDeviceId) ?? []), edge.aDeviceId]));
+    }
+    const visited = new Set<string>();
+    for (const start of adjacency.keys()) {
+      if (visited.has(start)) continue;
+      const stack = [start];
+      const component = new Set<string>();
+      visited.add(start);
+      while (stack.length) {
+        const current = stack.pop()!;
+        component.add(current);
+        for (const next of adjacency.get(current) ?? []) {
+          if (visited.has(next)) continue;
+          visited.add(next);
+          stack.push(next);
+        }
+      }
+      const componentEdges = edges.filter((edge) => component.has(edge.aDeviceId) && component.has(edge.bDeviceId));
+      if (componentEdges.length >= component.size) {
+        const devices = [...component].map((id) => project.devices.find((device) => device.id === id)?.label ?? id).sort();
+        issues.push(issue(
+          "warning",
+          `VLAN ${vlan} Layer 2 loop 가능성`,
+          `${devices.join(", ")} 사이에 ${componentEdges.length}개 L2 경로가 있어 순환 구조가 됩니다. STP root/blocked 포트, EtherChannel bundle, 또는 불필요한 링크 제거를 확인하세요.`
+        ));
+      }
     }
   }
   return issues;
@@ -382,6 +525,31 @@ function explainBpduGuardRisk(aDevice: NetworkDevice, aPort: NetworkPort, bDevic
     return `${label}: ${bDevice.label} ${bPort.name}는 PortFast/BPDU Guard edge 포트인데 스위치에 연결되어 있습니다.`;
   }
   return "";
+}
+
+function explainEtherChannelMismatch(aPort: NetworkPort, bPort: NetworkPort, label: string): string {
+  const aChannel = aPort.channelGroup;
+  const bChannel = bPort.channelGroup;
+  if (!aChannel && !bChannel) return "";
+  if (!aChannel || !bChannel) {
+    return `${label}: 한쪽 포트만 channel-group에 속해 있습니다. EtherChannel 멤버는 양쪽 포트를 같은 bundle 정책으로 맞춰야 합니다.`;
+  }
+  if (aChannel.id !== bChannel.id) {
+    return `${label}: channel-group ${aChannel.id}와 ${bChannel.id}가 서로 다릅니다.`;
+  }
+  if (!channelModesCompatible(aChannel.mode, bChannel.mode)) {
+    return `${label}: channel-group ${aChannel.id} mode ${aChannel.mode}/${bChannel.mode} 조합은 협상되지 않습니다.`;
+  }
+  return "";
+}
+
+function channelModesCompatible(left: NonNullable<NetworkPort["channelGroup"]>["mode"], right: NonNullable<NetworkPort["channelGroup"]>["mode"]): boolean {
+  if (left === "on" || right === "on") return left === "on" && right === "on";
+  const lacpModes = new Set(["active", "passive"]);
+  if (lacpModes.has(left) || lacpModes.has(right)) return lacpModes.has(left) && lacpModes.has(right) && (left === "active" || right === "active");
+  const pagpModes = new Set(["desirable", "auto"]);
+  if (pagpModes.has(left) || pagpModes.has(right)) return pagpModes.has(left) && pagpModes.has(right) && (left === "desirable" || right === "desirable");
+  return false;
 }
 
 function explainVtpMismatch(aDevice: NetworkDevice, aPort: NetworkPort, bDevice: NetworkDevice, bPort: NetworkPort, label: string): string {
@@ -452,7 +620,7 @@ function diagnoseServices(project: NetworkProject): NetworkIssue[] {
       if (!interfaceIpEntries(device).some((entry) => ipInSubnet(route.nextHop, entry.ipAddress, entry.subnetMask))) {
         issues.push(issue("warning", `${device.label} route next-hop이 연결된 subnet에 없습니다`, `${route.nextHop}는 이 장비의 활성 인터페이스에서 도달할 수 없습니다.`));
       }
-      if (!project.devices.some((candidate) => candidate.id !== device.id && candidate.powerOn && candidate.ports.some((port) => port.adminUp && port.ipAddress === route.nextHop)) && !firstHopVirtualIpExists(project, route.nextHop)) {
+      if (!nextHopAssignedExists(project, device.id, route.nextHop)) {
         issues.push(issue("warning", `${device.label} route next-hop이 할당되지 않았습니다`, `${route.nextHop}를 가진 전원 켜진 장비가 없습니다.`));
       }
       if (route.trackId !== undefined && !(device.config.trackObjects ?? []).some((track) => track.trackId === route.trackId)) {
@@ -672,20 +840,45 @@ function diagnoseIpSlaAndTracking(device: NetworkDevice): NetworkIssue[] {
   return issues;
 }
 
-function firstHopVirtualIpExists(project: NetworkProject, ipAddress: string): boolean {
+function firstHopGatewayExists(project: NetworkProject, gateway: string, hostIp: string, hostMask: string): boolean {
+  if (!ipInSubnet(gateway, hostIp, hostMask)) return false;
   return project.devices.some((device) =>
     device.powerOn &&
     device.ports.some((port) =>
       port.adminUp &&
-      ((port.hsrpGroups ?? []).some((group) => group.virtualIp === ipAddress) ||
-        (port.vrrpGroups ?? []).some((group) => group.virtualIp === ipAddress))
+      (interfaceGatewayOwner(gateway, port.ipAddress, port.subnetMask) ||
+        (port.secondaryIpAddresses ?? []).some((address) => interfaceGatewayOwner(gateway, address.ipAddress, address.subnetMask)) ||
+        (port.hsrpGroups ?? []).some((group) => group.virtualIp === gateway && ownerSubnetContains(gateway, port.ipAddress, port.subnetMask)) ||
+        (port.vrrpGroups ?? []).some((group) => group.virtualIp === gateway && ownerSubnetContains(gateway, port.ipAddress, port.subnetMask)))
+    )
+  );
+}
+
+function interfaceGatewayOwner(gateway: string, ownerIp: string, ownerMask: string): boolean {
+  return ownerIp === gateway && isIpv4(ownerIp) && isSubnetMask(ownerMask) && ipInSubnet(gateway, ownerIp, ownerMask);
+}
+
+function ownerSubnetContains(gateway: string, ownerIp: string, ownerMask: string): boolean {
+  return isIpv4(ownerIp) && isSubnetMask(ownerMask) && ipInSubnet(gateway, ownerIp, ownerMask);
+}
+
+function nextHopAssignedExists(project: NetworkProject, sourceDeviceId: string, nextHop: string): boolean {
+  return project.devices.some((device) =>
+    device.id !== sourceDeviceId &&
+    device.powerOn &&
+    device.ports.some((port) =>
+      port.adminUp &&
+      (port.ipAddress === nextHop ||
+        (port.secondaryIpAddresses ?? []).some((address) => address.ipAddress === nextHop) ||
+        (port.hsrpGroups ?? []).some((group) => group.virtualIp === nextHop) ||
+        (port.vrrpGroups ?? []).some((group) => group.virtualIp === nextHop))
     )
   );
 }
 
 function hsrpEffectivePriority(device: NetworkDevice, group: NonNullable<NetworkPort["hsrpGroups"]>[number]): number {
   const trackedPort = group.trackInterface ? device.ports.find((port) => portNameMatches(port.name, group.trackInterface!)) : undefined;
-  const trackedDown = Boolean(group.trackInterface && (!trackedPort || !device.powerOn || !trackedPort.adminUp));
+  const trackedDown = Boolean(group.trackInterface && (!trackedPort || !device.powerOn || !trackedPort.adminUp || !trackedPort.linkId));
   const trackObjectDown = group.trackObject !== undefined && !trackObjectLikelyUp(device, group.trackObject);
   return Math.max(0, group.priority - (trackedDown || trackObjectDown ? group.trackDecrement ?? 10 : 0));
 }
@@ -700,7 +893,7 @@ function trackObjectLikelyUp(device: NetworkDevice, trackId: number): boolean {
   if (!track || !device.powerOn) return false;
   if (track.type === "interface") {
     const port = track.interfaceName ? device.ports.find((candidate) => portNameMatches(candidate.name, track.interfaceName!)) : undefined;
-    return Boolean(port?.adminUp);
+    return Boolean(port?.adminUp && port.linkId);
   }
   if (track.type === "ip-sla") {
     const operation = (device.config.ipSlaOperations ?? []).find((item) => item.operationId === track.ipSlaOperationId);
@@ -720,6 +913,165 @@ function prefixLengthOf(value: string): number {
   const [network, prefixText] = value.split("/");
   const prefix = Number(prefixText);
   return isIpv4(network) && Number.isInteger(prefix) && prefix >= 0 && prefix <= 32 ? prefix : -1;
+}
+
+function canForwardLayer2(device: NetworkDevice): boolean {
+  return device.kind === "switch" || device.kind === "hub" || device.kind === "wireless";
+}
+
+function sharedVlans(a: NetworkPort, b: NetworkPort): number[] {
+  const aVlans = portVlans(a);
+  const bVlans = portVlans(b);
+  return [...aVlans].filter((vlan) => bVlans.has(vlan));
+}
+
+function linkCarriesVlan(a: NetworkPort, b: NetworkPort, vlan: number): boolean {
+  return sharedVlans(a, b).includes(vlan);
+}
+
+function portVlans(port: NetworkPort): Set<number> {
+  if (port.mode === "trunk") return new Set([...port.allowedVlans, port.nativeVlan ?? 1]);
+  if (port.subinterfaceVlan) return new Set([port.subinterfaceVlan]);
+  return new Set([port.vlan]);
+}
+
+function logicalLayer2EdgeKey(linkId: string, aDeviceId: string, aPort: NetworkPort, bDeviceId: string, bPort: NetworkPort): string {
+  const aChannel = aPort.channelGroup?.id;
+  const bChannel = bPort.channelGroup?.id;
+  if (aChannel !== undefined && aChannel === bChannel) {
+    return `${[aDeviceId, bDeviceId].sort().join("<->")}:channel-${aChannel}`;
+  }
+  return linkId;
+}
+
+function routingProtocols(device: NetworkDevice): RoutingProtocolConfig[] {
+  return device.config.routingProtocols ?? [];
+}
+
+function routingProtocolsCompatible(left: RoutingProtocolConfig, right: RoutingProtocolConfig): boolean {
+  if (left.protocol !== right.protocol) return false;
+  if (left.protocol === "eigrp") return (left.processId ?? "") === (right.processId ?? "");
+  return true;
+}
+
+function routingProtocolLabel(protocol: RoutingProtocolConfig): string {
+  return `${protocol.protocol.toUpperCase()}${protocol.processId ? ` ${protocol.processId}` : ""}`;
+}
+
+function routingProtocolAdvertisesPort(protocol: RoutingProtocolConfig, port: NetworkPort): boolean {
+  if (!port.ipAddress || !port.subnetMask || !protocol.networks.length) return false;
+  return protocol.networks.some((network) => routingNetworkIncludesPort(network, port, protocol.protocol));
+}
+
+function dynamicRoutingUnadvertisedConnectedNetworks(project: NetworkProject, device: NetworkDevice, protocol: RoutingProtocolConfig, transitPort: NetworkPort): Array<{ portName: string; prefix: string }> {
+  const missing = new Map<string, { portName: string; prefix: string }>();
+  for (const entry of interfaceIpEntries(device)) {
+    if (entry.port.id === transitPort.id || entry.secondary) continue;
+    if (routingProtocolAdvertisesPort(protocol, entry.port)) continue;
+    if (!connectedNetworkHasEndpoint(project, device, entry.port, entry.ipAddress, entry.subnetMask)) continue;
+    const prefix = `${networkAddress(entry.ipAddress, entry.subnetMask)}/${maskToPrefix(entry.subnetMask)}`;
+    missing.set(`${entry.port.id}:${prefix}`, { portName: entry.port.name, prefix });
+  }
+  return [...missing.values()];
+}
+
+function connectedNetworkHasEndpoint(project: NetworkProject, owner: NetworkDevice, port: NetworkPort, ipAddress: string, subnetMask: string): boolean {
+  return project.devices.some((device) =>
+    device.id !== owner.id &&
+    device.powerOn &&
+    !isRoutingDevice(device) &&
+    device.ports.some((candidate) =>
+      candidate.adminUp &&
+      candidate.ipAddress &&
+      candidate.subnetMask &&
+      ipInSubnet(candidate.ipAddress, ipAddress, subnetMask) &&
+      layer2EndpointReachable(project, owner.id, port, device.id, candidate.id)
+    )
+  );
+}
+
+function layer2EndpointReachable(project: NetworkProject, sourceDeviceId: string, sourcePort: NetworkPort, targetDeviceId: string, targetPortId: string): boolean {
+  const vlan = portVlan(sourcePort);
+  const seen = new Set([sourceDeviceId]);
+  const queue = [sourceDeviceId];
+  while (queue.length) {
+    const current = queue.shift()!;
+    const currentDevice = project.devices.find((device) => device.id === current);
+    if (!currentDevice?.powerOn) continue;
+    if (current !== sourceDeviceId && current !== targetDeviceId && !canForwardLayer2(currentDevice)) continue;
+    for (const link of project.links.filter((item) => linkOperational(project, item) && (item.endpointA.deviceId === current || item.endpointB.deviceId === current))) {
+      const currentEndpoint = link.endpointA.deviceId === current ? link.endpointA : link.endpointB;
+      if (current === sourceDeviceId && currentEndpoint.portId !== sourcePort.id) continue;
+      const otherEndpoint = link.endpointA.deviceId === current ? link.endpointB : link.endpointA;
+      const currentPort = endpoint(project, currentEndpoint)?.port;
+      const other = endpoint(project, otherEndpoint);
+      if (!currentPort || !other || !currentPort.adminUp || !other.port.adminUp || !other.device.powerOn || !linkCarriesVlan(currentPort, other.port, vlan)) continue;
+      if (other.device.id === targetDeviceId && other.port.id === targetPortId) return true;
+      if (!seen.has(other.device.id)) {
+        seen.add(other.device.id);
+        queue.push(other.device.id);
+      }
+    }
+  }
+  return false;
+}
+
+function linkOperational(project: NetworkProject, link: NetworkProject["links"][number]): boolean {
+  if (link.status !== "up") return false;
+  const a = endpoint(project, link.endpointA);
+  const b = endpoint(project, link.endpointB);
+  return Boolean(a?.device.powerOn && b?.device.powerOn && a.port.adminUp && b.port.adminUp);
+}
+
+function routingNetworkIncludesPort(network: string, port: NetworkPort, protocol: RoutingProtocolConfig["protocol"]): boolean {
+  const statement = network.trim();
+  if (!statement || !isIpv4(port.ipAddress) || !isSubnetMask(port.subnetMask)) return false;
+  const cidr = statement.match(/^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/);
+  if (cidr) {
+    const [, base, prefixText] = cidr;
+    const prefix = Number(prefixText);
+    return Number.isInteger(prefix) && prefix >= 0 && prefix <= 32 && ipInSubnet(port.ipAddress, base, prefixToMask(prefix));
+  }
+  const [base, maskOrWildcard] = statement.split(/\s+/);
+  if (!isIpv4(base)) return false;
+  if (maskOrWildcard) {
+    if (!isIpv4(maskOrWildcard)) return false;
+    return isSubnetMask(maskOrWildcard) ? ipInSubnet(port.ipAddress, base, maskOrWildcard) : ipMatchesWildcard(port.ipAddress, base, maskOrWildcard);
+  }
+  if (networkAddress(port.ipAddress, port.subnetMask) === base) return true;
+  if (protocol === "ospf") return false;
+  return ipInSubnet(port.ipAddress, base, classfulMask(base));
+}
+
+function routingPortPassive(protocol: RoutingProtocolConfig, port: NetworkPort): boolean {
+  if (protocol.passiveInterfaceDefault) {
+    return !(protocol.passiveInterfaceExceptions ?? []).some((name) => portNameMatches(port.name, name));
+  }
+  return protocol.passiveInterfaces.some((name) => portNameMatches(port.name, name));
+}
+
+function isRoutingDevice(device: NetworkDevice): boolean {
+  if (device.kind === "router" || device.kind === "firewall") return true;
+  if (device.kind !== "switch") return false;
+  return isMultilayerSwitch(device) || device.ports.some((port) => port.name.toLowerCase().startsWith("vlan") && port.adminUp && port.ipAddress && port.subnetMask);
+}
+
+function classfulMask(ipAddress: string): string {
+  const firstOctet = Number(ipAddress.split(".")[0]);
+  if (firstOctet < 128) return "255.0.0.0";
+  if (firstOctet < 192) return "255.255.0.0";
+  return "255.255.255.0";
+}
+
+function ipMatchesWildcard(ipAddress: string, network: string, wildcard: string): boolean {
+  if (!isIpv4(ipAddress) || !isIpv4(network) || !isIpv4(wildcard)) return false;
+  const inverseWildcard = (~ipToNumber(wildcard)) >>> 0;
+  return ((ipToNumber(ipAddress) ^ ipToNumber(network)) & inverseWildcard) === 0;
+}
+
+function prefixToMask(prefix: number): string {
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  return [(mask >>> 24) & 255, (mask >>> 16) & 255, (mask >>> 8) & 255, mask & 255].join(".");
 }
 
 function isSubinterfacePort(port: NetworkPort): boolean {
