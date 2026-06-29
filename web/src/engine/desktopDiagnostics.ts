@@ -51,6 +51,41 @@ export function desktopHostname(device: NetworkDevice): string {
   return device.config.hostname || device.label;
 }
 
+export function desktopSystemInfo(device: NetworkDevice): string {
+  const ports = desktopNetworkPorts(device);
+  return [
+    `Host Name:                 ${desktopHostname(device)}`,
+    "OS Name:                   PTWeb Desktop OS",
+    "OS Version:                10.0.22631 N/A Build 22631",
+    "OS Manufacturer:           Network Editor Web",
+    `System Manufacturer:       ${device.kind.toUpperCase()}`,
+    `System Model:              ${device.model}`,
+    "System Type:               x64-based PC",
+    `Network Card(s):           ${ports.length} NIC(s) Installed.`,
+    ...ports.flatMap((port, index) => [
+      `                           [${String(index + 1).padStart(2, "0")}]: ${desktopAdapterDescription(port.kind)}`,
+      `                                 Connection Name: ${port.name}`,
+      `                                 DHCP Enabled: ${device.runtime.dhcpLeases.some((lease) => lease.macAddress === port.macAddress) ? "Yes" : "No"}`,
+      `                                 IP address(es): ${port.ipAddress || "0.0.0.0"}`
+    ])
+  ].join("\n");
+}
+
+export function desktopGetComputerInfo(device: NetworkDevice): string {
+  const ports = desktopNetworkPorts(device);
+  return [
+    `CsName                    : ${desktopHostname(device)}`,
+    `CsModel                   : ${device.model}`,
+    `CsManufacturer            : ${device.kind.toUpperCase()}`,
+    "OsName                    : PTWeb Desktop OS",
+    "OsVersion                 : 10.0.22631",
+    "OsArchitecture            : 64-bit",
+    `CsNetworkAdapters         : ${ports.length}`,
+    `CsPrimaryOwnerName        : ${device.label}`,
+    `CsDomain                  : ${device.config.domainName || "WORKGROUP"}`
+  ].join("\n");
+}
+
 export function desktopGetmacTable(device: NetworkDevice, options: { verbose?: boolean } = {}): string {
   const ports = device.ports.filter((port) => port.kind !== "console");
   if (!ports.length) return "No network adapters found.";
@@ -566,6 +601,10 @@ export function parseDesktopGetEventLogCommand(command: string): { valid: boolea
     }
   }
   return { valid: true, newest, sourceFilter };
+}
+
+export function parseDesktopGetComputerInfoCommand(command: string): { valid: boolean } {
+  return { valid: command.trim().split(/\s+/)[0]?.toLowerCase() === "get-computerinfo" };
 }
 
 export function parseDesktopGetNetAdapterCommand(command: string): { valid: boolean; nameFilter: string } {
