@@ -2,7 +2,7 @@ import { getDeviceModel } from "../data/deviceCatalog";
 import { analyzeAddressPlan } from "./addressPlan";
 import { analyzeCapacityPlan } from "./capacityPlan";
 import { analyzeConfigDrift } from "./configDrift";
-import { desktopNetstatListeningRows } from "./desktopDiagnostics";
+import { desktopNetstatListeningRows, desktopTasklistRows } from "./desktopDiagnostics";
 import { analyzeFailureImpact, summarizeFailureImpactBySeverity } from "./failureImpact";
 import { analyzeProjectAudit } from "./projectAudit";
 import { analyzeSecurityMatrix, summarizeSecurityPoliciesByType } from "./securityMatrix";
@@ -514,14 +514,18 @@ function serviceSection(project: NetworkProject): ReportSection {
 
   const listeningRows = project.devices
     .filter(hasServiceSurface)
-    .flatMap((device) => desktopNetstatListeningRows(device).map((row) => [
-      device.label,
-      row.service,
-      row.protocol,
-      row.localAddress,
-      row.state || "-",
-      row.pid
-    ]));
+    .flatMap((device) => {
+      const tasksByPid = new Map(desktopTasklistRows(device).map((task) => [task.pid, task]));
+      return desktopNetstatListeningRows(device).map((row) => [
+        device.label,
+        row.service,
+        row.protocol,
+        row.localAddress,
+        row.state || "-",
+        row.pid,
+        tasksByPid.get(row.pid)?.imageName ?? "-"
+      ]);
+    });
 
   const leaseRows = project.devices.flatMap((device) => device.runtime.dhcpLeases.map((lease) => [
     device.label,
@@ -544,7 +548,7 @@ function serviceSection(project: NetworkProject): ReportSection {
       ...table(["Device", "DNS", "HTTP", "FTP", "EMAIL", "TFTP", "SYSLOG"], serviceLogRows),
       "",
       "Listening Ports",
-      ...table(["Device", "Service", "Protocol", "Local address", "State", "PID"], listeningRows),
+      ...table(["Device", "Service", "Protocol", "Local address", "State", "PID", "Process"], listeningRows),
       "",
       "Runtime DHCP Leases",
       ...table(["Device", "IP", "MAC", "Client device", "Expires"], leaseRows)

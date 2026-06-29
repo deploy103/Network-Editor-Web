@@ -1,4 +1,4 @@
-import { desktopNetstatListeningRows } from "./desktopDiagnostics";
+import { desktopNetstatListeningRows, desktopTasklistRows } from "./desktopDiagnostics";
 import { ipInSubnet, isIpv4, isSubnetMask } from "./ip";
 import { fallbackPing } from "./simulation";
 import { endpoint } from "./topology";
@@ -100,16 +100,18 @@ export function buildServiceReachabilityReportLines(project: NetworkProject): st
       String(serviceLogCount(device, "TFTP")),
       String(device.runtime.logs.length)
     ]);
-  const listeningRows = project.devices.flatMap((device) =>
-    desktopNetstatListeningRows(device).map((row) => [
+  const listeningRows = project.devices.flatMap((device) => {
+    const tasksByPid = new Map(desktopTasklistRows(device).map((task) => [task.pid, task]));
+    return desktopNetstatListeningRows(device).map((row) => [
       device.label,
       row.service,
       row.protocol,
       row.localAddress,
       row.state || "-",
-      row.pid
-    ])
-  );
+      row.pid,
+      tasksByPid.get(row.pid)?.imageName ?? "-"
+    ]);
+  });
   return [
     "Network Editor Web Service Reachability Report",
     `Project: ${project.name}`,
@@ -156,7 +158,7 @@ export function buildServiceReachabilityReportLines(project: NetworkProject): st
     ...table(["Device", "DNS", "HTTP", "FTP", "EMAIL", "TFTP", "SYSLOG"], serviceLogRows),
     "",
     "Listening Ports",
-    ...table(["Device", "Service", "Protocol", "Local address", "State", "PID"], listeningRows),
+    ...table(["Device", "Service", "Protocol", "Local address", "State", "PID", "Process"], listeningRows),
     "",
     "Checks",
     ...table(["Client", "Service", "Status", "Server", "Scope", "Reason"], report.checks.map((check) => [
