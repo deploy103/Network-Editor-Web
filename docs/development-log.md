@@ -217,6 +217,8 @@
 - 23:31 Rechecked non-web build targets; `npm run build:go` is blocked because `go` is not installed and `npm run build:rust` is blocked because `wasm-pack` is not installed.
 - 23:32 Hardened Desktop `Test-NetConnection`/`tnc` parsing for `-CommonTCPPort HTTP`, `-InformationLevel Detailed`, `-TraceRoute`, and `-DiagnoseRouting` option forms.
 - 23:34 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
+- 23:51 Added Desktop `Get-NetTCPConnection -State Listen` and `Get-Process -Id <pid>` helpers/parsers for PowerShell-style TCP listener owning-process and process identity evidence, then exposed them in the Command Prompt quick commands, help text, Verification Plan, and Lab Workbook.
+- 23:51 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 
 ### Next
 
