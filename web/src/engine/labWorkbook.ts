@@ -163,7 +163,7 @@ function serviceSection(project: NetworkProject): WorkbookSection {
       "",
       "Required checks",
       "- Use Desktop or Complex PDU tests for DNS and HTTP when those services are enabled.",
-      "- Use Desktop Command Prompt netstat -an or netstat -ano on service devices to confirm listening application ports and PID evidence.",
+      "- Use Desktop Command Prompt netstat -an or netstat -ano plus tasklist /svc on service devices to confirm listening application ports and PID evidence.",
       "- Use show services summary on service devices to confirm enabled and disabled service counts.",
       "- Confirm DHCP leases are issued from the intended pool when DHCP is part of the lab.",
       "- Use show ip dhcp pool summary when DHCP pools are part of the lab.",
