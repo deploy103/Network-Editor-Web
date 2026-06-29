@@ -7341,7 +7341,7 @@ function transportAllows(transportInput: string, protocol: "ssh" | "telnet"): bo
   return tokens.includes("all") || tokens.includes(protocol);
 }
 
-const desktopQuickCommands = ["help", "hostname", "getmac", "getmac /v", "ipconfig /all", "ipconfig /displaydns", "ipconfig /flushdns", "ipconfig /renew", "ipconfig /release", "netsh interface ip show config", "arp -a", "arp -d *", "route print", "route print -4", "netstat -r", "netstat -rn", "netstat -an", "netstat -ano", "tasklist /svc", "ping -n 4 www.lab.local", "tracert www.lab.local", "pathping www.lab.local", "nslookup www.lab.local", "web www.lab.local", "ftp www.lab.local", "mail www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
+const desktopQuickCommands = ["help", "hostname", "getmac", "getmac /v", "ipconfig /all", "ipconfig /displaydns", "ipconfig /flushdns", "ipconfig /renew", "ipconfig /release", "netsh interface ip show config", "arp -a", "arp -d *", "route print", "route print -4", "netstat -r", "netstat -rn", "netstat -an", "netstat -ano", "netstat -abno", "tasklist /svc", "ping -n 4 www.lab.local", "tracert www.lab.local", "pathping www.lab.local", "nslookup www.lab.local", "web www.lab.local", "ftp www.lab.local", "mail www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
 
 type DesktopApp = "ip" | "prompt" | "browser" | "terminal" | "ftp" | "email" | "tftp" | "syslog";
 
@@ -7675,7 +7675,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
       "지원 명령:",
       "  hostname | getmac [/v]",
       "  ipconfig /all | ipconfig /displaydns | ipconfig /flushdns | ipconfig /renew | ipconfig /release",
-      "  netsh interface ip show config | arp -a | arp -d <ip|*> | route print [-4] | netstat -r|-rn | netstat -an|-ano | tasklist [/svc] [/fi \"PID eq <pid>\"]",
+      "  netsh interface ip show config | arp -a | arp -d <ip|*> | route print [-4] | netstat -r|-rn | netstat -an|-ano|-abno | tasklist [/svc] [/fi \"PID eq <pid>\"]",
       "  ping [-4] [-n 횟수] <ip|이름> | tracert [-d] <ip|이름> | pathping [-n] <ip|이름> | nslookup [-type=A|PTR] <이름|ip> [dns-server]",
       "  http|web|browser <ip|이름> | ftp <ip|이름> [ls|get 파일] | email|mail <서버> <받는사람> [메시지]",
       "  ssh [-l user] [-p 22] <ip|이름> | telnet <ip|이름> [23] | tftp <ip|이름> | syslog <ip|이름> <메시지>"
@@ -7715,7 +7715,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
   if (isDesktopRoutePrintCommand(command)) return desktopRoutePrint(device);
   const netstatCommand = parseDesktopNetstatCommand(command);
   if (netstatCommand.kind === "routes") return desktopRoutePrint(device);
-  if (netstatCommand.kind === "listening") return desktopNetstatListening(device, { includePid: netstatCommand.includePid });
+  if (netstatCommand.kind === "listening") return desktopNetstatListening(device, { includePid: netstatCommand.includePid, includeProcess: netstatCommand.includeProcess });
   const tasklistCommand = parseDesktopTasklistCommand(command);
   if (tasklistCommand.valid) return desktopTasklist(device, { showServices: tasklistCommand.showServices, pidFilter: tasklistCommand.pidFilter });
   if (lower.startsWith("ping ")) {
@@ -7993,7 +7993,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     onProjectChange(appendDesktopEvent(loggedProject, device.id, target.id, "SYSLOG", `${target.label}에 SYSLOG 메시지를 기록했습니다.`, "delivered"), "SYSLOG 메시지를 기록했습니다.");
     return `SYSLOG sent to ${target.label}: ${logMessage}`;
   }
-  return "알 수 없는 데스크톱 명령입니다. help, hostname, getmac [/v], ipconfig, netsh interface ip show config, arp -a, arp -d <ip|*>, route print [-4], netstat -r|-rn, netstat -an, netstat -ano, tasklist [/svc] [/fi \"PID eq <pid>\"], ping [-4] [-n 횟수] <ip|이름>, tracert [-d] <ip|이름>, pathping [-n] <ip|이름>, nslookup [-type=A|PTR] <이름|ip> [dns-server], http/web <ip|이름>, ftp <ip|이름>, email/mail <ip|이름> <받는사람>, ssh [-l user] [-p 22] <ip|이름>, telnet <ip|이름> [23], tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
+  return "알 수 없는 데스크톱 명령입니다. help, hostname, getmac [/v], ipconfig, netsh interface ip show config, arp -a, arp -d <ip|*>, route print [-4], netstat -r|-rn, netstat -an, netstat -ano, netstat -abno, tasklist [/svc] [/fi \"PID eq <pid>\"], ping [-4] [-n 횟수] <ip|이름>, tracert [-d] <ip|이름>, pathping [-n] <ip|이름>, nslookup [-type=A|PTR] <이름|ip> [dns-server], http/web <ip|이름>, ftp <ip|이름>, email/mail <ip|이름> <받는사람>, ssh [-l user] [-p 22] <ip|이름>, telnet <ip|이름> [23], tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
 }
 
 function resolveDesktopTarget(project: NetworkProject, value: string): NetworkDevice | null {

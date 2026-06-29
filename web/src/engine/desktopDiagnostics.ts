@@ -199,20 +199,34 @@ function routePrintRow(destination: string, netmask: string, gateway: string, if
   return `${destination.padEnd(27)}${netmask.padEnd(17)}${gateway.padEnd(16)}${iface.padEnd(16)}${metric}`;
 }
 
-export function desktopNetstatListening(device: NetworkDevice, options: { includePid?: boolean } = {}): string {
+export function desktopNetstatListening(device: NetworkDevice, options: { includePid?: boolean; includeProcess?: boolean } = {}): string {
   const rows = desktopNetstatListeningRows(device);
   const includePid = options.includePid ?? false;
+  const includeProcess = options.includeProcess ?? false;
+  const tasksByPid = includeProcess ? new Map(desktopTasklistRows(device).map((task) => [task.pid, task])) : new Map<string, DesktopTasklistRow>();
   if (!rows.length) return "Active Connections\n\n  No listening services.";
   return [
     "Active Connections",
     "",
-    includePid
-      ? "  Proto  Local Address          Foreign Address        State           PID"
-      : "  Proto  Local Address          Foreign Address        State",
-    ...rows.map((row) => includePid
-      ? `  ${row.protocol.padEnd(5)}  ${row.localAddress.padEnd(21)}${row.foreignAddress.padEnd(23)}${row.state.padEnd(16)}${row.pid}`
-      : `  ${row.protocol.padEnd(5)}  ${row.localAddress.padEnd(21)}${row.foreignAddress.padEnd(23)}${row.state}`)
+    netstatHeader(includePid, includeProcess),
+    ...rows.map((row) => netstatRow(row, includePid, includeProcess, tasksByPid.get(row.pid)?.imageName ?? "-"))
   ].join("\n");
+}
+
+function netstatHeader(includePid: boolean, includeProcess: boolean): string {
+  return [
+    "  Proto  Local Address          Foreign Address        State",
+    includePid ? "          PID" : "",
+    includeProcess ? " Process" : ""
+  ].join("");
+}
+
+function netstatRow(row: DesktopNetstatRow, includePid: boolean, includeProcess: boolean, processName: string): string {
+  return [
+    `  ${row.protocol.padEnd(5)}  ${row.localAddress.padEnd(21)}${row.foreignAddress.padEnd(23)}${row.state.padEnd(16)}`,
+    includePid ? row.pid.padStart(11) : "",
+    includeProcess ? ` ${processName}` : ""
+  ].join("");
 }
 
 export function desktopNetstatListeningRows(device: NetworkDevice): DesktopNetstatRow[] {
@@ -296,15 +310,15 @@ export function isDesktopRoutePrintCommand(command: string): boolean {
   return tokens[0] === "route" && tokens[1] === "print" && tokens.slice(2).every((token) => token === "-4");
 }
 
-export function parseDesktopNetstatCommand(command: string): { kind: "routes" | "listening" | "none"; includePid: boolean } {
+export function parseDesktopNetstatCommand(command: string): { kind: "routes" | "listening" | "none"; includePid: boolean; includeProcess: boolean } {
   const tokens = normalizedDesktopTokens(command);
-  if (tokens[0] !== "netstat") return { kind: "none", includePid: false };
+  if (tokens[0] !== "netstat") return { kind: "none", includePid: false, includeProcess: false };
   const flags = new Set(tokens.slice(1).flatMap(expandDesktopOptionToken));
-  if (flags.has("r")) return { kind: "routes", includePid: false };
-  if (flags.size === 0 || flags.has("a") || flags.has("n") || flags.has("o")) {
-    return { kind: "listening", includePid: flags.has("o") };
+  if (flags.has("r")) return { kind: "routes", includePid: false, includeProcess: false };
+  if (flags.size === 0 || flags.has("a") || flags.has("n") || flags.has("o") || flags.has("b")) {
+    return { kind: "listening", includePid: flags.has("o"), includeProcess: flags.has("b") };
   }
-  return { kind: "none", includePid: false };
+  return { kind: "none", includePid: false, includeProcess: false };
 }
 
 export function isDesktopNetshInterfaceConfigCommand(command: string): boolean {

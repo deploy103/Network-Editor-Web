@@ -288,7 +288,7 @@ function serviceTasks(project: NetworkProject): VerificationTask[] {
 }
 
 function serviceVerificationCommands(device: NetworkDevice): string[] {
-  const commands = ["Desktop > Services", "Desktop > Command Prompt > netstat -an", "Desktop > Command Prompt > netstat -ano", "Desktop > Command Prompt > tasklist /svc", "show services", "show services summary", "show service logs", "show service logs summary"];
+  const commands = ["Desktop > Services", "Desktop > Command Prompt > netstat -an", "Desktop > Command Prompt > netstat -ano", "Desktop > Command Prompt > netstat -abno", "Desktop > Command Prompt > tasklist /svc", "show services", "show services summary", "show service logs", "show service logs summary"];
   const services = enabledServiceNames(device);
   if (services.includes("dhcp")) commands.push("show ip dhcp pool", "show ip dhcp pool summary", "show ip dhcp binding", "show ip dhcp binding summary");
   if (services.includes("dns")) commands.push("show hosts", "show hosts summary", "Desktop > Command Prompt > nslookup <record> [dns-server]", "show service logs dns");
@@ -302,7 +302,7 @@ function serviceVerificationCommands(device: NetworkDevice): string[] {
 
 function serviceVerificationExpected(device: NetworkDevice): string[] {
   const expected = enabledServiceNames(device).map((name) => `${name.toUpperCase()} enabled`);
-  if (expected.length) expected.push("Desktop netstat shows expected listening service ports", "Desktop netstat -ano shows listener PID evidence", "Desktop tasklist /svc maps listener PIDs to service process names");
+  if (expected.length) expected.push("Desktop netstat shows expected listening service ports", "Desktop netstat -ano shows listener PID evidence", "Desktop netstat -abno shows listener process names", "Desktop tasklist /svc maps listener PIDs to service process names");
   if (device.config.services.dhcp) expected.push(`${device.config.dhcpPools.filter((pool) => pool.enabled).length}/${device.config.dhcpPools.length} DHCP pools enabled`);
   if (device.config.services.dns) expected.push(`${device.config.dnsRecords.length} DNS records available`, "DNS lookups create DNS service log entries");
   if (device.config.services.http) expected.push("HTTP client request creates a service log entry");
