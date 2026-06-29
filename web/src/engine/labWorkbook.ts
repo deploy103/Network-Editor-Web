@@ -123,6 +123,7 @@ function addressingSection(project: NetworkProject, audience: WorkbookAudience):
       "Student actions",
       "- Verify each endpoint has IP address, subnet mask, gateway, and DNS where required.",
       "- Use Desktop Command Prompt ipconfig /all, netsh interface ip show config, Get-NetAdapter, Get-NetIPConfiguration -All, or Get-DnsClientServerAddress to capture host adapter evidence.",
+      "- Use Desktop Command Prompt route print, Get-NetRoute, arp -a, or Get-NetNeighbor to capture host route and neighbor evidence.",
       "- Verify each routed interface or SVI has the expected subnet gateway address.",
       "- Use the exported Address Plan if you need the full assignment table."
     ]
