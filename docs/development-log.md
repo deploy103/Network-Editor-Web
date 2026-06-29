@@ -201,6 +201,8 @@
 - 23:07 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 - 23:08 Connected Desktop `netsh interface ip show config` into Verification Plan desktop identity tasks and Lab Workbook host-adapter evidence guidance.
 - 23:09 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
+- 23:10 Expanded Desktop `nslookup` parsing to accept space-separated `-type PTR`, `-q`, `-querytype`, and ignore common `-debug`, `-timeout`, and `-retry` controls while preserving directed DNS server arguments.
+- 23:11 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 
 ### Next
 
