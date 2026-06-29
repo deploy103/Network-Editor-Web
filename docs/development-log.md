@@ -209,6 +209,8 @@
 - 23:17 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 - 23:19 Added Desktop `netstat -abno`/`netstat /abno` process-name output and connected it into service-device Verification Plan and Lab Workbook PID/process evidence guidance.
 - 23:20 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
+- 23:23 Added Desktop `sc query`, `sc queryex`, and `sc queryex <service>` output for service RUNNING/STOPPED state and PID evidence, then connected `sc queryex <service>` into Verification Plan and Lab Workbook service-state guidance.
+- 23:25 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 
 ### Next
 

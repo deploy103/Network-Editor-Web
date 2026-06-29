@@ -263,6 +263,27 @@ export function desktopTasklist(device: NetworkDevice, options: { showServices?:
   ].join("\n");
 }
 
+export function desktopScQuery(device: NetworkDevice, options: { extended?: boolean; serviceName?: string } = {}): string {
+  const query = options.serviceName?.trim().toLowerCase() ?? "";
+  const services = listeningServices.filter((service) => !query || service.service === query || service.label.toLowerCase() === query);
+  if (!services.length) return `[SC] EnumQueryServicesStatus:OpenService FAILED 1060:\n\nThe specified service does not exist as an installed service.`;
+  return services.map((service) => {
+    const running = Boolean(device.config.services[service.service]);
+    return [
+      `SERVICE_NAME: ${service.service}`,
+      `DISPLAY_NAME: PTWeb ${service.label} Service`,
+      "        TYPE               : 10  WIN32_OWN_PROCESS",
+      `        STATE              : ${running ? "4  RUNNING" : "1  STOPPED"}`,
+      "                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)",
+      "        WIN32_EXIT_CODE    : 0  (0x0)",
+      "        SERVICE_EXIT_CODE  : 0  (0x0)",
+      "        CHECKPOINT         : 0x0",
+      "        WAIT_HINT          : 0x0",
+      ...(options.extended ? [`        PID                : ${running ? service.pid : "0"}`, "        FLAGS              :"] : [])
+    ].join("\n");
+  }).join("\n\n");
+}
+
 export function desktopTasklistRows(device: NetworkDevice): DesktopTasklistRow[] {
   const tasks = new Map<string, DesktopTasklistRow>();
   desktopNetstatListeningRows(device).forEach((row) => {
@@ -302,6 +323,18 @@ export function parseDesktopTasklistCommand(command: string): { valid: boolean; 
     valid: true,
     showServices: tokens.includes("-svc"),
     pidFilter: filterMatch?.[1] ?? ""
+  };
+}
+
+export function parseDesktopScCommand(command: string): { valid: boolean; extended: boolean; serviceName: string } {
+  const tokens = normalizedDesktopTokens(command);
+  if (tokens[0] !== "sc" || (tokens[1] !== "query" && tokens[1] !== "queryex")) {
+    return { valid: false, extended: false, serviceName: "" };
+  }
+  return {
+    valid: true,
+    extended: tokens[1] === "queryex",
+    serviceName: tokens[2] ?? ""
   };
 }
 
