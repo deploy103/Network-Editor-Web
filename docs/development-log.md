@@ -205,6 +205,8 @@
 - 23:11 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 - 23:14 Added Desktop `tasklist`, `tasklist /svc`, and `tasklist /fi "PID eq <pid>"` output that maps `netstat -ano` listener PIDs to PTWeb service process names, then connected `tasklist /svc` into Verification Plan and Lab Workbook PID evidence guidance.
 - 23:15 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
+- 23:16 Added PID-to-process columns to standalone Service Reachability and Project Report `Listening Ports` tables using the shared Desktop tasklist rows.
+- 23:17 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 
 ### Next
 

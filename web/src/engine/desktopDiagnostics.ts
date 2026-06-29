@@ -30,7 +30,7 @@ export interface DesktopNetstatRow {
   pid: string;
 }
 
-interface DesktopTasklistRow {
+export interface DesktopTasklistRow {
   imageName: string;
   pid: string;
   sessionName: string;
@@ -249,7 +249,7 @@ export function desktopTasklist(device: NetworkDevice, options: { showServices?:
   ].join("\n");
 }
 
-function desktopTasklistRows(device: NetworkDevice): DesktopTasklistRow[] {
+export function desktopTasklistRows(device: NetworkDevice): DesktopTasklistRow[] {
   const tasks = new Map<string, DesktopTasklistRow>();
   desktopNetstatListeningRows(device).forEach((row) => {
     const current = tasks.get(row.pid);
