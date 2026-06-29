@@ -193,6 +193,8 @@
 - 22:46 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, `node --check scripts/visual-smoke.cjs`, and `git diff --check`.
 - 22:57 Extracted Desktop `ipconfig /displaydns` output into shared diagnostics helpers and expanded cache rows with Windows-style A/PTR record type, TTL, data length, and answer-section evidence.
 - 22:58 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
+- 23:00 Added shared Desktop parsers for Windows-style slash and spaced options across `arp /a`, `arp /d <ip>`, `route print /4`, `netstat /ano`, `netstat -a -n -o`, and `netstat /rn`.
+- 23:01 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 
 ### Next
 

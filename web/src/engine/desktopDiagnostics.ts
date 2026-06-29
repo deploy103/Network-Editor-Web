@@ -204,6 +204,33 @@ export function desktopNetstatListeningRows(device: NetworkDevice): DesktopNetst
     })));
 }
 
+export function parseDesktopArpCommand(command: string): { action: "show" | "delete" | "none"; target: string } {
+  const tokens = normalizedDesktopTokens(command);
+  if (tokens[0] !== "arp") return { action: "none", target: "" };
+  if (tokens.slice(1).some((token) => token === "-a")) return { action: "show", target: "" };
+  const deleteIndex = tokens.slice(1).findIndex((token) => token === "-d");
+  if (deleteIndex >= 0) {
+    return { action: "delete", target: tokens[deleteIndex + 2] ?? "*" };
+  }
+  return { action: "none", target: "" };
+}
+
+export function isDesktopRoutePrintCommand(command: string): boolean {
+  const tokens = normalizedDesktopTokens(command);
+  return tokens[0] === "route" && tokens[1] === "print" && tokens.slice(2).every((token) => token === "-4");
+}
+
+export function parseDesktopNetstatCommand(command: string): { kind: "routes" | "listening" | "none"; includePid: boolean } {
+  const tokens = normalizedDesktopTokens(command);
+  if (tokens[0] !== "netstat") return { kind: "none", includePid: false };
+  const flags = new Set(tokens.slice(1).flatMap(expandDesktopOptionToken));
+  if (flags.has("r")) return { kind: "routes", includePid: false };
+  if (flags.size === 0 || flags.has("a") || flags.has("n") || flags.has("o")) {
+    return { kind: "listening", includePid: flags.has("o") };
+  }
+  return { kind: "none", includePid: false };
+}
+
 export function parseDesktopNslookupCommand(command: string): { name: string; serverText: string; queryType: string } {
   const tokens = command.trim().split(/\s+/);
   const args = tokens[0]?.toLowerCase() === "nslookup" ? tokens.slice(1) : [...tokens];
@@ -247,4 +274,13 @@ function boundedDesktopNumber(value: string, min: number, max: number): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return min;
   return Math.max(min, Math.min(max, Math.round(parsed)));
+}
+
+function normalizedDesktopTokens(command: string): string[] {
+  return command.trim().toLowerCase().split(/\s+/).filter(Boolean).map((token) => token.startsWith("/") ? `-${token.slice(1)}` : token);
+}
+
+function expandDesktopOptionToken(token: string): string[] {
+  if (!token.startsWith("-")) return [];
+  return token.slice(1).split("");
 }
