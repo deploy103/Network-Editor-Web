@@ -197,6 +197,8 @@
 - 23:01 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 - 23:03 Added shared Desktop SSH/Telnet parsing for `ssh user@host`, `ssh -l user -p 22 host`, and `telnet host 23`, including expected-port rejection output for mismatched SSH/Telnet ports.
 - 23:04 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
+- 23:06 Added Desktop `netsh interface ip show config` and `netsh int ipv4 show configuration` support with per-adapter DHCP, IP, subnet, gateway, metric, and DNS evidence.
+- 23:07 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 
 ### Next
 
