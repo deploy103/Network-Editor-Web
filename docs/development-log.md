@@ -213,6 +213,7 @@
 - 23:25 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 - 23:28 Added Desktop `Test-NetConnection`/`tnc` parsing and output for ICMP reachability and TCP service-port checks, including port-to-service state validation and Verification Plan/Lab Workbook guidance for `Test-NetConnection <server> -Port <port>`.
 - 23:30 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
+- 23:30 Verified `node --check scripts/visual-smoke.cjs`; `npm run smoke:visual` remains blocked by missing Playwright Chromium dependency `libnspr4.so`.
 
 ### Next
 
