@@ -3,7 +3,7 @@ import { ArrowLeft, Cable, CircleDot, CircleHelp, Copy, Cpu, Download, Edit3, Fi
 import { cableCatalog, canPortUseCable, createDevice, defaultTransceiverIdForMedia, deviceCatalog, displayKind, effectivePortKind, getDeviceModel, getModuleSpec, getTransceiverSpec, installModule, installedModuleForSlot, removeModule, transceiverCatalog, transceiverCompatibleWithPort, transceiverMediaLabel } from "../data/deviceCatalog";
 import { bootBanner, bootDevice, initialCliSession, initialConsoleSession, runCliCommand, type CliSession } from "../engine/cli";
 import { cliEngine } from "../engine/cliEngine";
-import { clearDesktopArpEntries, desktopArpTable, desktopDnsCache, desktopGetmacTable, desktopHostname, desktopIpconfigAll, desktopNetshInterfaceConfig, desktopNetstatListening, desktopRoutePrint, desktopScQuery, desktopTasklist, isDesktopNetshInterfaceConfigCommand, isDesktopRoutePrintCommand, parseDesktopArpCommand, parseDesktopNetstatCommand, parseDesktopNslookupCommand, parseDesktopPingCommand, parseDesktopRemoteAccessCommand, parseDesktopScCommand, parseDesktopTasklistCommand, parseDesktopTraceCommand } from "../engine/desktopDiagnostics";
+import { clearDesktopArpEntries, desktopArpTable, desktopDnsCache, desktopGetmacTable, desktopHostname, desktopIpconfigAll, desktopNetshInterfaceConfig, desktopNetstatListening, desktopRoutePrint, desktopScQuery, desktopTasklist, isDesktopNetshInterfaceConfigCommand, isDesktopRoutePrintCommand, parseDesktopArpCommand, parseDesktopNetstatCommand, parseDesktopNslookupCommand, parseDesktopPingCommand, parseDesktopRemoteAccessCommand, parseDesktopScCommand, parseDesktopTasklistCommand, parseDesktopTestNetConnectionCommand, parseDesktopTraceCommand } from "../engine/desktopDiagnostics";
 import { desktopConsoleTargets } from "../engine/desktopTerminal";
 import { diagnoseProject, type NetworkIssueSeverity } from "../engine/diagnostics";
 import { ipInSubnet, ipToNumber, isIpv4, isSubnetMask, maskToPrefix } from "../engine/ip";
@@ -7341,7 +7341,7 @@ function transportAllows(transportInput: string, protocol: "ssh" | "telnet"): bo
   return tokens.includes("all") || tokens.includes(protocol);
 }
 
-const desktopQuickCommands = ["help", "hostname", "getmac", "getmac /v", "ipconfig /all", "ipconfig /displaydns", "ipconfig /flushdns", "ipconfig /renew", "ipconfig /release", "netsh interface ip show config", "arp -a", "arp -d *", "route print", "route print -4", "netstat -r", "netstat -rn", "netstat -an", "netstat -ano", "netstat -abno", "tasklist /svc", "sc queryex dns", "ping -n 4 www.lab.local", "tracert www.lab.local", "pathping www.lab.local", "nslookup www.lab.local", "web www.lab.local", "ftp www.lab.local", "mail www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
+const desktopQuickCommands = ["help", "hostname", "getmac", "getmac /v", "ipconfig /all", "ipconfig /displaydns", "ipconfig /flushdns", "ipconfig /renew", "ipconfig /release", "netsh interface ip show config", "arp -a", "arp -d *", "route print", "route print -4", "netstat -r", "netstat -rn", "netstat -an", "netstat -ano", "netstat -abno", "tasklist /svc", "sc queryex dns", "Test-NetConnection www.lab.local -Port 80", "ping -n 4 www.lab.local", "tracert www.lab.local", "pathping www.lab.local", "nslookup www.lab.local", "web www.lab.local", "ftp www.lab.local", "mail www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
 
 type DesktopApp = "ip" | "prompt" | "browser" | "terminal" | "ftp" | "email" | "tftp" | "syslog";
 
@@ -7589,7 +7589,7 @@ function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: Ne
             <span>{device.config.hostname || device.label}&gt;</span>
             <input value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handlePromptKeyDown} placeholder="ipconfig | ping 192.168.1.1 | tracert www.lab.local | pathping www.lab.local | http www.lab.local" />
           </form>
-          <small>프로젝트 장비 {project.devices.length}개 | hostname, getmac, ipconfig, netsh, arp -a, arp -d, route print, netstat, tasklist, sc, ping, tracert, pathping, nslookup, http, ftp, email, ssh, telnet, tftp, syslog</small>
+          <small>프로젝트 장비 {project.devices.length}개 | hostname, getmac, ipconfig, netsh, arp -a, arp -d, route print, netstat, tasklist, sc, Test-NetConnection, ping, tracert, pathping, nslookup, http, ftp, email, ssh, telnet, tftp, syslog</small>
         </section>
       )}
       {activeApp === "browser" && (
@@ -7676,6 +7676,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
       "  hostname | getmac [/v]",
       "  ipconfig /all | ipconfig /displaydns | ipconfig /flushdns | ipconfig /renew | ipconfig /release",
       "  netsh interface ip show config | arp -a | arp -d <ip|*> | route print [-4] | netstat -r|-rn | netstat -an|-ano|-abno | tasklist [/svc] [/fi \"PID eq <pid>\"] | sc query[ex] [service]",
+      "  Test-NetConnection <ip|이름> [-Port 포트] | tnc <ip|이름> -p 포트",
       "  ping [-4] [-n 횟수] <ip|이름> | tracert [-d] <ip|이름> | pathping [-n] <ip|이름> | nslookup [-type=A|PTR] <이름|ip> [dns-server]",
       "  http|web|browser <ip|이름> | ftp <ip|이름> [ls|get 파일] | email|mail <서버> <받는사람> [메시지]",
       "  ssh [-l user] [-p 22] <ip|이름> | telnet <ip|이름> [23] | tftp <ip|이름> | syslog <ip|이름> <메시지>"
@@ -7795,6 +7796,45 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
       ...uniqueHops.map((hop, index) => `${String(index).padStart(2)}   <1ms   ${lost}/${sent} = ${result.success ? "0" : "100"}%       ${lost}/${sent} = ${result.success ? "0" : "100"}%       ${hop}`),
       "",
       result.success ? "Trace complete." : `Trace failed: ${result.message}`
+    ].join("\n");
+  }
+  const testNetConnection = parseDesktopTestNetConnectionCommand(command);
+  if (testNetConnection.valid) {
+    if (!testNetConnection.targetText.trim()) return "사용법: Test-NetConnection <ip|이름> [-Port 포트]";
+    const resolved = await resolveDesktopNetworkTarget(project, device, testNetConnection.targetText, onProjectChange);
+    if (!resolved.target) return resolved.error;
+    const target = resolved.target;
+    const targetAddress = primaryDeviceIp(target) || testNetConnection.targetText.trim();
+    const sourcePort = device.ports.find((port) => port.kind !== "console" && port.adminUp && port.ipAddress);
+    if (!testNetConnection.port) {
+      const result = await simulatePing(resolved.project, device.id, target.id);
+      onProjectChange(result.project, result.message);
+      return [
+        `ComputerName           : ${target.label}`,
+        `RemoteAddress          : ${targetAddress}`,
+        `InterfaceAlias         : ${sourcePort?.name ?? "-"}`,
+        `SourceAddress          : ${sourcePort?.ipAddress ?? "-"}`,
+        `PingSucceeded          : ${result.success ? "True" : "False"}`,
+        `PingReplyDetails (RTT) : ${result.success ? "<1 ms" : "-"}`
+      ].join("\n");
+    }
+    const portState = testNetConnectionPortState(target, testNetConnection.port);
+    const result = await simulatePing(resolved.project, device.id, target.id, portState.protocol);
+    const tcpSucceeded = result.success && portState.open;
+    if (result.success && !portState.open) {
+      const nextProject = appendDesktopEvent(result.project, device.id, target.id, portState.label, `${target.label} TCP/${testNetConnection.port} 연결 실패: ${portState.reason}`, "dropped");
+      onProjectChange(nextProject, `${target.label} TCP/${testNetConnection.port} 연결이 실패했습니다.`);
+    } else {
+      onProjectChange(result.project, tcpSucceeded ? `${target.label} TCP/${testNetConnection.port} 연결 성공.` : result.message);
+    }
+    return [
+      `ComputerName     : ${target.label}`,
+      `RemoteAddress    : ${targetAddress}`,
+      `RemotePort       : ${testNetConnection.port}`,
+      `InterfaceAlias   : ${sourcePort?.name ?? "-"}`,
+      `SourceAddress    : ${sourcePort?.ipAddress ?? "-"}`,
+      `TcpTestSucceeded : ${tcpSucceeded ? "True" : "False"}`,
+      ...(tcpSucceeded ? [] : [`FailureReason    : ${result.success ? portState.reason : result.message}`])
     ].join("\n");
   }
   if (lower.startsWith("nslookup ")) {
@@ -7995,7 +8035,39 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     onProjectChange(appendDesktopEvent(loggedProject, device.id, target.id, "SYSLOG", `${target.label}에 SYSLOG 메시지를 기록했습니다.`, "delivered"), "SYSLOG 메시지를 기록했습니다.");
     return `SYSLOG sent to ${target.label}: ${logMessage}`;
   }
-  return "알 수 없는 데스크톱 명령입니다. help, hostname, getmac [/v], ipconfig, netsh interface ip show config, arp -a, arp -d <ip|*>, route print [-4], netstat -r|-rn, netstat -an, netstat -ano, netstat -abno, tasklist [/svc] [/fi \"PID eq <pid>\"], sc query[ex] [service], ping [-4] [-n 횟수] <ip|이름>, tracert [-d] <ip|이름>, pathping [-n] <ip|이름>, nslookup [-type=A|PTR] <이름|ip> [dns-server], http/web <ip|이름>, ftp <ip|이름>, email/mail <ip|이름> <받는사람>, ssh [-l user] [-p 22] <ip|이름>, telnet <ip|이름> [23], tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
+  return "알 수 없는 데스크톱 명령입니다. help, hostname, getmac [/v], ipconfig, netsh interface ip show config, arp -a, arp -d <ip|*>, route print [-4], netstat -r|-rn, netstat -an, netstat -ano, netstat -abno, tasklist [/svc] [/fi \"PID eq <pid>\"], sc query[ex] [service], Test-NetConnection <ip|이름> [-Port 포트], ping [-4] [-n 횟수] <ip|이름>, tracert [-d] <ip|이름>, pathping [-n] <ip|이름>, nslookup [-type=A|PTR] <이름|ip> [dns-server], http/web <ip|이름>, ftp <ip|이름>, email/mail <ip|이름> <받는사람>, ssh [-l user] [-p 22] <ip|이름>, telnet <ip|이름> [23], tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
+}
+
+function testNetConnectionPortState(device: NetworkDevice, port: string): { protocol: string; label: string; open: boolean; reason: string } {
+  const normalizedPort = port.trim();
+  const serviceByPort: Record<string, { protocol: keyof NetworkDevice["config"]["services"]; label: string }> = {
+    "21": { protocol: "ftp", label: "FTP" },
+    "25": { protocol: "email", label: "EMAIL" },
+    "53": { protocol: "dns", label: "DNS" },
+    "67": { protocol: "dhcp", label: "DHCP" },
+    "69": { protocol: "tftp", label: "TFTP" },
+    "80": { protocol: "http", label: "HTTP" },
+    "514": { protocol: "syslog", label: "SYSLOG" }
+  };
+  if (normalizedPort === "22" || normalizedPort === "23") {
+    const protocol = normalizedPort === "22" ? "ssh" : "telnet";
+    const access = remoteAccessState(device, protocol);
+    return {
+      protocol,
+      label: protocol.toUpperCase(),
+      open: access.enabled,
+      reason: access.enabled ? `${protocol.toUpperCase()} listener is open.` : access.reason
+    };
+  }
+  const service = serviceByPort[normalizedPort];
+  if (!service) return { protocol: "tcp", label: "TCP", open: false, reason: `No modeled listener for TCP/${normalizedPort}.` };
+  const open = Boolean(device.config.services[service.protocol]);
+  return {
+    protocol: service.protocol,
+    label: service.label,
+    open,
+    reason: open ? `${service.label} listener is open.` : `${service.label} service is stopped.`
+  };
 }
 
 function resolveDesktopTarget(project: NetworkProject, value: string): NetworkDevice | null {
