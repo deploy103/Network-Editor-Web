@@ -800,6 +800,35 @@ export function parseDesktopWebRequestCommand(command: string): { valid: boolean
   return { valid: true, targetText: targetText || positional[0] || "", method };
 }
 
+export function parseDesktopTestConnectionCommand(command: string): { valid: boolean; count: number; targetText: string } {
+  const tokens = command.trim().split(/\s+/);
+  const commandName = tokens.shift()?.toLowerCase();
+  if (commandName !== "test-connection") return { valid: false, count: 4, targetText: "" };
+  let count = 4;
+  let targetText = "";
+  const positional: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const lower = token.toLowerCase();
+    if (["-computername", "-targetname", "-source"].includes(lower) && tokens[index + 1]) {
+      if (lower !== "-source") targetText = tokens[index + 1];
+      index += 1;
+    } else if (lower.startsWith("-computername:") || lower.startsWith("-targetname:")) {
+      targetText = token.slice(token.indexOf(":") + 1);
+    } else if (["-count", "-count:"].includes(lower) && tokens[index + 1]) {
+      count = boundedDesktopNumber(tokens[index + 1], 1, 10);
+      index += 1;
+    } else if (lower.startsWith("-count:")) {
+      count = boundedDesktopNumber(token.slice(token.indexOf(":") + 1), 1, 10);
+    } else if (["-quiet", "-ipv4"].includes(lower)) {
+      continue;
+    } else if (!lower.startsWith("-")) {
+      positional.push(token);
+    }
+  }
+  return { valid: true, count, targetText: targetText || positional[0] || "" };
+}
+
 export function parseDesktopPingCommand(command: string): { count: number; targetText: string } {
   const tokens = command.trim().split(/\s+/);
   const args = tokens[0]?.toLowerCase() === "ping" ? tokens.slice(1) : tokens;

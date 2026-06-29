@@ -229,6 +229,8 @@
 - 00:12 (2026-06-30 KST) Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 - 00:17 (2026-06-30 KST) Added Desktop `Invoke-WebRequest`/`iwr` parsing and HTTP status output for PowerShell-style web service checks, including HTTP reachability logging and Verification Plan/Lab Workbook/README guidance.
 - 00:17 (2026-06-30 KST) Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
+- 00:22 (2026-06-30 KST) Added Desktop `Test-Connection` parsing and PowerShell-style ICMP reply output with bounded counts, then connected it to Command Prompt quick commands/help, Verification Plan, Lab Workbook, README, and feature smoke coverage.
+- 00:22 (2026-06-30 KST) Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 
 ### Next
 
