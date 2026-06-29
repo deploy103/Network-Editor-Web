@@ -143,9 +143,10 @@ function addressingTasks(project: NetworkProject): VerificationTask[] {
     .map((device) => task("desktop", "recommended", `Verify desktop identity on ${device.label}`, {
       device,
       rationale: "Desktop identity, adapter MACs, and local routes help correlate host-side evidence with ARP, DHCP, and service tests.",
-      commands: ["Desktop > Command Prompt > hostname", "Desktop > Command Prompt > getmac", "Desktop > Command Prompt > getmac /v", "Desktop > Command Prompt > ipconfig /all", "Desktop > Command Prompt > netsh interface ip show config", "Desktop > Command Prompt > Get-NetAdapter", "Desktop > Command Prompt > Get-NetIPConfiguration -All", "Desktop > Command Prompt > Get-DnsClientServerAddress", "Desktop > Command Prompt > Get-NetRoute", "Desktop > Command Prompt > Get-NetNeighbor", "Desktop > Command Prompt > route print", "Desktop > Command Prompt > route print -4"],
+      commands: ["Desktop > Command Prompt > hostname", "Desktop > Command Prompt > systeminfo", "Desktop > Command Prompt > Get-ComputerInfo", "Desktop > Command Prompt > getmac", "Desktop > Command Prompt > getmac /v", "Desktop > Command Prompt > ipconfig /all", "Desktop > Command Prompt > netsh interface ip show config", "Desktop > Command Prompt > Get-NetAdapter", "Desktop > Command Prompt > Get-NetIPConfiguration -All", "Desktop > Command Prompt > Get-DnsClientServerAddress", "Desktop > Command Prompt > Get-NetRoute", "Desktop > Command Prompt > Get-NetNeighbor", "Desktop > Command Prompt > route print", "Desktop > Command Prompt > route print -4"],
       expected: [
         `${device.config.hostname || device.label} hostname visible`,
+        "Desktop systeminfo/Get-ComputerInfo show host identity and OS inventory",
         `${device.ports.filter((port) => port.kind !== "console").length} network adapters listed`,
         "Netsh interface config shows adapter IP, gateway, and DNS evidence",
         "PowerShell adapter commands show interface status, IPv4 address, gateway, and DNS server evidence",
