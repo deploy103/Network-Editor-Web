@@ -344,6 +344,7 @@ export function parseDesktopTestNetConnectionCommand(command: string): { valid: 
   if (commandName !== "test-netconnection" && commandName !== "tnc") return { valid: false, targetText: "", port: "" };
   let targetText = "";
   let port = "";
+  const commonPorts: Record<string, string> = { http: "80", rdp: "3389", smb: "445", winrm: "5985" };
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
     const lower = token.toLowerCase();
@@ -357,6 +358,15 @@ export function parseDesktopTestNetConnectionCommand(command: string): { valid: 
       index += 1;
     } else if (lower.startsWith("-port:") || lower.startsWith("-p:")) {
       port = token.slice(token.indexOf(":") + 1);
+    } else if (lower === "-commontcpport" && tokens[index + 1]) {
+      port = commonPorts[tokens[index + 1].toLowerCase()] ?? port;
+      index += 1;
+    } else if (lower.startsWith("-commontcpport:")) {
+      port = commonPorts[token.slice(token.indexOf(":") + 1).toLowerCase()] ?? port;
+    } else if (lower === "-informationlevel" && tokens[index + 1]) {
+      index += 1;
+    } else if (lower === "-traceroute" || lower === "-diagnoserouting") {
+      continue;
     } else if (!lower.startsWith("-") && !targetText) {
       targetText = token;
     }

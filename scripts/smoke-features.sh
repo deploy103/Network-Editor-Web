@@ -180,6 +180,8 @@ const parsedTestNetConnection = parseDesktopTestNetConnectionCommand("Test-NetCo
 assert(parsedTestNetConnection.valid && parsedTestNetConnection.targetText === "www.lab.local" && parsedTestNetConnection.port === "80", "Desktop Test-NetConnection parser must preserve target and port");
 const parsedTnc = parseDesktopTestNetConnectionCommand("tnc -ComputerName www.lab.local -p 443");
 assert(parsedTnc.valid && parsedTnc.targetText === "www.lab.local" && parsedTnc.port === "443", "Desktop tnc parser must accept PowerShell-style aliases");
+const parsedTncCommonPort = parseDesktopTestNetConnectionCommand("tnc -ComputerName www.lab.local -CommonTCPPort HTTP -InformationLevel Detailed");
+assert(parsedTncCommonPort.valid && parsedTncCommonPort.targetText === "www.lab.local" && parsedTncCommonPort.port === "80", "Desktop tnc parser must accept common TCP port and information-level options");
 assert(parseDesktopNetstatCommand("netstat /ano").kind === "listening" && parseDesktopNetstatCommand("netstat /ano").includePid, "Desktop netstat parser must accept slash-style combined listener PID options");
 assert(parseDesktopNetstatCommand("netstat -a -n -o").kind === "listening" && parseDesktopNetstatCommand("netstat -a -n -o").includePid, "Desktop netstat parser must accept spaced listener PID options");
 assert(parseDesktopNetstatCommand("netstat /abno").kind === "listening" && parseDesktopNetstatCommand("netstat /abno").includePid && parseDesktopNetstatCommand("netstat /abno").includeProcess, "Desktop netstat parser must accept process-name listener options");
