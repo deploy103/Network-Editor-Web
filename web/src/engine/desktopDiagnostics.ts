@@ -30,6 +30,15 @@ export interface DesktopNetstatRow {
   pid: string;
 }
 
+interface DesktopTasklistRow {
+  imageName: string;
+  pid: string;
+  sessionName: string;
+  sessionNumber: string;
+  memUsage: string;
+  services: string[];
+}
+
 export function desktopHostname(device: NetworkDevice): string {
   return device.config.hostname || device.label;
 }
@@ -223,6 +232,43 @@ export function desktopNetstatListeningRows(device: NetworkDevice): DesktopNetst
     })));
 }
 
+export function desktopTasklist(device: NetworkDevice, options: { showServices?: boolean; pidFilter?: string } = {}): string {
+  const rows = desktopTasklistRows(device).filter((row) => !options.pidFilter || row.pid === options.pidFilter);
+  if (!rows.length) return "INFO: No tasks are running which match the specified criteria.";
+  if (options.showServices) {
+    return [
+      "Image Name                     PID Services",
+      "========================= ======== ============================================",
+      ...rows.map((row) => `${row.imageName.padEnd(25)} ${row.pid.padStart(8)} ${row.services.join(", ")}`)
+    ].join("\n");
+  }
+  return [
+    "Image Name                     PID Session Name        Session#    Mem Usage",
+    "========================= ======== ================ =========== ============",
+    ...rows.map((row) => `${row.imageName.padEnd(25)} ${row.pid.padStart(8)} ${row.sessionName.padEnd(16)} ${row.sessionNumber.padStart(11)} ${row.memUsage.padStart(12)}`)
+  ].join("\n");
+}
+
+function desktopTasklistRows(device: NetworkDevice): DesktopTasklistRow[] {
+  const tasks = new Map<string, DesktopTasklistRow>();
+  desktopNetstatListeningRows(device).forEach((row) => {
+    const current = tasks.get(row.pid);
+    if (current) {
+      if (!current.services.includes(row.service)) current.services.push(row.service);
+      return;
+    }
+    tasks.set(row.pid, {
+      imageName: `ptweb-${row.service.toLowerCase()}.exe`,
+      pid: row.pid,
+      sessionName: "Services",
+      sessionNumber: "0",
+      memUsage: `${(4096 + (Number(row.pid) % 2048)).toLocaleString("en-US")} K`,
+      services: [row.service]
+    });
+  });
+  return [...tasks.values()].sort((left, right) => Number(left.pid) - Number(right.pid));
+}
+
 export function parseDesktopArpCommand(command: string): { action: "show" | "delete" | "none"; target: string } {
   const tokens = normalizedDesktopTokens(command);
   if (tokens[0] !== "arp") return { action: "none", target: "" };
@@ -232,6 +278,17 @@ export function parseDesktopArpCommand(command: string): { action: "show" | "del
     return { action: "delete", target: tokens[deleteIndex + 2] ?? "*" };
   }
   return { action: "none", target: "" };
+}
+
+export function parseDesktopTasklistCommand(command: string): { valid: boolean; showServices: boolean; pidFilter: string } {
+  const tokens = normalizedDesktopTokens(command);
+  if (tokens[0] !== "tasklist") return { valid: false, showServices: false, pidFilter: "" };
+  const filterMatch = command.match(/(?:\/|-)?fi\s+"?\s*pid\s+eq\s+(\d+)/i);
+  return {
+    valid: true,
+    showServices: tokens.includes("-svc"),
+    pidFilter: filterMatch?.[1] ?? ""
+  };
 }
 
 export function isDesktopRoutePrintCommand(command: string): boolean {
