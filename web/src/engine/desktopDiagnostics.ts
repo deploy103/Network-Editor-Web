@@ -1,5 +1,5 @@
 import { isIpv4, networkAddress } from "./ip";
-import type { NetworkDevice, NetworkProject } from "../types/network";
+import type { NetworkDevice, NetworkPort, NetworkProject, PortKind } from "../types/network";
 
 type ServiceName = keyof NetworkDevice["config"]["services"];
 
@@ -81,7 +81,7 @@ export function desktopIpconfigAll(device: NetworkDevice): string {
 }
 
 export function desktopNetshInterfaceConfig(device: NetworkDevice): string {
-  const ports = device.ports.filter((port) => port.kind !== "console");
+  const ports = desktopNetworkPorts(device);
   if (!ports.length) return "There are no interfaces on the system.";
   return ports.map((port) => {
     const lease = device.runtime.dhcpLeases.find((item) => item.macAddress === port.macAddress);
@@ -97,6 +97,51 @@ export function desktopNetshInterfaceConfig(device: NetworkDevice): string {
       `    ${dnsMode}:        ${port.dnsServer || "0.0.0.0"}`
     ].join("\n");
   }).join("\n\n");
+}
+
+export function desktopGetNetAdapter(device: NetworkDevice, options: { nameFilter?: string } = {}): string {
+  const rows = filterDesktopPortsByName(desktopNetworkPorts(device), options.nameFilter);
+  if (!rows.length) return "Get-NetAdapter : No matching MSFT_NetAdapter objects found.";
+  return [
+    "Name                      InterfaceDescription              ifIndex Status       MacAddress          LinkSpeed",
+    "----                      --------------------              ------- ------       ----------          ---------",
+    ...rows.map((port) => `${port.name.padEnd(25)} ${desktopAdapterDescription(port.kind).padEnd(33)} ${desktopIfIndex(device, port).padStart(7)} ${desktopAdapterStatus(port).padEnd(12)} ${windowsMacAddress(port.macAddress).padEnd(19)} ${desktopLinkSpeed(port)}`)
+  ].join("\n");
+}
+
+export function desktopGetNetIpConfiguration(device: NetworkDevice, options: { all?: boolean; nameFilter?: string } = {}): string {
+  const rows = filterDesktopPortsByName(desktopNetworkPorts(device), options.nameFilter);
+  if (!rows.length) return "Get-NetIPConfiguration : No matching MSFT_NetIPConfiguration objects found.";
+  return rows.map((port) => {
+    const lease = device.runtime.dhcpLeases.find((item) => item.macAddress === port.macAddress);
+    return [
+      `InterfaceAlias       : ${port.name}`,
+      `InterfaceIndex       : ${desktopIfIndex(device, port)}`,
+      `InterfaceDescription : ${desktopAdapterDescription(port.kind)}`,
+      `NetProfile.Name      : PTWeb Lab`,
+      `IPv4Address          : ${port.ipAddress || "0.0.0.0"}`,
+      `IPv4DefaultGateway   : ${port.gateway || "0.0.0.0"}`,
+      `DNSServer            : ${port.dnsServer || "0.0.0.0"}`,
+      ...(options.all ? [
+        `MacAddress           : ${windowsMacAddress(port.macAddress)}`,
+        `Dhcp                 : ${lease ? "Enabled" : "Disabled"}`,
+        `NetAdapter.Status    : ${desktopAdapterStatus(port)}`
+      ] : [])
+    ].join("\n");
+  }).join("\n\n");
+}
+
+export function desktopGetDnsClientServerAddress(device: NetworkDevice, options: { addressFamily?: string; nameFilter?: string } = {}): string {
+  const family = (options.addressFamily ?? "IPv4").trim().toLowerCase();
+  if (family && family !== "ipv4" && family !== "2") return "Get-DnsClientServerAddress : No matching DNS client server addresses found.";
+  const rows = filterDesktopPortsByName(desktopNetworkPorts(device), options.nameFilter);
+  if (!rows.length) return "Get-DnsClientServerAddress : No matching DNS client server addresses found.";
+  return [
+    "InterfaceAlias               Interface Address ServerAddresses",
+    "                             Index     Family",
+    "--------------               --------- ------- ---------------",
+    ...rows.map((port) => `${port.name.padEnd(28)} ${desktopIfIndex(device, port).padStart(9)} IPv4    {${port.dnsServer || "0.0.0.0"}}`)
+  ].join("\n");
 }
 
 export function desktopDnsCache(project: NetworkProject, device: NetworkDevice): string {
@@ -396,6 +441,35 @@ export function parseDesktopGetProcessCommand(command: string): { valid: boolean
   return { valid: true, pidFilter, nameFilter };
 }
 
+export function parseDesktopGetNetAdapterCommand(command: string): { valid: boolean; nameFilter: string } {
+  const tokens = command.trim().split(/\s+/);
+  const commandName = tokens.shift()?.toLowerCase();
+  if (commandName !== "get-netadapter") return { valid: false, nameFilter: "" };
+  return { valid: true, nameFilter: parseDesktopPowerShellOption(tokens, ["-name", "-interfacealias"]) };
+}
+
+export function parseDesktopGetNetIpConfigurationCommand(command: string): { valid: boolean; all: boolean; nameFilter: string } {
+  const tokens = command.trim().split(/\s+/);
+  const commandName = tokens.shift()?.toLowerCase();
+  if (commandName !== "get-netipconfiguration") return { valid: false, all: false, nameFilter: "" };
+  return {
+    valid: true,
+    all: tokens.some((token) => token.toLowerCase() === "-all"),
+    nameFilter: parseDesktopPowerShellOption(tokens, ["-interfacealias", "-name"])
+  };
+}
+
+export function parseDesktopGetDnsClientServerAddressCommand(command: string): { valid: boolean; addressFamily: string; nameFilter: string } {
+  const tokens = command.trim().split(/\s+/);
+  const commandName = tokens.shift()?.toLowerCase();
+  if (commandName !== "get-dnsclientserveraddress") return { valid: false, addressFamily: "", nameFilter: "" };
+  return {
+    valid: true,
+    addressFamily: parseDesktopPowerShellOption(tokens, ["-addressfamily"]),
+    nameFilter: parseDesktopPowerShellOption(tokens, ["-interfacealias", "-name"])
+  };
+}
+
 export function parseDesktopArpCommand(command: string): { action: "show" | "delete" | "none"; target: string } {
   const tokens = normalizedDesktopTokens(command);
   if (tokens[0] !== "arp") return { action: "none", target: "" };
@@ -620,4 +694,71 @@ function desktopProcessName(imageName: string): string {
 
 function cleanDesktopPid(value: string): string {
   return value.split(",")[0]?.replace(/\D/g, "") ?? "";
+}
+
+function desktopNetworkPorts(device: NetworkDevice): NetworkDevice["ports"] {
+  return device.ports.filter((port) => port.kind !== "console");
+}
+
+function filterDesktopPortsByName(ports: NetworkDevice["ports"], nameFilter = ""): NetworkDevice["ports"] {
+  const normalized = nameFilter.trim().toLowerCase();
+  if (!normalized) return ports;
+  return ports.filter((port) => port.name.toLowerCase().includes(normalized));
+}
+
+function desktopIfIndex(device: NetworkDevice, port: NetworkPort): string {
+  return String(desktopNetworkPorts(device).findIndex((item) => item.id === port.id) + 1);
+}
+
+function desktopAdapterDescription(kind: PortKind): string {
+  const labels: Record<PortKind, string> = {
+    console: "PTWeb Console Adapter",
+    ethernet: "PTWeb Ethernet Adapter",
+    "fast-ethernet": "PTWeb Fast Ethernet Adapter",
+    fiber: "PTWeb Fiber Ethernet Adapter",
+    "gigabit-ethernet": "PTWeb Gigabit Ethernet Adapter",
+    serial: "PTWeb Serial Adapter",
+    wireless: "PTWeb Wireless Adapter"
+  };
+  return labels[kind];
+}
+
+function desktopAdapterStatus(port: NetworkPort): string {
+  return port.adminUp ? "Up" : "Disabled";
+}
+
+function desktopLinkSpeed(port: NetworkPort): string {
+  if (port.bandwidth) return `${port.bandwidth} Kbps`;
+  if (port.speed && port.speed !== "auto") return `${port.speed} Mbps`;
+  const speeds: Record<PortKind, string> = {
+    console: "9600 bps",
+    ethernet: "10 Mbps",
+    "fast-ethernet": "100 Mbps",
+    fiber: "1 Gbps",
+    "gigabit-ethernet": "1 Gbps",
+    serial: "1.544 Mbps",
+    wireless: "54 Mbps"
+  };
+  return speeds[port.kind];
+}
+
+function windowsMacAddress(macAddress: string): string {
+  const compact = macAddress.replace(/[^a-fA-F0-9]/g, "").toUpperCase();
+  if (compact.length === 12) return compact.match(/.{1,2}/g)?.join("-") ?? macAddress;
+  return macAddress.toUpperCase();
+}
+
+function parseDesktopPowerShellOption(tokens: string[], names: string[]): string {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const lower = token.toLowerCase();
+    if (names.includes(lower) && tokens[index + 1]) return cleanPowerShellValue(tokens[index + 1]);
+    const colonName = names.find((name) => lower.startsWith(`${name}:`));
+    if (colonName) return cleanPowerShellValue(token.slice(colonName.length + 1));
+  }
+  return "";
+}
+
+function cleanPowerShellValue(value: string): string {
+  return value.replace(/^["']|["']$/g, "");
 }
