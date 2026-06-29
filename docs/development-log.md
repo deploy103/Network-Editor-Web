@@ -219,6 +219,8 @@
 - 23:34 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 - 23:51 Added Desktop `Get-NetTCPConnection -State Listen` and `Get-Process -Id <pid>` helpers/parsers for PowerShell-style TCP listener owning-process and process identity evidence, then exposed them in the Command Prompt quick commands, help text, Verification Plan, and Lab Workbook.
 - 23:51 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
+- 23:56 Added Desktop `Get-NetAdapter`, `Get-NetIPConfiguration -All`, and `Get-DnsClientServerAddress` helpers/parsers for PowerShell-style host adapter status, IPv4, gateway, MAC, and DNS server evidence, then connected them to Command Prompt quick commands, Verification Plan, and Lab Workbook host-adapter guidance.
+- 23:56 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 
 ### Next
 
