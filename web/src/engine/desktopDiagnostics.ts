@@ -338,6 +338,32 @@ export function parseDesktopScCommand(command: string): { valid: boolean; extend
   };
 }
 
+export function parseDesktopTestNetConnectionCommand(command: string): { valid: boolean; targetText: string; port: string } {
+  const tokens = command.trim().split(/\s+/);
+  const commandName = tokens.shift()?.toLowerCase();
+  if (commandName !== "test-netconnection" && commandName !== "tnc") return { valid: false, targetText: "", port: "" };
+  let targetText = "";
+  let port = "";
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const lower = token.toLowerCase();
+    if (["-computername", "-computer", "-cn"].includes(lower) && tokens[index + 1]) {
+      targetText = tokens[index + 1];
+      index += 1;
+    } else if (lower.startsWith("-computername:")) {
+      targetText = token.slice(token.indexOf(":") + 1);
+    } else if (["-port", "-p"].includes(lower) && tokens[index + 1]) {
+      port = tokens[index + 1];
+      index += 1;
+    } else if (lower.startsWith("-port:") || lower.startsWith("-p:")) {
+      port = token.slice(token.indexOf(":") + 1);
+    } else if (!lower.startsWith("-") && !targetText) {
+      targetText = token;
+    }
+  }
+  return { valid: true, targetText, port };
+}
+
 export function isDesktopRoutePrintCommand(command: string): boolean {
   const tokens = normalizedDesktopTokens(command);
   return tokens[0] === "route" && tokens[1] === "print" && tokens.slice(2).every((token) => token === "-4");

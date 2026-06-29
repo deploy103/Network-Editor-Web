@@ -211,6 +211,8 @@
 - 23:20 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 - 23:23 Added Desktop `sc query`, `sc queryex`, and `sc queryex <service>` output for service RUNNING/STOPPED state and PID evidence, then connected `sc queryex <service>` into Verification Plan and Lab Workbook service-state guidance.
 - 23:25 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
+- 23:28 Added Desktop `Test-NetConnection`/`tnc` parsing and output for ICMP reachability and TCP service-port checks, including port-to-service state validation and Verification Plan/Lab Workbook guidance for `Test-NetConnection <server> -Port <port>`.
+- 23:30 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 
 ### Next
 
