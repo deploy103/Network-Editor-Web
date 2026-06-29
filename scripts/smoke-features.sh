@@ -48,7 +48,7 @@ const { canPortUseCable, createDevice, deviceCatalog, effectivePortKind, getTran
 const { analyzeAddressPlan, buildAddressPlanReportText } = require(path.join(tmpdir, "engine/addressPlan.js"));
 const { analyzeCapacityPlan, buildCapacityPlanReportText } = require(path.join(tmpdir, "engine/capacityPlan.js"));
 const { analyzeConfigDrift, buildConfigDriftReportText } = require(path.join(tmpdir, "engine/configDrift.js"));
-const { clearDesktopArpEntries, desktopArpTable, desktopDnsCache, desktopGetmacTable, desktopHostname, desktopIpconfigAll, desktopNetstatListening, desktopNetstatListeningRows, desktopRoutePrint, parseDesktopNslookupCommand, parseDesktopPingCommand, parseDesktopTraceCommand } = require(path.join(tmpdir, "engine/desktopDiagnostics.js"));
+const { clearDesktopArpEntries, desktopArpTable, desktopDnsCache, desktopGetmacTable, desktopHostname, desktopIpconfigAll, desktopNetstatListening, desktopNetstatListeningRows, desktopRoutePrint, isDesktopRoutePrintCommand, parseDesktopArpCommand, parseDesktopNetstatCommand, parseDesktopNslookupCommand, parseDesktopPingCommand, parseDesktopTraceCommand } = require(path.join(tmpdir, "engine/desktopDiagnostics.js"));
 const { desktopConsoleTargets } = require(path.join(tmpdir, "engine/desktopTerminal.js"));
 const { diagnoseProject } = require(path.join(tmpdir, "engine/diagnostics.js"));
 const { analyzeFailureImpact, buildFailureImpactReportText } = require(path.join(tmpdir, "engine/failureImpact.js"));
@@ -79,8 +79,8 @@ assert(
   editorSource.includes("getmac /v") &&
   editorSource.includes("route print -4") &&
   editorSource.includes("netstat -rn") &&
-  editorSource.includes("netstat -nao") &&
   editorSource.includes("netstat -ano") &&
+  editorSource.includes("parseDesktopNetstatCommand") &&
   editorSource.includes("nslookup [-type=A|PTR] <이름|ip> [dns-server]") &&
   editorSource.includes("ping [-4] [-n 횟수] <ip|이름>") &&
   editorSource.includes("pathping [-n] <ip|이름>") &&
@@ -138,15 +138,22 @@ assert(routePrintOutput.includes("Interface List") && routePrintOutput.includes(
 const pcWithArp = { ...pc, runtime: { ...pc.runtime, arpTable: [{ ipAddress: "192.168.10.1", macAddress: "0200.0000.0001", portName: "FastEthernet0" }, { ipAddress: "192.168.10.2", macAddress: "0200.0000.0002", portName: "FastEthernet0" }] } };
 const arpTableOutput = desktopArpTable(pcWithArp);
 assert(arpTableOutput.includes("Interface:") && arpTableOutput.includes("Internet Address") && arpTableOutput.includes("Physical Address") && arpTableOutput.includes("dynamic"), "Desktop arp -a helper must include Windows-style ARP table columns");
+assert(parseDesktopArpCommand("arp /a").action === "show", "Desktop ARP parser must accept slash-style show options");
+const parsedArpDelete = parseDesktopArpCommand("arp /d 192.168.10.1");
+assert(parsedArpDelete.action === "delete" && parsedArpDelete.target === "192.168.10.1", "Desktop ARP parser must accept slash-style delete options");
 const pcAfterSingleArpDelete = clearDesktopArpEntries(pcWithArp, "192.168.10.1");
 assert(pcAfterSingleArpDelete.removed === 1 && pcAfterSingleArpDelete.device.runtime.arpTable.length === 1, "Desktop arp -d <ip> helper must remove a single ARP entry");
 const pcAfterAllArpDelete = clearDesktopArpEntries(pcWithArp, "*");
 assert(pcAfterAllArpDelete.removed === 2 && pcAfterAllArpDelete.device.runtime.arpTable.length === 0, "Desktop arp -d * helper must clear all ARP entries");
+assert(isDesktopRoutePrintCommand("route print /4") && isDesktopRoutePrintCommand("route print -4"), "Desktop route parser must accept slash and dash IPv4 filters");
 const serverListeningRows = desktopNetstatListeningRows(server);
 assert(serverListeningRows.some((row) => row.service === "HTTP" && row.localAddress.endsWith(":80") && row.state === "LISTENING"), "Desktop netstat helper must list HTTP TCP listeners");
 assert(serverListeningRows.some((row) => row.service === "DNS" && row.protocol === "UDP" && row.localAddress.endsWith(":53") && row.pid === "4053"), "Desktop netstat helper must list DNS UDP listeners with stable PID evidence");
 const netstatPidOutput = desktopNetstatListening(server, { includePid: true });
 assert(netstatPidOutput.includes("PID") && netstatPidOutput.includes("4080") && netstatPidOutput.includes("4053"), "Desktop netstat -ano helper must include listener PID output");
+assert(parseDesktopNetstatCommand("netstat /ano").kind === "listening" && parseDesktopNetstatCommand("netstat /ano").includePid, "Desktop netstat parser must accept slash-style combined listener PID options");
+assert(parseDesktopNetstatCommand("netstat -a -n -o").kind === "listening" && parseDesktopNetstatCommand("netstat -a -n -o").includePid, "Desktop netstat parser must accept spaced listener PID options");
+assert(parseDesktopNetstatCommand("netstat /rn").kind === "routes", "Desktop netstat parser must accept slash-style route table options");
 const directedNslookup = parseDesktopNslookupCommand("nslookup www.lab.local 192.168.10.10");
 assert(directedNslookup.name === "www.lab.local" && directedNslookup.serverText === "192.168.10.10", "Desktop nslookup parser must preserve directed DNS server argument");
 const defaultNslookup = parseDesktopNslookupCommand("nslookup www.lab.local");

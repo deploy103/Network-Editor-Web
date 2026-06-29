@@ -3,7 +3,7 @@ import { ArrowLeft, Cable, CircleDot, CircleHelp, Copy, Cpu, Download, Edit3, Fi
 import { cableCatalog, canPortUseCable, createDevice, defaultTransceiverIdForMedia, deviceCatalog, displayKind, effectivePortKind, getDeviceModel, getModuleSpec, getTransceiverSpec, installModule, installedModuleForSlot, removeModule, transceiverCatalog, transceiverCompatibleWithPort, transceiverMediaLabel } from "../data/deviceCatalog";
 import { bootBanner, bootDevice, initialCliSession, initialConsoleSession, runCliCommand, type CliSession } from "../engine/cli";
 import { cliEngine } from "../engine/cliEngine";
-import { clearDesktopArpEntries, desktopArpTable, desktopDnsCache, desktopGetmacTable, desktopHostname, desktopIpconfigAll, desktopNetstatListening, desktopRoutePrint, parseDesktopNslookupCommand, parseDesktopPingCommand, parseDesktopTraceCommand } from "../engine/desktopDiagnostics";
+import { clearDesktopArpEntries, desktopArpTable, desktopDnsCache, desktopGetmacTable, desktopHostname, desktopIpconfigAll, desktopNetstatListening, desktopRoutePrint, isDesktopRoutePrintCommand, parseDesktopArpCommand, parseDesktopNetstatCommand, parseDesktopNslookupCommand, parseDesktopPingCommand, parseDesktopTraceCommand } from "../engine/desktopDiagnostics";
 import { desktopConsoleTargets } from "../engine/desktopTerminal";
 import { diagnoseProject, type NetworkIssueSeverity } from "../engine/diagnostics";
 import { ipInSubnet, ipToNumber, isIpv4, isSubnetMask, maskToPrefix } from "../engine/ip";
@@ -7699,10 +7699,10 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     onProjectChange(released.project, released.message);
     return released.message;
   }
-  if (lower === "arp -a") return desktopArpTable(device);
-  if (lower === "arp -d" || lower.startsWith("arp -d ")) {
-    const target = command.slice("arp -d".length).trim() || "*";
-    const cleared = clearDesktopArpEntries(device, target);
+  const arpCommand = parseDesktopArpCommand(command);
+  if (arpCommand.action === "show") return desktopArpTable(device);
+  if (arpCommand.action === "delete") {
+    const cleared = clearDesktopArpEntries(device, arpCommand.target);
     if (cleared.device !== device) {
       onProjectChange({
         ...project,
@@ -7711,9 +7711,10 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     }
     return cleared.message;
   }
-  if (lower === "route print" || lower === "route print -4" || lower === "netstat -r" || lower === "netstat -rn") return desktopRoutePrint(device);
-  if (lower === "netstat" || lower === "netstat -a" || lower === "netstat -an" || lower === "netstat -na") return desktopNetstatListening(device);
-  if (lower === "netstat -ano" || lower === "netstat -aon" || lower === "netstat -oan" || lower === "netstat -nao" || lower === "netstat -noa") return desktopNetstatListening(device, { includePid: true });
+  if (isDesktopRoutePrintCommand(command)) return desktopRoutePrint(device);
+  const netstatCommand = parseDesktopNetstatCommand(command);
+  if (netstatCommand.kind === "routes") return desktopRoutePrint(device);
+  if (netstatCommand.kind === "listening") return desktopNetstatListening(device, { includePid: netstatCommand.includePid });
   if (lower.startsWith("ping ")) {
     const parsed = parseDesktopPingCommand(command);
     if (!parsed.targetText.trim()) return "사용법: ping [-4] [-n 횟수] <ip|이름>";
