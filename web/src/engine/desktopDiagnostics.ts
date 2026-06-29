@@ -771,6 +771,35 @@ export function parseDesktopResolveDnsNameCommand(command: string): { valid: boo
   };
 }
 
+export function parseDesktopWebRequestCommand(command: string): { valid: boolean; targetText: string; method: string } {
+  const tokens = command.trim().split(/\s+/);
+  const commandName = tokens.shift()?.toLowerCase();
+  if (!["invoke-webrequest", "iwr"].includes(commandName ?? "")) return { valid: false, targetText: "", method: "" };
+  let targetText = "";
+  let method = "GET";
+  const positional: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const lower = token.toLowerCase();
+    if (["-uri", "-url"].includes(lower) && tokens[index + 1]) {
+      targetText = tokens[index + 1];
+      index += 1;
+    } else if (lower.startsWith("-uri:") || lower.startsWith("-url:")) {
+      targetText = token.slice(token.indexOf(":") + 1);
+    } else if (lower === "-method" && tokens[index + 1]) {
+      method = tokens[index + 1].toUpperCase();
+      index += 1;
+    } else if (lower.startsWith("-method:")) {
+      method = token.slice(token.indexOf(":") + 1).toUpperCase();
+    } else if (["-usebasicparsing", "-disablekeepalive"].includes(lower)) {
+      continue;
+    } else if (!lower.startsWith("-")) {
+      positional.push(token);
+    }
+  }
+  return { valid: true, targetText: targetText || positional[0] || "", method };
+}
+
 export function parseDesktopPingCommand(command: string): { count: number; targetText: string } {
   const tokens = command.trim().split(/\s+/);
   const args = tokens[0]?.toLowerCase() === "ping" ? tokens.slice(1) : tokens;
