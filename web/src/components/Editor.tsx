@@ -3,7 +3,7 @@ import { ArrowLeft, Cable, CircleDot, CircleHelp, Copy, Cpu, Download, Edit3, Fi
 import { cableCatalog, canPortUseCable, createDevice, defaultTransceiverIdForMedia, deviceCatalog, displayKind, effectivePortKind, getDeviceModel, getModuleSpec, getTransceiverSpec, installModule, installedModuleForSlot, removeModule, transceiverCatalog, transceiverCompatibleWithPort, transceiverMediaLabel } from "../data/deviceCatalog";
 import { bootBanner, bootDevice, initialCliSession, initialConsoleSession, runCliCommand, type CliSession } from "../engine/cli";
 import { cliEngine } from "../engine/cliEngine";
-import { clearDesktopArpEntries, desktopArpTable, desktopDnsCache, desktopGetDnsClientServerAddress, desktopGetEventLog, desktopGetmacTable, desktopGetNetAdapter, desktopGetNetIpConfiguration, desktopGetNetNeighbor, desktopGetNetRoute, desktopGetNetTcpConnection, desktopGetProcess, desktopGetService, desktopHostname, desktopIpconfigAll, desktopNetshInterfaceConfig, desktopNetstatListening, desktopResolveDnsNameOutput, desktopRoutePrint, desktopScQuery, desktopTasklist, isDesktopNetshInterfaceConfigCommand, isDesktopRoutePrintCommand, parseDesktopArpCommand, parseDesktopGetDnsClientServerAddressCommand, parseDesktopGetEventLogCommand, parseDesktopGetNetAdapterCommand, parseDesktopGetNetIpConfigurationCommand, parseDesktopGetNetNeighborCommand, parseDesktopGetNetRouteCommand, parseDesktopGetNetTcpConnectionCommand, parseDesktopGetProcessCommand, parseDesktopGetServiceCommand, parseDesktopNetstatCommand, parseDesktopNslookupCommand, parseDesktopPingCommand, parseDesktopRemoteAccessCommand, parseDesktopResolveDnsNameCommand, parseDesktopScCommand, parseDesktopTasklistCommand, parseDesktopTestConnectionCommand, parseDesktopTestNetConnectionCommand, parseDesktopTraceCommand, parseDesktopWebRequestCommand } from "../engine/desktopDiagnostics";
+import { clearDesktopArpEntries, desktopArpTable, desktopDnsCache, desktopGetDnsClientServerAddress, desktopGetEventLog, desktopGetmacTable, desktopGetNetAdapter, desktopGetNetIpConfiguration, desktopGetNetNeighbor, desktopGetNetRoute, desktopGetNetTcpConnection, desktopGetProcess, desktopGetService, desktopHostname, desktopIpconfigAll, desktopNetshInterfaceConfig, desktopNetstatListening, desktopResolveDnsNameOutput, desktopRoutePrint, desktopScQuery, desktopTasklist, isDesktopNetshInterfaceConfigCommand, isDesktopRoutePrintCommand, parseDesktopArpCommand, parseDesktopGetDnsClientServerAddressCommand, parseDesktopGetEventLogCommand, parseDesktopGetNetAdapterCommand, parseDesktopGetNetIpConfigurationCommand, parseDesktopGetNetNeighborCommand, parseDesktopGetNetRouteCommand, parseDesktopGetNetTcpConnectionCommand, parseDesktopGetProcessCommand, parseDesktopGetServiceCommand, parseDesktopNetstatCommand, parseDesktopNslookupCommand, parseDesktopPingCommand, parseDesktopRemoteAccessCommand, parseDesktopResolveDnsNameCommand, parseDesktopScCommand, parseDesktopSendMailMessageCommand, parseDesktopTasklistCommand, parseDesktopTestConnectionCommand, parseDesktopTestNetConnectionCommand, parseDesktopTraceCommand, parseDesktopWebRequestCommand } from "../engine/desktopDiagnostics";
 import { desktopConsoleTargets } from "../engine/desktopTerminal";
 import { diagnoseProject, type NetworkIssueSeverity } from "../engine/diagnostics";
 import { ipInSubnet, ipToNumber, isIpv4, isSubnetMask, maskToPrefix } from "../engine/ip";
@@ -7341,7 +7341,7 @@ function transportAllows(transportInput: string, protocol: "ssh" | "telnet"): bo
   return tokens.includes("all") || tokens.includes(protocol);
 }
 
-const desktopQuickCommands = ["help", "hostname", "getmac", "getmac /v", "ipconfig /all", "ipconfig /displaydns", "ipconfig /flushdns", "ipconfig /renew", "ipconfig /release", "netsh interface ip show config", "Get-NetAdapter", "Get-NetIPConfiguration -All", "Get-DnsClientServerAddress", "Get-NetRoute", "Get-NetNeighbor", "arp -a", "arp -d *", "route print", "route print -4", "netstat -r", "netstat -rn", "netstat -an", "netstat -ano", "netstat -abno", "tasklist /svc", "Get-NetTCPConnection -State Listen", "Get-Process -Id 4080", "Get-Service dns", "Get-EventLog -LogName Application -Newest 10", "sc queryex dns", "Test-NetConnection www.lab.local -Port 80", "Test-Connection www.lab.local -Count 4", "ping -n 4 www.lab.local", "tracert www.lab.local", "pathping www.lab.local", "nslookup www.lab.local", "Resolve-DnsName www.lab.local", "Invoke-WebRequest http://www.lab.local", "web www.lab.local", "ftp www.lab.local", "mail www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
+const desktopQuickCommands = ["help", "hostname", "getmac", "getmac /v", "ipconfig /all", "ipconfig /displaydns", "ipconfig /flushdns", "ipconfig /renew", "ipconfig /release", "netsh interface ip show config", "Get-NetAdapter", "Get-NetIPConfiguration -All", "Get-DnsClientServerAddress", "Get-NetRoute", "Get-NetNeighbor", "arp -a", "arp -d *", "route print", "route print -4", "netstat -r", "netstat -rn", "netstat -an", "netstat -ano", "netstat -abno", "tasklist /svc", "Get-NetTCPConnection -State Listen", "Get-Process -Id 4080", "Get-Service dns", "Get-EventLog -LogName Application -Newest 10", "sc queryex dns", "Test-NetConnection www.lab.local -Port 80", "Test-Connection www.lab.local -Count 4", "ping -n 4 www.lab.local", "tracert www.lab.local", "pathping www.lab.local", "nslookup www.lab.local", "Resolve-DnsName www.lab.local", "Invoke-WebRequest http://www.lab.local", "Send-MailMessage -SmtpServer www.lab.local -To admin@lab.local -Body test", "web www.lab.local", "ftp www.lab.local", "mail www.lab.local admin@lab.local test", "ssh 192.168.1.1", "telnet 192.168.1.1", "tftp www.lab.local", "syslog www.lab.local link-check"];
 
 type DesktopApp = "ip" | "prompt" | "browser" | "terminal" | "ftp" | "email" | "tftp" | "syslog";
 
@@ -7589,7 +7589,7 @@ function DesktopTab({ device, project, onProjectChange, onUpdate }: { device: Ne
             <span>{device.config.hostname || device.label}&gt;</span>
             <input value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handlePromptKeyDown} placeholder="ipconfig | ping 192.168.1.1 | tracert www.lab.local | pathping www.lab.local | http www.lab.local" />
           </form>
-          <small>프로젝트 장비 {project.devices.length}개 | hostname, getmac, ipconfig, netsh, Get-NetAdapter, Get-NetIPConfiguration, Get-DnsClientServerAddress, Get-NetRoute, Get-NetNeighbor, arp -a, arp -d, route print, netstat, tasklist, Get-NetTCPConnection, Get-Process, Get-Service, Get-EventLog, sc, Test-NetConnection, Test-Connection, ping, tracert, pathping, nslookup, Resolve-DnsName, Invoke-WebRequest, http, ftp, email, ssh, telnet, tftp, syslog</small>
+          <small>프로젝트 장비 {project.devices.length}개 | hostname, getmac, ipconfig, netsh, Get-NetAdapter, Get-NetIPConfiguration, Get-DnsClientServerAddress, Get-NetRoute, Get-NetNeighbor, arp -a, arp -d, route print, netstat, tasklist, Get-NetTCPConnection, Get-Process, Get-Service, Get-EventLog, sc, Test-NetConnection, Test-Connection, ping, tracert, pathping, nslookup, Resolve-DnsName, Invoke-WebRequest, Send-MailMessage, http, ftp, email, ssh, telnet, tftp, syslog</small>
         </section>
       )}
       {activeApp === "browser" && (
@@ -7680,7 +7680,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
       "  Get-NetTCPConnection [-State Listen] [-LocalPort port] | Get-Process [-Id pid|-Name name] | Get-Service [service] | Get-EventLog [-Newest n] [-Source service] | sc query[ex] [service]",
       "  Test-NetConnection <ip|이름> [-Port 포트] | tnc <ip|이름> -p 포트 | Test-Connection <ip|이름> [-Count 횟수]",
       "  ping [-4] [-n 횟수] <ip|이름> | tracert [-d] <ip|이름> | pathping [-n] <ip|이름> | nslookup [-type=A|PTR] <이름|ip> [dns-server] | Resolve-DnsName <이름|ip> [-Server dns] [-Type A|PTR]",
-      "  Invoke-WebRequest [-Uri] <url> | iwr <url> | http|web|browser <ip|이름> | ftp <ip|이름> [ls|get 파일] | email|mail <서버> <받는사람> [메시지]",
+      "  Invoke-WebRequest [-Uri] <url> | iwr <url> | http|web|browser <ip|이름> | ftp <ip|이름> [ls|get 파일] | Send-MailMessage -SmtpServer <서버> -To <받는사람> [-Body 메시지] | email|mail <서버> <받는사람> [메시지]",
       "  ssh [-l user] [-p 22] <ip|이름> | telnet <ip|이름> [23] | tftp <ip|이름> | syslog <ip|이름> <메시지>"
     ].join("\n");
   }
@@ -8042,6 +8042,31 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     }
     return `Connected to ${target.label}.\n220 PTWeb FTP Service ready\nUser: anonymous\n230 User logged in\nftp> ${action}\n200 PORT command successful\n150 Opening ASCII mode data connection\n  readme.txt\n  running-config.txt\n  network-backup.ptweb\n226 Transfer complete`;
   }
+  const sendMailMessage = parseDesktopSendMailMessageCommand(command);
+  if (sendMailMessage.valid) {
+    if (!sendMailMessage.serverText.trim() || !sendMailMessage.recipient.trim()) return "사용법: Send-MailMessage -SmtpServer <서버> -To <받는사람> [-Body 메시지]";
+    const message = sendMailMessage.message || `${device.label} mail test`;
+    const resolved = await resolveDesktopNetworkTarget(project, device, sendMailMessage.serverText, onProjectChange);
+    if (!resolved.target) return `Send-MailMessage : ${resolved.error}`;
+    const { target, project: resolvedProject } = resolved;
+    const result = await simulatePing(resolvedProject, device.id, target.id, "email");
+    if (!result.success) {
+      onProjectChange(appendDesktopEvent(result.project, device.id, target.id, "EMAIL", `Send-MailMessage 실패: ${result.message}`, "dropped"), result.message);
+      return `Send-MailMessage : EMAIL delivery failed: ${result.message}`;
+    }
+    if (!target.config.services.email) {
+      const nextProject = appendDesktopEvent(result.project, device.id, target.id, "EMAIL", `${target.label} Send-MailMessage 거부: EMAIL 서비스 꺼짐`, "dropped");
+      onProjectChange(nextProject, `${target.label} EMAIL 서비스가 꺼져 있습니다.`);
+      return `Send-MailMessage : ${target.label} EMAIL service is stopped.`;
+    }
+    const loggedProject = appendServerLog(result.project, target.id, "info", `EMAIL Send-MailMessage from ${device.label} to ${sendMailMessage.recipient}: ${message}`);
+    onProjectChange(appendDesktopEvent(loggedProject, device.id, target.id, "EMAIL", `${sendMailMessage.recipient}에게 Send-MailMessage를 전송했습니다.`, "delivered"), "EMAIL 메시지를 전송했습니다.");
+    return [
+      `SmtpServer : ${target.label}`,
+      `To         : ${sendMailMessage.recipient}`,
+      "Status     : 250 Message accepted for delivery"
+    ].join("\n");
+  }
   if (lower.startsWith("email ") || lower.startsWith("mail ")) {
     const [, targetText = "", recipient = "", ...messageParts] = command.split(/\s+/);
     if (!targetText.trim() || !recipient.trim()) return "사용법: email|mail <서버 ip|이름> <받는사람> [메시지]";
@@ -8153,7 +8178,7 @@ async function desktopCommand(project: NetworkProject, device: NetworkDevice, co
     onProjectChange(appendDesktopEvent(loggedProject, device.id, target.id, "SYSLOG", `${target.label}에 SYSLOG 메시지를 기록했습니다.`, "delivered"), "SYSLOG 메시지를 기록했습니다.");
     return `SYSLOG sent to ${target.label}: ${logMessage}`;
   }
-  return "알 수 없는 데스크톱 명령입니다. help, hostname, getmac [/v], ipconfig, netsh interface ip show config, Get-NetAdapter [-Name adapter], Get-NetIPConfiguration [-All] [-InterfaceAlias adapter], Get-DnsClientServerAddress [-AddressFamily IPv4], Get-NetRoute [-DestinationPrefix prefix], Get-NetNeighbor [-IPAddress ip], arp -a, arp -d <ip|*>, route print [-4], netstat -r|-rn, netstat -an, netstat -ano, netstat -abno, tasklist [/svc] [/fi \"PID eq <pid>\"], Get-NetTCPConnection [-State Listen] [-LocalPort port], Get-Process [-Id pid|-Name name], Get-Service [service], Get-EventLog [-Newest n] [-Source service], sc query[ex] [service], Test-NetConnection <ip|이름> [-Port 포트], Test-Connection <ip|이름> [-Count 횟수], ping [-4] [-n 횟수] <ip|이름>, tracert [-d] <ip|이름>, pathping [-n] <ip|이름>, nslookup [-type=A|PTR] <이름|ip> [dns-server], Resolve-DnsName <이름|ip> [-Server dns] [-Type A|PTR], Invoke-WebRequest [-Uri] <url>, http/web <ip|이름>, ftp <ip|이름>, email/mail <ip|이름> <받는사람>, ssh [-l user] [-p 22] <ip|이름>, telnet <ip|이름> [23], tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
+  return "알 수 없는 데스크톱 명령입니다. help, hostname, getmac [/v], ipconfig, netsh interface ip show config, Get-NetAdapter [-Name adapter], Get-NetIPConfiguration [-All] [-InterfaceAlias adapter], Get-DnsClientServerAddress [-AddressFamily IPv4], Get-NetRoute [-DestinationPrefix prefix], Get-NetNeighbor [-IPAddress ip], arp -a, arp -d <ip|*>, route print [-4], netstat -r|-rn, netstat -an, netstat -ano, netstat -abno, tasklist [/svc] [/fi \"PID eq <pid>\"], Get-NetTCPConnection [-State Listen] [-LocalPort port], Get-Process [-Id pid|-Name name], Get-Service [service], Get-EventLog [-Newest n] [-Source service], sc query[ex] [service], Test-NetConnection <ip|이름> [-Port 포트], Test-Connection <ip|이름> [-Count 횟수], ping [-4] [-n 횟수] <ip|이름>, tracert [-d] <ip|이름>, pathping [-n] <ip|이름>, nslookup [-type=A|PTR] <이름|ip> [dns-server], Resolve-DnsName <이름|ip> [-Server dns] [-Type A|PTR], Invoke-WebRequest [-Uri] <url>, Send-MailMessage -SmtpServer <서버> -To <받는사람> [-Body 메시지], http/web <ip|이름>, ftp <ip|이름>, email/mail <ip|이름> <받는사람>, ssh [-l user] [-p 22] <ip|이름>, telnet <ip|이름> [23], tftp <ip|이름>, syslog <ip|이름> <메시지>를 사용하세요.";
 }
 
 function testNetConnectionPortState(device: NetworkDevice, port: string): { protocol: string; label: string; open: boolean; reason: string } {

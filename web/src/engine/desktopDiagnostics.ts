@@ -842,6 +842,46 @@ export function parseDesktopWebRequestCommand(command: string): { valid: boolean
   return { valid: true, targetText: targetText || positional[0] || "", method };
 }
 
+export function parseDesktopSendMailMessageCommand(command: string): { valid: boolean; serverText: string; recipient: string; message: string } {
+  const tokens = command.trim().split(/\s+/);
+  const commandName = tokens.shift()?.toLowerCase();
+  if (commandName !== "send-mailmessage") return { valid: false, serverText: "", recipient: "", message: "" };
+  let serverText = "";
+  let recipient = "";
+  let subject = "";
+  let body = "";
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const lower = token.toLowerCase();
+    if (["-smtpserver", "-server"].includes(lower) && tokens[index + 1]) {
+      serverText = tokens[index + 1];
+      index += 1;
+    } else if (lower.startsWith("-smtpserver:") || lower.startsWith("-server:")) {
+      serverText = token.slice(token.indexOf(":") + 1);
+    } else if (["-to", "-recipient"].includes(lower) && tokens[index + 1]) {
+      recipient = tokens[index + 1];
+      index += 1;
+    } else if (lower.startsWith("-to:") || lower.startsWith("-recipient:")) {
+      recipient = token.slice(token.indexOf(":") + 1);
+    } else if (lower === "-subject" && tokens[index + 1]) {
+      subject = cleanPowerShellValue(tokens[index + 1]);
+      index += 1;
+    } else if (lower.startsWith("-subject:")) {
+      subject = cleanPowerShellValue(token.slice(token.indexOf(":") + 1));
+    } else if (lower === "-body" && tokens[index + 1]) {
+      body = cleanPowerShellValue(tokens[index + 1]);
+      index += 1;
+    } else if (lower.startsWith("-body:")) {
+      body = cleanPowerShellValue(token.slice(token.indexOf(":") + 1));
+    } else if (["-from", "-port", "-credential"].includes(lower) && tokens[index + 1]) {
+      index += 1;
+    } else if (lower.startsWith("-from:") || lower.startsWith("-port:")) {
+      continue;
+    }
+  }
+  return { valid: true, serverText, recipient, message: body || subject };
+}
+
 export function parseDesktopTestConnectionCommand(command: string): { valid: boolean; count: number; targetText: string } {
   const tokens = command.trim().split(/\s+/);
   const commandName = tokens.shift()?.toLowerCase();
