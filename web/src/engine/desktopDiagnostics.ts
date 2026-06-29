@@ -1,5 +1,5 @@
 import { isIpv4, networkAddress } from "./ip";
-import type { NetworkDevice } from "../types/network";
+import type { NetworkDevice, NetworkProject } from "../types/network";
 
 type ServiceName = keyof NetworkDevice["config"]["services"];
 
@@ -71,6 +71,24 @@ export function desktopIpconfigAll(device: NetworkDevice): string {
     .join("\n");
 }
 
+export function desktopDnsCache(project: NetworkProject, device: NetworkDevice): string {
+  const dnsServerIp = device.ports.find((port) => port.dnsServer)?.dnsServer ?? "";
+  if (!dnsServerIp) return "DNS 확인자 캐시에 표시할 서버가 없습니다.";
+  const server = project.devices.find((item) => item.config.services.dns && item.ports.some((port) => port.ipAddress === dnsServerIp));
+  if (!server) return `DNS 서버 ${dnsServerIp}을(를) 찾을 수 없습니다.`;
+  return [
+    "Windows IP Configuration",
+    "",
+    "DNS Resolver Cache",
+    `Server: ${server.label} (${dnsServerIp})`,
+    "",
+    ...(server.config.dnsRecords.length ? server.config.dnsRecords.flatMap((record) => [
+      ...dnsCacheRecordLines(record.name, "1", "4", "A (Host) Record", record.value),
+      ...dnsCacheRecordLines(reverseDnsName(record.value), "12", String(record.name.length), "PTR Record", record.name)
+    ]) : ["캐시된 DNS 레코드가 없습니다."])
+  ].join("\n").trimEnd();
+}
+
 export function clearDesktopArpEntries(device: NetworkDevice, target = "*"): { device: NetworkDevice; removed: number; message: string } {
   const normalized = target.trim();
   if (!normalized || normalized === "*") {
@@ -89,6 +107,23 @@ export function clearDesktopArpEntries(device: NetworkDevice, target = "*"): { d
     removed,
     message: removed ? `Deleted ARP entry ${normalized}.` : `ARP entry ${normalized} not found.`
   };
+}
+
+function dnsCacheRecordLines(name: string, type: string, dataLength: string, dataLabel: string, value: string): string[] {
+  return [
+    `Record Name . . . . . : ${name}`,
+    `Record Type . . . . . : ${type}`,
+    "Time To Live  . . . . : 1200",
+    `Data Length . . . . . : ${dataLength}`,
+    "Section . . . . . . . : Answer",
+    `${dataLabel} . . . : ${value}`,
+    ""
+  ];
+}
+
+function reverseDnsName(ipAddress: string): string {
+  if (!isIpv4(ipAddress)) return ipAddress;
+  return `${ipAddress.split(".").reverse().join(".")}.in-addr.arpa`;
 }
 
 export function desktopArpTable(device: NetworkDevice): string {
