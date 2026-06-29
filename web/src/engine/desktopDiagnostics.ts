@@ -297,8 +297,23 @@ export function parseDesktopNslookupCommand(command: string): { name: string; se
   const tokens = command.trim().split(/\s+/);
   const args = tokens[0]?.toLowerCase() === "nslookup" ? tokens.slice(1) : [...tokens];
   let queryType = "";
-  while (args[0]?.toLowerCase().startsWith("-type=") || args[0]?.toLowerCase().startsWith("-querytype=") || args[0]?.toLowerCase().startsWith("-q=")) {
-    queryType = args.shift()?.split("=")[1]?.toUpperCase() ?? "";
+  while (args[0]?.startsWith("-")) {
+    const option = args[0].toLowerCase();
+    if (option.startsWith("-type=") || option.startsWith("-querytype=") || option.startsWith("-q=")) {
+      queryType = args.shift()?.split("=")[1]?.toUpperCase() ?? "";
+    } else if (option === "-type" || option === "-querytype" || option === "-q") {
+      args.shift();
+      queryType = (args.shift() ?? "").toUpperCase();
+    } else if (option === "-debug" || option === "-nodebug") {
+      args.shift();
+    } else if (option === "-timeout" || option === "-retry") {
+      args.shift();
+      if (args[0] && !args[0].startsWith("-")) args.shift();
+    } else if (option.startsWith("-timeout=") || option.startsWith("-retry=")) {
+      args.shift();
+    } else {
+      break;
+    }
   }
   return { name: args[0] ?? "", serverText: args[1] ?? "", queryType };
 }
