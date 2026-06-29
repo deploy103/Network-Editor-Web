@@ -199,6 +199,8 @@
 - 23:04 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 - 23:06 Added Desktop `netsh interface ip show config` and `netsh int ipv4 show configuration` support with per-adapter DHCP, IP, subnet, gateway, metric, and DNS evidence.
 - 23:07 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
+- 23:08 Connected Desktop `netsh interface ip show config` into Verification Plan desktop identity tasks and Lab Workbook host-adapter evidence guidance.
+- 23:09 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 
 ### Next
 
