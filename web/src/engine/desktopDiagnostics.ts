@@ -71,6 +71,25 @@ export function desktopIpconfigAll(device: NetworkDevice): string {
     .join("\n");
 }
 
+export function desktopNetshInterfaceConfig(device: NetworkDevice): string {
+  const ports = device.ports.filter((port) => port.kind !== "console");
+  if (!ports.length) return "There are no interfaces on the system.";
+  return ports.map((port) => {
+    const lease = device.runtime.dhcpLeases.find((item) => item.macAddress === port.macAddress);
+    const dnsMode = lease ? "DNS servers configured through DHCP" : "Statically Configured DNS Servers";
+    return [
+      `Configuration for interface "${port.name}"`,
+      `    DHCP enabled:                         ${lease ? "Yes" : "No"}`,
+      `    IP Address:                           ${port.ipAddress || "0.0.0.0"}`,
+      `    Subnet Prefix:                        ${port.ipAddress && port.subnetMask && isIpv4(port.ipAddress) && isIpv4(port.subnetMask) ? `${networkAddress(port.ipAddress, port.subnetMask)} (${port.subnetMask})` : "0.0.0.0 (0.0.0.0)"}`,
+      `    Default Gateway:                      ${port.gateway || "0.0.0.0"}`,
+      `    Gateway Metric:                       0`,
+      `    InterfaceMetric:                      25`,
+      `    ${dnsMode}:        ${port.dnsServer || "0.0.0.0"}`
+    ].join("\n");
+  }).join("\n\n");
+}
+
 export function desktopDnsCache(project: NetworkProject, device: NetworkDevice): string {
   const dnsServerIp = device.ports.find((port) => port.dnsServer)?.dnsServer ?? "";
   if (!dnsServerIp) return "DNS 확인자 캐시에 표시할 서버가 없습니다.";
@@ -229,6 +248,15 @@ export function parseDesktopNetstatCommand(command: string): { kind: "routes" | 
     return { kind: "listening", includePid: flags.has("o") };
   }
   return { kind: "none", includePid: false };
+}
+
+export function isDesktopNetshInterfaceConfigCommand(command: string): boolean {
+  const tokens = normalizedDesktopTokens(command);
+  return tokens[0] === "netsh" &&
+    (tokens[1] === "interface" || tokens[1] === "int") &&
+    (tokens[2] === "ip" || tokens[2] === "ipv4") &&
+    tokens[3] === "show" &&
+    (tokens[4] === "config" || tokens[4] === "configuration");
 }
 
 export function parseDesktopRemoteAccessCommand(command: string): { protocol: "ssh" | "telnet" | ""; targetText: string; username: string; port: string } {

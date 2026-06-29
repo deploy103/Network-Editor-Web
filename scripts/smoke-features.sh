@@ -48,7 +48,7 @@ const { canPortUseCable, createDevice, deviceCatalog, effectivePortKind, getTran
 const { analyzeAddressPlan, buildAddressPlanReportText } = require(path.join(tmpdir, "engine/addressPlan.js"));
 const { analyzeCapacityPlan, buildCapacityPlanReportText } = require(path.join(tmpdir, "engine/capacityPlan.js"));
 const { analyzeConfigDrift, buildConfigDriftReportText } = require(path.join(tmpdir, "engine/configDrift.js"));
-const { clearDesktopArpEntries, desktopArpTable, desktopDnsCache, desktopGetmacTable, desktopHostname, desktopIpconfigAll, desktopNetstatListening, desktopNetstatListeningRows, desktopRoutePrint, isDesktopRoutePrintCommand, parseDesktopArpCommand, parseDesktopNetstatCommand, parseDesktopNslookupCommand, parseDesktopPingCommand, parseDesktopRemoteAccessCommand, parseDesktopTraceCommand } = require(path.join(tmpdir, "engine/desktopDiagnostics.js"));
+const { clearDesktopArpEntries, desktopArpTable, desktopDnsCache, desktopGetmacTable, desktopHostname, desktopIpconfigAll, desktopNetshInterfaceConfig, desktopNetstatListening, desktopNetstatListeningRows, desktopRoutePrint, isDesktopNetshInterfaceConfigCommand, isDesktopRoutePrintCommand, parseDesktopArpCommand, parseDesktopNetstatCommand, parseDesktopNslookupCommand, parseDesktopPingCommand, parseDesktopRemoteAccessCommand, parseDesktopTraceCommand } = require(path.join(tmpdir, "engine/desktopDiagnostics.js"));
 const { desktopConsoleTargets } = require(path.join(tmpdir, "engine/desktopTerminal.js"));
 const { diagnoseProject } = require(path.join(tmpdir, "engine/diagnostics.js"));
 const { analyzeFailureImpact, buildFailureImpactReportText } = require(path.join(tmpdir, "engine/failureImpact.js"));
@@ -76,6 +76,7 @@ const editorSource = fs.readFileSync(path.join(root, "web/src/components/Editor.
 assert(
   editorSource.includes("pathping www.lab.local") &&
   editorSource.includes("desktopIpconfigAll") &&
+  editorSource.includes("netsh interface ip show config") &&
   editorSource.includes("getmac /v") &&
   editorSource.includes("route print -4") &&
   editorSource.includes("netstat -rn") &&
@@ -133,6 +134,9 @@ assert(desktopGetmacTable(pc).includes(pc.ports.find((port) => port.kind !== "co
 assert(desktopGetmacTable(pc, { verbose: true }).includes("Connection Name") && desktopGetmacTable(pc, { verbose: true }).includes("Network Adapter"), "Desktop getmac /v helper must include verbose adapter columns");
 const ipconfigOutput = desktopIpconfigAll(pc);
 assert(ipconfigOutput.includes("물리적 주소") && ipconfigOutput.includes("DHCP 사용") && ipconfigOutput.includes("IPv4 주소") && ipconfigOutput.includes("DNS 서버"), "Desktop ipconfig /all helper must include adapter MAC, DHCP, IPv4, and DNS fields");
+const netshConfigOutput = desktopNetshInterfaceConfig(pc);
+assert(netshConfigOutput.includes("Configuration for interface") && netshConfigOutput.includes("DHCP enabled") && netshConfigOutput.includes("IP Address") && netshConfigOutput.includes("Default Gateway") && netshConfigOutput.includes("DNS Servers"), "Desktop netsh interface config helper must include adapter IP, DHCP, gateway, and DNS fields");
+assert(isDesktopNetshInterfaceConfigCommand("netsh interface ip show config") && isDesktopNetshInterfaceConfigCommand("netsh int ipv4 show configuration"), "Desktop netsh parser must accept interface/int and ip/ipv4 forms");
 const pcWithDhcpLease = { ...pc, runtime: { ...pc.runtime, dhcpLeases: [{ ipAddress: "192.168.10.100", macAddress: pc.ports.find((port) => port.kind !== "console").macAddress, deviceId: pc.id, expiresAt: Date.now() + 60000 }] } };
 assert(desktopIpconfigAll(pcWithDhcpLease).includes("DHCP 임대 만료"), "Desktop ipconfig /all helper must include DHCP lease expiration when a lease exists");
 const dnsCacheOutput = desktopDnsCache(project, pc);
