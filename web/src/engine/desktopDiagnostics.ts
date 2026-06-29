@@ -263,6 +263,46 @@ export function desktopTasklist(device: NetworkDevice, options: { showServices?:
   ].join("\n");
 }
 
+export function desktopGetNetTcpConnection(device: NetworkDevice, options: { state?: string; localPort?: string } = {}): string {
+  const stateFilter = normalizeDesktopTcpState(options.state ?? "");
+  const localPortFilter = (options.localPort ?? "").trim();
+  const rows = desktopNetstatListeningRows(device)
+    .filter((row) => row.protocol === "TCP")
+    .filter((row) => !stateFilter || row.state === stateFilter)
+    .filter((row) => !localPortFilter || splitDesktopEndpoint(row.localAddress).port === localPortFilter);
+  if (!rows.length) return "Get-NetTCPConnection : No matching MSFT_NetTCPConnection objects found.";
+  return [
+    "LocalAddress                        LocalPort RemoteAddress                       RemotePort State       AppliedSetting OwningProcess",
+    "------------                        --------- -------------                       ---------- -----       -------------- -------------",
+    ...rows.map((row) => {
+      const local = splitDesktopEndpoint(row.localAddress);
+      const remote = splitDesktopEndpoint(row.foreignAddress);
+      return `${local.address.padEnd(35)} ${local.port.padStart(9)} ${remote.address.padEnd(35)} ${remote.port.padStart(10)} ${desktopTcpStateLabel(row.state).padEnd(11)} ${"Internet".padEnd(14)} ${row.pid}`;
+    })
+  ].join("\n");
+}
+
+export function desktopGetProcess(device: NetworkDevice, options: { pidFilter?: string; nameFilter?: string } = {}): string {
+  const nameFilter = (options.nameFilter ?? "").toLowerCase().replace(/\.exe$/, "");
+  const rows = desktopTasklistRows(device)
+    .filter((row) => !options.pidFilter || row.pid === options.pidFilter)
+    .filter((row) => !nameFilter || desktopProcessName(row.imageName).toLowerCase().includes(nameFilter));
+  if (!rows.length) return "Get-Process : Cannot find a process with the specified process identifier or process name.";
+  return [
+    "Handles  NPM(K)    PM(K)      WS(K)     CPU(s)     Id  SI ProcessName",
+    "-------  ------    -----      -----     ------     --  -- -----------",
+    ...rows.map((row) => {
+      const pidNumber = Number(row.pid);
+      const handles = String(80 + (Number.isFinite(pidNumber) ? pidNumber % 47 : 0));
+      const npm = String(6 + (Number.isFinite(pidNumber) ? pidNumber % 9 : 0));
+      const pm = String(4096 + (Number.isFinite(pidNumber) ? pidNumber % 2048 : 0));
+      const ws = String(8192 + (Number.isFinite(pidNumber) ? pidNumber % 4096 : 0));
+      const cpu = (Number.isFinite(pidNumber) ? (pidNumber % 120) / 10 : 0).toFixed(2);
+      return `${handles.padStart(7)} ${npm.padStart(7)} ${pm.padStart(8)} ${ws.padStart(10)} ${cpu.padStart(10)} ${row.pid.padStart(6)} ${row.sessionNumber.padStart(3)} ${desktopProcessName(row.imageName)}`;
+    })
+  ].join("\n");
+}
+
 export function desktopScQuery(device: NetworkDevice, options: { extended?: boolean; serviceName?: string } = {}): string {
   const query = options.serviceName?.trim().toLowerCase() ?? "";
   const services = listeningServices.filter((service) => !query || service.service === query || service.label.toLowerCase() === query);
@@ -302,6 +342,58 @@ export function desktopTasklistRows(device: NetworkDevice): DesktopTasklistRow[]
     });
   });
   return [...tasks.values()].sort((left, right) => Number(left.pid) - Number(right.pid));
+}
+
+export function parseDesktopGetNetTcpConnectionCommand(command: string): { valid: boolean; state: string; localPort: string } {
+  const tokens = command.trim().split(/\s+/);
+  const commandName = tokens.shift()?.toLowerCase();
+  if (commandName !== "get-nettcpconnection") return { valid: false, state: "", localPort: "" };
+  let state = "";
+  let localPort = "";
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const lower = token.toLowerCase();
+    if (lower === "-state" && tokens[index + 1]) {
+      state = tokens[index + 1];
+      index += 1;
+    } else if (lower.startsWith("-state:")) {
+      state = token.slice(token.indexOf(":") + 1);
+    } else if (lower === "-localport" && tokens[index + 1]) {
+      localPort = tokens[index + 1];
+      index += 1;
+    } else if (lower.startsWith("-localport:")) {
+      localPort = token.slice(token.indexOf(":") + 1);
+    }
+  }
+  return { valid: true, state, localPort };
+}
+
+export function parseDesktopGetProcessCommand(command: string): { valid: boolean; pidFilter: string; nameFilter: string } {
+  const tokens = command.trim().split(/\s+/);
+  const commandName = tokens.shift()?.toLowerCase();
+  if (!["get-process", "gps", "ps"].includes(commandName ?? "")) return { valid: false, pidFilter: "", nameFilter: "" };
+  let pidFilter = "";
+  let nameFilter = "";
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const lower = token.toLowerCase();
+    if (["-id", "-pid", "-processid"].includes(lower) && tokens[index + 1]) {
+      pidFilter = cleanDesktopPid(tokens[index + 1]);
+      index += 1;
+    } else if (lower.startsWith("-id:") || lower.startsWith("-pid:") || lower.startsWith("-processid:")) {
+      pidFilter = cleanDesktopPid(token.slice(token.indexOf(":") + 1));
+    } else if (lower === "-name" && tokens[index + 1]) {
+      nameFilter = tokens[index + 1];
+      index += 1;
+    } else if (lower.startsWith("-name:")) {
+      nameFilter = token.slice(token.indexOf(":") + 1);
+    } else if (!lower.startsWith("-") && !pidFilter && /^\d+$/.test(token)) {
+      pidFilter = token;
+    } else if (!lower.startsWith("-") && !nameFilter) {
+      nameFilter = token;
+    }
+  }
+  return { valid: true, pidFilter, nameFilter };
 }
 
 export function parseDesktopArpCommand(command: string): { action: "show" | "delete" | "none"; target: string } {
@@ -500,4 +592,32 @@ function normalizedDesktopTokens(command: string): string[] {
 function expandDesktopOptionToken(token: string): string[] {
   if (!token.startsWith("-")) return [];
   return token.slice(1).split("");
+}
+
+function splitDesktopEndpoint(endpoint: string): { address: string; port: string } {
+  const index = endpoint.lastIndexOf(":");
+  if (index < 0) return { address: endpoint, port: "" };
+  return {
+    address: endpoint.slice(0, index) || "*",
+    port: endpoint.slice(index + 1)
+  };
+}
+
+function normalizeDesktopTcpState(state: string): string {
+  const normalized = state.trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized === "listen" || normalized === "listening") return "LISTENING";
+  return normalized.toUpperCase();
+}
+
+function desktopTcpStateLabel(state: string): string {
+  return state === "LISTENING" ? "Listen" : state;
+}
+
+function desktopProcessName(imageName: string): string {
+  return imageName.replace(/\.exe$/i, "");
+}
+
+function cleanDesktopPid(value: string): string {
+  return value.split(",")[0]?.replace(/\D/g, "") ?? "";
 }
