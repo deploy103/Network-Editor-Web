@@ -170,7 +170,7 @@ function serviceSection(project: NetworkProject): WorkbookSection {
       "- Use show ip dhcp pool summary when DHCP pools are part of the lab.",
       "- Use show ip dhcp binding summary after DHCP tests to confirm lease evidence.",
       "- Use show hosts summary when DNS records or name servers are part of the lab.",
-      "- Use show service logs dns after nslookup <record> <dns-server> tests to confirm directed DNS evidence.",
+      "- Use show service logs dns after nslookup <record> <dns-server> or Resolve-DnsName <record> -Server <dns-server> -Type A tests to confirm directed DNS evidence.",
       "- Check service logs after test traffic is generated.",
       "- Use show service logs summary on service devices to confirm per-service evidence counts."
     ]

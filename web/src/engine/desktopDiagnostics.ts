@@ -39,6 +39,14 @@ export interface DesktopTasklistRow {
   services: string[];
 }
 
+export interface DesktopResolveDnsNameRecord {
+  queryName: string;
+  queryType: "A" | "PTR";
+  recordValue: string;
+  dnsServerIp: string;
+  serverLabel: string;
+}
+
 export function desktopHostname(device: NetworkDevice): string {
   return device.config.hostname || device.label;
 }
@@ -160,6 +168,19 @@ export function desktopDnsCache(project: NetworkProject, device: NetworkDevice):
       ...dnsCacheRecordLines(reverseDnsName(record.value), "12", String(record.name.length), "PTR Record", record.name)
     ]) : ["캐시된 DNS 레코드가 없습니다."])
   ].join("\n").trimEnd();
+}
+
+export function desktopResolveDnsNameOutput(record: DesktopResolveDnsNameRecord): string {
+  const valueHeader = record.queryType === "PTR" ? "NameHost" : "IPAddress";
+  const displayName = record.queryType === "PTR" ? reverseDnsName(record.queryName) : record.queryName;
+  return [
+    `Server       : ${record.serverLabel}`,
+    `Address      : ${record.dnsServerIp}`,
+    "",
+    `Name                                           Type   TTL   Section    ${valueHeader}`,
+    `----                                           ----   ---   -------    ${"-".repeat(valueHeader.length)}`,
+    `${displayName.padEnd(46)} ${record.queryType.padEnd(5)} ${"1200".padEnd(5)} ${"Answer".padEnd(10)} ${record.recordValue}`
+  ].join("\n");
 }
 
 export function clearDesktopArpEntries(device: NetworkDevice, target = "*"): { device: NetworkDevice; removed: number; message: string } {
@@ -622,6 +643,46 @@ export function parseDesktopNslookupCommand(command: string): { name: string; se
     }
   }
   return { name: args[0] ?? "", serverText: args[1] ?? "", queryType };
+}
+
+export function parseDesktopResolveDnsNameCommand(command: string): { valid: boolean; name: string; serverText: string; queryType: string } {
+  const tokens = command.trim().split(/\s+/);
+  const commandName = tokens.shift()?.toLowerCase();
+  if (commandName !== "resolve-dnsname") return { valid: false, name: "", serverText: "", queryType: "" };
+  let name = "";
+  let serverText = "";
+  let queryType = "";
+  const positional: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const lower = token.toLowerCase();
+    if (lower === "-name" && tokens[index + 1]) {
+      name = tokens[index + 1];
+      index += 1;
+    } else if (lower.startsWith("-name:")) {
+      name = token.slice(token.indexOf(":") + 1);
+    } else if (lower === "-server" && tokens[index + 1]) {
+      serverText = tokens[index + 1];
+      index += 1;
+    } else if (lower.startsWith("-server:")) {
+      serverText = token.slice(token.indexOf(":") + 1);
+    } else if (lower === "-type" && tokens[index + 1]) {
+      queryType = tokens[index + 1].toUpperCase();
+      index += 1;
+    } else if (lower.startsWith("-type:")) {
+      queryType = token.slice(token.indexOf(":") + 1).toUpperCase();
+    } else if (["-dnsonly", "-nohostsfile", "-quicktimeout"].includes(lower)) {
+      continue;
+    } else if (!lower.startsWith("-")) {
+      positional.push(token);
+    }
+  }
+  return {
+    valid: true,
+    name: name || positional[0] || "",
+    serverText: serverText || positional[1] || "",
+    queryType
+  };
 }
 
 export function parseDesktopPingCommand(command: string): { count: number; targetText: string } {

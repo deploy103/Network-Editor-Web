@@ -221,6 +221,8 @@
 - 23:51 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 - 23:56 Added Desktop `Get-NetAdapter`, `Get-NetIPConfiguration -All`, and `Get-DnsClientServerAddress` helpers/parsers for PowerShell-style host adapter status, IPv4, gateway, MAC, and DNS server evidence, then connected them to Command Prompt quick commands, Verification Plan, and Lab Workbook host-adapter guidance.
 - 23:56 Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
+- 00:03 (2026-06-30 KST) Added Desktop `Resolve-DnsName` parsing and PowerShell-style A/PTR answer output, including directed DNS server selection, DNS reachability checks, server log entries, Command Prompt quick command/help exposure, and Verification Plan/Lab Workbook DNS evidence guidance.
+- 00:03 (2026-06-30 KST) Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 
 ### Next
 

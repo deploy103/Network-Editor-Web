@@ -292,7 +292,7 @@ function serviceVerificationCommands(device: NetworkDevice): string[] {
   const commands = ["Desktop > Services", "Desktop > Command Prompt > Test-NetConnection <server> -Port <port>", "Desktop > Command Prompt > netstat -an", "Desktop > Command Prompt > netstat -ano", "Desktop > Command Prompt > netstat -abno", "Desktop > Command Prompt > tasklist /svc", "Desktop > Command Prompt > Get-NetTCPConnection -State Listen", "Desktop > Command Prompt > Get-Process -Id <pid>", "Desktop > Command Prompt > sc queryex <service>", "show services", "show services summary", "show service logs", "show service logs summary"];
   const services = enabledServiceNames(device);
   if (services.includes("dhcp")) commands.push("show ip dhcp pool", "show ip dhcp pool summary", "show ip dhcp binding", "show ip dhcp binding summary");
-  if (services.includes("dns")) commands.push("show hosts", "show hosts summary", "Desktop > Command Prompt > nslookup <record> [dns-server]", "show service logs dns");
+  if (services.includes("dns")) commands.push("show hosts", "show hosts summary", "Desktop > Command Prompt > nslookup <record> [dns-server]", "Desktop > Command Prompt > Resolve-DnsName <record> -Server <dns-server> -Type A", "show service logs dns");
   if (services.includes("http")) commands.push("Desktop > Web Browser", "show service logs http");
   if (services.includes("ftp")) commands.push("Desktop > FTP", "show service logs ftp");
   if (services.includes("email")) commands.push("Desktop > Email", "show service logs email");
@@ -305,7 +305,7 @@ function serviceVerificationExpected(device: NetworkDevice): string[] {
   const expected = enabledServiceNames(device).map((name) => `${name.toUpperCase()} enabled`);
   if (expected.length) expected.push("Desktop Test-NetConnection reports expected TcpTestSucceeded state", "Desktop netstat shows expected listening service ports", "Desktop netstat -ano shows listener PID evidence", "Desktop netstat -abno shows listener process names", "Desktop tasklist /svc maps listener PIDs to service process names", "Desktop Get-NetTCPConnection shows TCP listener owning-process evidence", "Desktop Get-Process -Id confirms listener process identity", "Desktop sc queryex shows service state and PID evidence");
   if (device.config.services.dhcp) expected.push(`${device.config.dhcpPools.filter((pool) => pool.enabled).length}/${device.config.dhcpPools.length} DHCP pools enabled`);
-  if (device.config.services.dns) expected.push(`${device.config.dnsRecords.length} DNS records available`, "DNS lookups create DNS service log entries");
+  if (device.config.services.dns) expected.push(`${device.config.dnsRecords.length} DNS records available`, "Desktop Resolve-DnsName returns A/PTR answer records when DNS is reachable", "DNS lookups create DNS service log entries");
   if (device.config.services.http) expected.push("HTTP client request creates a service log entry");
   if (device.config.services.ftp) expected.push("FTP client request creates a service log entry");
   if (device.config.services.email) expected.push("EMAIL client request creates a service log entry");
