@@ -406,6 +406,23 @@ export function desktopGetProcess(device: NetworkDevice, options: { pidFilter?: 
   ].join("\n");
 }
 
+export function desktopGetService(device: NetworkDevice, options: { nameFilter?: string } = {}): string {
+  const filter = (options.nameFilter ?? "").trim().toLowerCase();
+  const rows = listeningServices
+    .filter((service) => !filter || service.service.includes(filter) || service.label.toLowerCase().includes(filter) || `ptweb ${service.label.toLowerCase()} service`.includes(filter))
+    .map((service) => ({
+      status: device.config.services[service.service] ? "Running" : "Stopped",
+      name: service.service,
+      displayName: `PTWeb ${service.label} Service`
+    }));
+  if (!rows.length) return "Get-Service : Cannot find any service with service name matching the specified filter.";
+  return [
+    "Status   Name               DisplayName",
+    "------   ----               -----------",
+    ...rows.map((row) => `${row.status.padEnd(8)} ${row.name.padEnd(18)} ${row.displayName}`)
+  ].join("\n");
+}
+
 export function desktopScQuery(device: NetworkDevice, options: { extended?: boolean; serviceName?: string } = {}): string {
   const query = options.serviceName?.trim().toLowerCase() ?? "";
   const services = listeningServices.filter((service) => !query || service.service === query || service.label.toLowerCase() === query);
@@ -497,6 +514,16 @@ export function parseDesktopGetProcessCommand(command: string): { valid: boolean
     }
   }
   return { valid: true, pidFilter, nameFilter };
+}
+
+export function parseDesktopGetServiceCommand(command: string): { valid: boolean; nameFilter: string } {
+  const tokens = command.trim().split(/\s+/);
+  const commandName = tokens.shift()?.toLowerCase();
+  if (!["get-service", "gsv"].includes(commandName ?? "")) return { valid: false, nameFilter: "" };
+  return {
+    valid: true,
+    nameFilter: parseDesktopPowerShellOption(tokens, ["-name", "-displayname"]) || tokens.find((token) => !token.startsWith("-")) || ""
+  };
 }
 
 export function parseDesktopGetNetAdapterCommand(command: string): { valid: boolean; nameFilter: string } {

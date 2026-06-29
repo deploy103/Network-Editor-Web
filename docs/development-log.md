@@ -225,6 +225,8 @@
 - 00:03 (2026-06-30 KST) Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 - 00:08 (2026-06-30 KST) Added Desktop `Get-NetRoute` and `Get-NetNeighbor` helpers/parsers for PowerShell-style active route and ARP/neighbor evidence, then exposed them in Command Prompt quick commands, help text, Verification Plan, Lab Workbook, README, and feature smoke coverage.
 - 00:08 (2026-06-30 KST) Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
+- 00:12 (2026-06-30 KST) Added Desktop `Get-Service`/`gsv` helper and parser for PowerShell-style service running/stopped state checks, then connected it to Command Prompt quick commands/help, Verification Plan, Lab Workbook, README, and feature smoke coverage.
+- 00:12 (2026-06-30 KST) Re-verified `npm run build`, `npm run smoke:features`, full `npm run smoke:all`, and `git diff --check`.
 
 ### Next
 
