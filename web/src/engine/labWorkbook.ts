@@ -174,6 +174,7 @@ function serviceSection(project: NetworkProject): WorkbookSection {
       "- Use show ip dhcp binding summary after DHCP tests to confirm lease evidence.",
       "- Use show hosts summary when DNS records or name servers are part of the lab.",
       "- Use show service logs dns after nslookup <record> <dns-server> or Resolve-DnsName <record> -Server <dns-server> -Type A tests to confirm directed DNS evidence.",
+      "- Use Desktop Command Prompt Get-EventLog -LogName Application -Newest 10 after service tests to capture recent runtime events.",
       "- Check service logs after test traffic is generated.",
       "- Use show service logs summary on service devices to confirm per-service evidence counts."
     ]

@@ -423,6 +423,22 @@ export function desktopGetService(device: NetworkDevice, options: { nameFilter?:
   ].join("\n");
 }
 
+export function desktopGetEventLog(device: NetworkDevice, options: { newest?: number; sourceFilter?: string } = {}): string {
+  const newest = Math.max(1, Math.min(50, Math.round(options.newest ?? 10)));
+  const sourceFilter = (options.sourceFilter ?? "").trim().toLowerCase();
+  const rows = device.runtime.logs
+    .map((entry, index) => ({ entry, index: index + 1, source: desktopEventSource(entry.message) }))
+    .reverse()
+    .filter((row) => !sourceFilter || row.source.toLowerCase().includes(sourceFilter) || row.entry.message.toLowerCase().includes(sourceFilter))
+    .slice(0, newest);
+  if (!rows.length) return "Get-EventLog : No entries were found in the specified event log.";
+  return [
+    "Index TimeGenerated            EntryType   Source     Message",
+    "----- -------------            ---------   ------     -------",
+    ...rows.map((row) => `${String(row.index).padStart(5)} ${new Date(row.entry.createdAt).toISOString().padEnd(24)} ${desktopEventType(row.entry.level).padEnd(11)} ${row.source.padEnd(10)} ${row.entry.message}`)
+  ].join("\n");
+}
+
 export function desktopScQuery(device: NetworkDevice, options: { extended?: boolean; serviceName?: string } = {}): string {
   const query = options.serviceName?.trim().toLowerCase() ?? "";
   const services = listeningServices.filter((service) => !query || service.service === query || service.label.toLowerCase() === query);
@@ -524,6 +540,32 @@ export function parseDesktopGetServiceCommand(command: string): { valid: boolean
     valid: true,
     nameFilter: parseDesktopPowerShellOption(tokens, ["-name", "-displayname"]) || tokens.find((token) => !token.startsWith("-")) || ""
   };
+}
+
+export function parseDesktopGetEventLogCommand(command: string): { valid: boolean; newest: number; sourceFilter: string } {
+  const tokens = command.trim().split(/\s+/);
+  const commandName = tokens.shift()?.toLowerCase();
+  if (!["get-eventlog", "get-winevent"].includes(commandName ?? "")) return { valid: false, newest: 10, sourceFilter: "" };
+  let newest = 10;
+  let sourceFilter = "";
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const lower = token.toLowerCase();
+    if (["-newest", "-maxevents"].includes(lower) && tokens[index + 1]) {
+      newest = boundedDesktopNumber(tokens[index + 1], 1, 50);
+      index += 1;
+    } else if (lower.startsWith("-newest:") || lower.startsWith("-maxevents:")) {
+      newest = boundedDesktopNumber(token.slice(token.indexOf(":") + 1), 1, 50);
+    } else if (["-source", "-providername"].includes(lower) && tokens[index + 1]) {
+      sourceFilter = cleanPowerShellValue(tokens[index + 1]);
+      index += 1;
+    } else if (lower.startsWith("-source:") || lower.startsWith("-providername:")) {
+      sourceFilter = cleanPowerShellValue(token.slice(token.indexOf(":") + 1));
+    } else if (["-logname", "-list"].includes(lower) && tokens[index + 1]) {
+      index += 1;
+    }
+  }
+  return { valid: true, newest, sourceFilter };
 }
 
 export function parseDesktopGetNetAdapterCommand(command: string): { valid: boolean; nameFilter: string } {
@@ -997,4 +1039,22 @@ function parseDesktopPowerShellOption(tokens: string[], names: string[]): string
 
 function cleanPowerShellValue(value: string): string {
   return value.replace(/^["']|["']$/g, "");
+}
+
+function desktopEventSource(message: string): string {
+  const upper = message.toUpperCase();
+  if (upper.startsWith("DNS") || upper.startsWith("RESOLVE-DNSNAME")) return "DNS";
+  if (upper.startsWith("HTTP") || upper.includes("INVOKE-WEBREQUEST")) return "HTTP";
+  if (upper.startsWith("FTP")) return "FTP";
+  if (upper.startsWith("EMAIL")) return "EMAIL";
+  if (upper.startsWith("TFTP")) return "TFTP";
+  if (upper.includes("SYSLOG")) return "SYSLOG";
+  if (upper.startsWith("DHCP")) return "DHCP";
+  return "PTWeb";
+}
+
+function desktopEventType(level: "info" | "warning" | "error"): string {
+  if (level === "warning") return "Warning";
+  if (level === "error") return "Error";
+  return "Information";
 }
