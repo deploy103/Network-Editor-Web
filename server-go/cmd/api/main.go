@@ -24,13 +24,18 @@ func main() {
 	}
 	defer db.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
-		log.Printf("database ping failed: %v", err)
+	if err := waitForDatabase(ctx, db); err != nil {
+		log.Fatalf("database ping failed: %v", err)
 	}
 
-	api := httpapi.New(store.NewPostgresStore(db), env("SESSION_SECRET", "dev-session-secret-change-me"))
+	dataStore := store.NewPostgresStore(db)
+	if err := dataStore.EnsureSchema(ctx); err != nil {
+		log.Fatalf("ensure database schema: %v", err)
+	}
+
+	api := httpapi.New(dataStore, env("SESSION_SECRET", "dev-session-secret-change-me"))
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           api.Routes(),
@@ -43,6 +48,22 @@ func main() {
 	log.Printf("network editor api listening on %s", addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("listen: %v", err)
+	}
+}
+
+func waitForDatabase(ctx context.Context, db *sql.DB) error {
+	var lastErr error
+	for {
+		if err := db.PingContext(ctx); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		select {
+		case <-ctx.Done():
+			return lastErr
+		case <-time.After(time.Second):
+		}
 	}
 }
 

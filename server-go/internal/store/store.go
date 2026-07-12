@@ -39,6 +39,37 @@ func (s *Store) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }
 
+// EnsureSchema makes API startup independent from Docker's one-time
+// /docker-entrypoint-initdb.d initialization. This also repairs deployments
+// that reuse a PostgreSQL volume created before the schema was mounted.
+func (s *Store) EnsureSchema(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `
+		create table if not exists users (
+			id text primary key,
+			name text not null check (length(name) between 1 and 80),
+			username text not null unique check (length(username) between 3 and 40),
+			email text not null unique check (position('@' in email) > 1),
+			birth_date date not null,
+			password_hash text not null,
+			created_at timestamptz not null default now()
+		);
+
+		create table if not exists projects (
+			id text primary key,
+			owner_id text not null references users(id) on delete cascade,
+			name text not null check (length(name) between 1 and 100),
+			payload jsonb not null,
+			created_at timestamptz not null default now(),
+			updated_at timestamptz not null default now()
+		);
+
+		create index if not exists projects_owner_updated_idx on projects(owner_id, updated_at desc);
+		create unique index if not exists users_username_lower_idx on users(lower(username));
+		create unique index if not exists users_email_lower_idx on users(lower(email));
+	`)
+	return err
+}
+
 func (s *Store) CreateUser(ctx context.Context, user User) error {
 	_, err := s.db.ExecContext(ctx, `
 		insert into users (id, name, username, email, birth_date, password_hash)

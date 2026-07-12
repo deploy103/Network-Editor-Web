@@ -87,10 +87,23 @@ func (api *API) signup(w http.ResponseWriter, r *http.Request) {
 		PasswordHash: passwordHash,
 	}
 	if err := api.store.CreateUser(r.Context(), user); err != nil {
-		writeError(w, http.StatusConflict, "username or email already exists")
+		if isUniqueViolation(err) {
+			writeError(w, http.StatusConflict, "username or email already exists")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not create account")
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"user": publicUser(user), "token": api.sign(user.ID)})
+}
+
+type sqlStateError interface {
+	SQLState() string
+}
+
+func isUniqueViolation(err error) bool {
+	var stateErr sqlStateError
+	return errors.As(err, &stateErr) && stateErr.SQLState() == "23505"
 }
 
 func (api *API) login(w http.ResponseWriter, r *http.Request) {
