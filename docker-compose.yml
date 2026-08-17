@@ -1,31 +1,61 @@
 services:
-  postgres:
-    image: postgres:16
+  web:
+    build:
+      context: .
+      target: web
+    restart: unless-stopped
+    expose:
+      - "8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      backend:
+      mvtp-web-net:
+        aliases:
+          - network-editor-web
+
+  api:
+    build:
+      context: .
+      target: api
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: network
-      POSTGRES_PASSWORD: network
-      POSTGRES_DB: network_editor
-    ports:
-      - "5432:5432"
+      ADDR: ":8080"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-network}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-network_editor}?sslmode=disable"
+      SESSION_SECRET: "${SESSION_SECRET:?set SESSION_SECRET}"
+      CORS_ORIGIN: "${CORS_ORIGIN:-*}"
+    expose:
+      - "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-network}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}"
+      POSTGRES_DB: "${POSTGRES_DB:-network_editor}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
-
-  api:
-    image: golang:1.23
-    working_dir: /app/server-go
-    command: go run ./cmd/api
-    environment:
-      ADDR: ":8080"
-      DATABASE_URL: postgres://network:network@postgres:5432/network_editor?sslmode=disable
-      SESSION_SECRET: change-this-dev-secret
-      CORS_ORIGIN: http://localhost:5173,http://localhost:5174
-    ports:
-      - "8080:8080"
-    volumes:
-      - .:/app
-    depends_on:
-      - postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
 
 volumes:
   postgres_data:
+
+networks:
+  backend:
+    internal: true
+  mvtp-web-net:
+    external: true

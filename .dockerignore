@@ -1,0 +1,9 @@
+.git
+.env
+.env.*
+!.env.example
+node_modules
+web/node_modules
+web/dist
+server-go/network-editor-api
+npm-debug.log*
