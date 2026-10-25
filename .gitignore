@@ -11,3 +11,5 @@ server-go/bin
 __pycache__
 *.pyc
 alternative/
+docs/development-log.md
+TODO.md

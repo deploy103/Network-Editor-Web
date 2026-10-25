@@ -37,7 +37,7 @@ npm run build:rust
 npm run build:go
 ```
 
-This environment currently has Node/npm only, so the web build is the first verified build target.
+The web build uses Node/npm. Rust/WASM and Go builds require the additional toolchains listed above; validate each build in its intended environment.
 
 Optional browser layout smoke coverage is available with:
 
