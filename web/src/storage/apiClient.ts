@@ -1,7 +1,8 @@
 import type { NetworkProject, User } from "../types/network";
 import { normalizeProject } from "./normalizeProject";
 
-const API_URL = String(import.meta.env.VITE_API_URL ?? "").replace(/\/+$/, "");
+const CONFIGURED_API_URL = String(import.meta.env.VITE_API_URL ?? "");
+const API_URL = CONFIGURED_API_URL.replace(/\/+$/, "");
 const SESSION_KEY = "new-network-editor-api-session";
 const SESSION_COOKIE_KEY = "new-network-editor-session";
 const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
@@ -15,7 +16,7 @@ interface ApiSession {
 }
 
 export function isApiEnabled(): boolean {
-  return API_URL.length > 0;
+  return CONFIGURED_API_URL.length > 0;
 }
 
 export function currentApiUser(): User | null {

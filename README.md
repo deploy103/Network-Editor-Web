@@ -30,6 +30,16 @@ docker compose up postgres api
 VITE_API_URL=http://localhost:8080 npm run dev --workspace web
 ```
 
+### API mode and switching existing local data
+
+`VITE_API_URL` unset or empty selects browser-local storage; `/` selects the same-origin API; an absolute URL selects that API origin. Vite embeds this setting at build time (the supplied Dockerfile defaults to `/`), so changing a running server's environment does not change an already built web bundle.
+
+Enabling `/` does **not** automatically migrate local accounts, credentials, sessions, or projects to the API. Existing projects may appear missing without having been deleted. Do not clear the existing browser profile or its `localStorage`; the local backup key is only a best-effort copy in that same storage, not a separate backup.
+
+Before an operational switch, keep access to local mode in the original browser profile and origin. For **each local account**, back up **every project** using **JSON 내보내기** or **PTWEB 프로젝트 내보내기 (Cisco .pkt 아님)**. Then use **회원가입** for a new API account or **로그인** for an existing API account, and use **가져오기** and its confirmation to import the files. Imports receive a new project ID and the signed-in owner's ID. Compare project counts and key contents, and prepare a rollback plan that preserves the original local data and local-mode access.
+
+This is a source-supported export/account/import path, not a verified migration procedure. The bounded storage-module checks do **not** verify the full UI, Go/PostgreSQL persistence, or migration. **Do not roll out the switch until dummy-data import, owner assignment, and recovery have been verified.**
+
 Rust, `wasm-pack`, and Go toolchains are required for:
 
 ```bash
